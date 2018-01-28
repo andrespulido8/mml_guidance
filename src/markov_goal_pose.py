@@ -8,7 +8,7 @@ from nav_msgs.msg import Odometry
 class MarkovChain:
     def __init__(self):
         self.is_time_mode = (
-            True  # Change this to False if you want to use distance mode
+            False # Change this to False if you want to use distance mode
         )
 
         self.tolerance_radius = 0.2  # meters
@@ -22,16 +22,22 @@ class MarkovChain:
 
         # ROS stuff
         self.is_sim = rospy.get_param("/is_sim", False)
-        rospy.loginfo(
-            f"Initializing markov_goal_pose node with parameter is_sim: {self.is_sim}"
-        )
-        self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
-        self.turtle_odom_sub = rospy.Subscriber(
-            "/robot0/odom", Odometry, self.odom_cb, queue_size=1
-        )
+        rospy.loginfo("Initializing markov_goal_pose node with parameter is_sim: {}".format(self.is_sim))
+        if self.is_sim:
+            self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
+            self.p = Pose()
+            self.turtle_odom_sub = rospy.Subscriber(
+                "/robot0/odom", Odometry, self.odom_cb, queue_size=1
+            )
+        else:
+            self.pose_pub = rospy.Publisher("goal_pose", PoseStamped, queue_size=2)
+            self.p = PoseStamped()
+            self.turtle_odom_sub = rospy.Subscriber(
+                "agent_pose", PoseStamped, self.odom_cb, queue_size=1
+            )
+
         self.goal_pose_square()
         # self.p = Pose()
-        self.p = PoseStamped().pose
 
     def goal_pose_square(self):
         """Generates an square of sides 2*k"""
@@ -146,7 +152,7 @@ class MarkovChain:
 
             self.prev_mult = mult
         else:
-            # print("dist to goal: ", np.linalg.norm(self.position - np.array([goal_pose['x'], goal_pose['y']])))
+            #  print("dist to goal: ", np.linalg.norm(self.position - np.array([curr_goal_pose['x'], curr_goal_pose['y']])))
             dist_to_goal = np.linalg.norm(
                 self.position - np.array([curr_goal_pose["x"], curr_goal_pose["y"]])
             )
@@ -168,13 +174,23 @@ class MarkovChain:
         self.create_pose_msg(goal_pose)
 
     def create_pose_msg(self, goal_pose):
-        self.p.position.x = goal_pose["x"]
-        self.p.position.y = goal_pose["y"]
-        self.p.position.z = goal_pose["z"]
-        self.p.orientation.x = goal_pose["qx"]
-        self.p.orientation.y = goal_pose["qy"]
-        self.p.orientation.z = goal_pose["qz"]
-        self.p.orientation.w = goal_pose["qw"]
+        if self.is_sim:
+            self.p.position.x = goal_pose["x"]
+            self.p.position.y = goal_pose["y"]
+            self.p.position.z = goal_pose["z"]
+            self.p.orientation.x = goal_pose["qx"]
+            self.p.orientation.y = goal_pose["qy"]
+            self.p.orientation.z = goal_pose["qz"]
+            self.p.orientation.w = goal_pose["qw"]
+        else:
+            self.p.pose.position.x = goal_pose["x"]
+            self.p.pose.position.y = goal_pose["y"]
+            self.p.pose.position.z = goal_pose["z"]
+            self.p.pose.orientation.x = goal_pose["qx"]
+            self.p.pose.orientation.y = goal_pose["qy"]
+            self.p.pose.orientation.z = goal_pose["qz"]
+            self.p.pose.orientation.w = goal_pose["qw"]
+
 
 
 if __name__ == "__main__":
