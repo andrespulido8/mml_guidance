@@ -10,7 +10,7 @@ class MarkovChain:
     def __init__(self):
         self.n_states = 5
 
-        self.tolerance_radius = 0.1
+        self.tolerance_radius = 0.2
 
         # self.visited_states = np.zeros(self.n_states)
         self.init_time = np.array(rospy.get_time())
@@ -19,11 +19,14 @@ class MarkovChain:
 
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node")
-        self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
+	self.pose_sub = rospy.Subscriber("agent_pose", PoseStamped, self.odom_cb)
+        self.pose_pub = rospy.Publisher("goal_pose", PoseStamped, queue_size=2)
         self.goal_pose_square()
-        # self.p = Pose()
-        self.p = PoseStamped().pose
-
+        self.position = [0.,0.]
+        self.ps = PoseStamped()
+	self.p  = self.ps.pose
+	self.create_pose_msg(self.goal_list[0])
+	
     def goal_pose_square(self):
         """Generates an square of sides 2*k"""
         self.goal_list = []
@@ -105,13 +108,17 @@ class MarkovChain:
         )
 
     def odom_cb(self, msg):
-        self.position = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
+        self.position = np.array([msg.pose.position.x, msg.pose.position.y])
 
     # self.position = np.array([msg.pose.position.x, msg.pose.position.y])
 
     def pub_goal_pose(self):
         """Publishes a goal pose after the goal is reached within tolerance_radius"""
-        if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
+	#rospy.logwarn(self.goal_list[self.prev_goal]['x','y'])
+	d = np.linalg.norm(self.position - np.array([self.goal_list[self.prev_goal]['x'], self.goal_list[self.prev_goal]['y']]))
+	rospy.logwarn("G: %d\tD: %.4f"%(self.prev_goal, d))
+	if d < self.tolerance_radius:
+        #if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
             self.prev_goal = np.random.choice(len(self.goal_list), p=self.trans_matrix[self.prev_goal])
 
             goal_pose = self.goal_list[self.prev_goal]
@@ -137,6 +144,6 @@ if __name__ == "__main__":
     square_chain = MarkovChain()
     while not rospy.is_shutdown():
             square_chain.pub_goal_pose()
-            square_chain.pose_pub.publish(square_chain.p)
+            square_chain.pose_pub.publish(square_chain.ps)
             rate.sleep()
             

@@ -26,6 +26,7 @@
 
         <!-- Road Network -->
 		<node pkg="mml_guidance" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
+			<remap from="agent_pose" to="/$(arg rigid_body)/nwu/pose_stamped" />
 			<remap from="/goal_pose" to="/rail/goal_pose"/>
             <!--<remap from="goal_pose" to="goal_pose"/>-->
 		</node>
