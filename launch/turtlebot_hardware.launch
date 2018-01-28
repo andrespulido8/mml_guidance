@@ -1,7 +1,7 @@
 <launch>
 
     <!--Change default to the name of the rigid body you are tracking in optitrak-->
-    <arg name="rigid_body"  default="robo0_turtlebot"/>
+    <arg name="rigid_body"  default="rail"/>
 
     <!--Node that converts optitrak data to more user friendly forms: NWU & NED pose message topics-->
     <node pkg="ros_vrpn_client" name="$(arg rigid_body)" type="ros_vrpn_client" args="_vrpn_server_ip:=192.168.1.104" required="true" output="screen"/>
