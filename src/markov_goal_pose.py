@@ -34,12 +34,14 @@ class MarkovChain():
         self.goal_list = []
         z = 0  # turtlebot on the ground
         qx = qy = 0  # no roll or pitch
-        k = 1  # Multiplier
-        self.goal_list.append({'curr_goal':0, 'x': 0*k,  'y': 0*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})  
-        self.goal_list.append({'curr_goal':1, 'x': 0  ,  'y': -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': -0.707})  # 90 degress orientation
-        self.goal_list.append({'curr_goal':2, 'x': 2*k,  'y': -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})
-        self.goal_list.append({'curr_goal':3, 'x': 2*k,  'y': 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': 0.707})
-        self.goal_list.append({'curr_goal':4, 'x': 0*k,  'y': 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 1,     'qw': 0})  # 180 degress orientation
+        k = 1  # Multiplier  TODO: change this to make square bigger or smaller
+        x_offset = 0  # TODO: change this to not crash to the net
+        y_offset = 0
+        self.goal_list.append({'curr_goal':0, 'x': x_offset + 0*k,  'y': y_offset + 0*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})  
+        self.goal_list.append({'curr_goal':1, 'x': x_offset + 0  ,  'y': y_offset + -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': -0.707})  # 90 degress orientation
+        self.goal_list.append({'curr_goal':2, 'x': x_offset + 2*k,  'y': y_offset + -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})
+        self.goal_list.append({'curr_goal':3, 'x': x_offset + 2*k,  'y': y_offset + 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': 0.707})
+        self.goal_list.append({'curr_goal':4, 'x': x_offset + 0*k,  'y': y_offset + 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 1,     'qw': 0})  # 180 degress orientation
 
         self.trans_matrix = np.array([[0. , 0. , 1. , 0. , 0. ],
                                       [0. , 0. , 0.5, 0.5, 0. ],
@@ -56,7 +58,7 @@ class MarkovChain():
         #if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
         #    self.prev_goal = self.prev_goal + 1
         #    self.create_pose_msg(self.goal_list[self.prev_goal])
-        time_step = 10  # seconds 
+        time_step = 10  # amount of seconds until next goal pose TODO: change if desired
         now = rospy.get_time() - self.init_time
         mult = np.floor(now/time_step)
         curr_goal = self.prev_goal 
