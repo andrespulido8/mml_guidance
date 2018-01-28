@@ -38,9 +38,9 @@ class MarkovChain():
 
         z = 0  			        # turtlebot on the ground
         qx = qy = 0  		    # no roll or pitch
-        k = .75 		        # Multiplier  TODO: change this to make square bigger or smaller
-        x_offset = -.5  		# TODO: change this to not crash to the net
-        y_offset = .5
+        k = 1.25	            # Multiplier  TODO: change this to make square bigger or smaller
+        x_offset = -1.25   		# TODO: change this to not crash to the net
+        y_offset = .2
         self.goal_list.append({'curr_goal':0, 'x': x_offset + 0*k,  'y': y_offset + 0*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})  
         self.goal_list.append({'curr_goal':1, 'x': x_offset + 0*k,  'y': y_offset + -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': -0.707})  # 90 degress orientation
         self.goal_list.append({'curr_goal':2, 'x': x_offset + 2*k,  'y': y_offset + -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})
