@@ -2,7 +2,7 @@
 from fileinput import filename
 import numpy as np
 import rospy
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Point, PoseStamped
 from nav_msgs.msg import Odometry
 
 class MarkovChain():
@@ -19,10 +19,13 @@ class MarkovChain():
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node") 
         pose_pub = rospy.Publisher('goal_pose', Pose, queue_size=2)
-        rospy.Subscriber('/odom', Odometry, self.odom_cb, queue_size=3)
+	    # pose_pub = rospy.Publisher('goal_pose', PoseStamped, queue_size=2)
+        #rospy.Subscriber('/odom', Odometry, self.odom_cb, queue_size=3)
+        #rospy.Subscriber('/odom', PoseStamped, self.odom_cb, queue_size=3)
         self.goal_pose_square()
         rate = rospy.Rate(10)  # Hz
-        self.p = Pose()
+        # self.p = Pose()
+        self.p = PoseStamped().pose
 
         while not rospy.is_shutdown():
             self.pub_goal_pose()
@@ -32,13 +35,14 @@ class MarkovChain():
     def goal_pose_square(self):
         """ Generates an square of sides 2*k"""
         self.goal_list = []
-        z = 0  # turtlebot on the ground
-        qx = qy = 0  # no roll or pitch
-        k = 1  # Multiplier  TODO: change this to make square bigger or smaller
-        x_offset = 0  # TODO: change this to not crash to the net
-        y_offset = 0
+
+        z = 0  			        # turtlebot on the ground
+        qx = qy = 0  		    # no roll or pitch
+        k = .75 		        # Multiplier  TODO: change this to make square bigger or smaller
+        x_offset = -.5  		# TODO: change this to not crash to the net
+        y_offset = .5
         self.goal_list.append({'curr_goal':0, 'x': x_offset + 0*k,  'y': y_offset + 0*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})  
-        self.goal_list.append({'curr_goal':1, 'x': x_offset + 0  ,  'y': y_offset + -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': -0.707})  # 90 degress orientation
+        self.goal_list.append({'curr_goal':1, 'x': x_offset + 0*k,  'y': y_offset + -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': -0.707})  # 90 degress orientation
         self.goal_list.append({'curr_goal':2, 'x': x_offset + 2*k,  'y': y_offset + -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})
         self.goal_list.append({'curr_goal':3, 'x': x_offset + 2*k,  'y': y_offset + 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': 0.707})
         self.goal_list.append({'curr_goal':4, 'x': x_offset + 0*k,  'y': y_offset + 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 1,     'qw': 0})  # 180 degress orientation
@@ -51,7 +55,9 @@ class MarkovChain():
 
     def odom_cb(self, msg):
         self.position = np.array([msg.pose.pose.position.x, 
-                                    msg.pose.pose.position.y])
+	                                msg.pose.pose.position.y])
+	#self.position = np.array([msg.pose.position.x, msg.pose.position.y])
+
 
     def pub_goal_pose(self):
         """ Gets time and publishes a goal pose every time_step seconds or after the goal is reached within tolerance_radius"""
@@ -71,7 +77,7 @@ class MarkovChain():
             curr_goal = np.random.choice(np.arange(self.n_states),p=self.trans_matrix[curr_goal,:])
         
         goal_pose = self.goal_list[curr_goal]
-        if curr_goal is not self.prev_goal:
+        if curr_goal is not self.prev_goal and not rospy.is_shutdown():
             rospy.logwarn("New goal pose: x={}, y={} with index {}".format(goal_pose['x'], goal_pose['y'], curr_goal))
         # Publish the goal pose
         self.create_pose_msg(goal_pose)
@@ -90,4 +96,6 @@ class MarkovChain():
 
 if __name__ == '__main__':
     rospy.init_node('goal_pose_node', anonymous=True)
+    
+    #while not rospy.is_shutdown():
     square_chain = MarkovChain()
