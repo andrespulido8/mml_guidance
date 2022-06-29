@@ -1,0 +1,43 @@
+<!-- launch file for MML demo -->
+<launch>
+	<!-- Launches the reef estimator -->
+	<arg name="control_mode" value="altitude_hold"/>
+	<arg name="vehicle" default="sim"/>
+	<node name="reef_estimator" pkg="reef_estimator" type="reef_estimator" output="screen">
+		<rosparam file="$(find reef_estimator)/params/xy_est_params.yaml" />
+		<rosparam file="$(find reef_estimator)/params/z_est_params.yaml" />
+		<rosparam file="$(find reef_estimator)/params/basic_params.yaml" />
+                <rosparam>
+                    enable_rgbd: false
+                    enable_sonar: true
+                    enable_mocap_xy: true
+                    enable_mocap_z: false
+                </rosparam>
+		<remap from="mocap_ned" to="pose_stamped"/>
+		<remap from="mocap_velocity/body_level_frame" to="velocity/body_level_frame"/>
+		<remap from="rgbd_velocity_body_frame" to="rgbd_velocity/body_level_frame"/>
+	</node>
+
+	<!-- Launches the position to velocity node -->
+	<rosparam command="load" file="$(find sim_helper)/params/sim_camera_to_body.yaml" />
+	<node name="pose_to_vel" pkg="position_to_velocity" type="position_to_velocity_node" output="screen" >
+		<rosparam command="load" file="$(find position_to_velocity)/params/basic.yaml" />
+		<remap from="odom" to="multirotor/truth/NED"/> 
+	</node>
+
+	<rosparam file="$(find sim_helper)/params/$(arg vehicle)_pid.yaml"/>
+	<node name="reef_control_pid" pkg="reef_control" type="reef_control_node" output="screen"/>
+
+	<group ns="robot0">
+		<node pkg="andres_turtlebot_pid" name="turtlebot_pid" type="turtlebot_pid.py" output="screen">
+			<remap from="/cmd_vel" to="/robot0/cmd_vel"/>
+			<remap from="/odom" to="/robot0/odom"/>
+			<remap from="/goal_pose" to="/robot0/goal_pose"/>
+		</node>
+		<node pkg="mml" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
+			<remap from="/goal_pose" to="/robot0/goal_pose"/>
+		</node>
+		<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>
+	</group>
+
+</launch>
