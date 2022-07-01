@@ -37,7 +37,7 @@
 		<node pkg="mml" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
 			<remap from="/goal_pose" to="/robot0/goal_pose"/>
 		</node>
-		<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>
 	</group>
+	<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>
 
 </launch>

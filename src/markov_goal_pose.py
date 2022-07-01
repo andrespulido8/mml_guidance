@@ -1,66 +1,78 @@
 #!/usr/bin/env python
+from fileinput import filename
 import numpy as np
 import rospy
 from geometry_msgs.msg import Pose
 
 
-def publisher():
-    rospy.init_node('goal_pose_node', anonymous=True)
-    pub = rospy.Publisher('goal_pose', Pose, queue_size=1)
-    goal_list = goal_pose_rectangle()
+class MarkovChain():
+    def __init__(self):
+        self.n_states = 5
 
-    rate = rospy.Rate(10)  # Hz
-    global init_time 
-    init_time = np.array(rospy.get_time())
-    ii_last = None
-    rospy.loginfo("Initializing markov_goal_pose node") 
-    while not rospy.is_shutdown():
-        p, ii_last = pub_goal_pose(goal_list, ii_last)
-        pub.publish(p)
-        rate.sleep()
-    
-def goal_pose_rectangle():
-    goal_list = []
-    z = 0
-    qx = qy = 0
-    k = 1  # Multiplier
-    goal_list.append({'x': 0, 'y': -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': -0.707})  # 90 degress orientation
-    goal_list.append({'x': -1*k, 'y': -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0, 'qw': 1})
-    goal_list.append({'x': 1*k, 'y': 1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': 0.707})
-    goal_list.append({'x': 0*k, 'y': 1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 1, 'qw': 0})  # 180 degress orientation
-    goal_list.append({'x': 0*k, 'y': 0*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0, 'qw': 1})  
-    return goal_list
+        #self.visited_states = np.zeros(self.n_states) 
+        self.init_time = np.array(rospy.get_time())
+        self.prev_goal = 0 
+        self.prev_mult = 0 
+        
+        # ROS stuff
+        rospy.loginfo("Initializing markov_goal_pose node") 
+        pose_pub = rospy.Publisher('goal_pose', Pose, queue_size=1)
+        self.goal_pose_square()
+        rate = rospy.Rate(10)  # Hz
 
-def pub_goal_pose(goal_list, ii_last):
-    time_step = 5 
-    now = np.array(rospy.get_time()) - init_time
-    if now > 0 and now < time_step*1:
-        ii = 0
-    elif now > time_step*1 and now < time_step*2:
-        ii = 1 
-    elif now > time_step*2 and now < time_step*3:
-        ii = 2 
-    elif now > time_step*3 and now < time_step*4:
-        ii = 3
-    else:
-        ii = 4
-    
-    goal_pose = goal_list[ii]
-    if ii is not ii_last:
-        rospy.loginfo("New goal pose: {} with index {}".format(goal_pose, ii))
+        while not rospy.is_shutdown():
+            p = self.pub_goal_pose()
+            pose_pub.publish(p)
+            rate.sleep()
 
-    p = Pose()
-    p.position.x = goal_pose['x']
-    p.position.y = goal_pose['y']
-    p.position.z = goal_pose['z']
-    p.orientation.x = goal_pose['qx']
-    p.orientation.y = goal_pose['qy']
-    p.orientation.z = goal_pose['qz']
-    p.orientation.w = goal_pose['qw']
-    
-    ii_last = ii
+    def goal_pose_square(self):
+        """ Generates an square of sides 2*k"""
+        self.goal_list = []
+        z = 0  # turtlebot on the ground
+        qx = qy = 0  # no roll or pitch
+        k = 1  # Multiplier
+        self.goal_list.append({'curr_goal':0, 'x': 0*k,  'y': 0*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})  
+        self.goal_list.append({'curr_goal':1, 'x': 0  ,  'y': -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': -0.707})  # 90 degress orientation
+        self.goal_list.append({'curr_goal':2, 'x': 2*k,  'y': -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})
+        self.goal_list.append({'curr_goal':3, 'x': 2*k,  'y': 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': 0.707})
+        self.goal_list.append({'curr_goal':4, 'x': 0*k,  'y': 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 1,     'qw': 0})  # 180 degress orientation
+        self.trans_matrix = np.array([[0. , 0. , 1. , 0. , 0. ],
+                                      [0. , 0. , 0.5, 0.5, 0. ],
+                                      [0. , 0. , 0. , 1. , 0. ],
+                                      [0. , 0. , 0. , 0. , 1. ],
+                                      [0. , 1. , 0. , 0. , 0. ]])
 
-    return p, ii_last
+    def pub_goal_pose(self):
+        """ Gets time and publishes a goal pose every 10 seconds """
+        time_step = 5 
+        now = rospy.get_time() - self.init_time
+        mult = np.floor(now/time_step)
+        curr_goal = self.prev_goal 
+        change = True if mult > self.prev_mult else False
+
+        if now > 0 and now < time_step:  
+            curr_goal = 0  # Start at the first state
+        elif change:
+            curr_goal = np.random.choice(np.arange(self.n_states),p=self.trans_matrix[curr_goal,:])
+
+        goal_pose = self.goal_list[curr_goal]
+        if curr_goal is not self.prev_goal:
+            rospy.logwarn("New goal pose: x={}, y={} with index {}".format(goal_pose['x'], goal_pose['y'], curr_goal))
+
+        p = Pose()
+        p.position.x = goal_pose['x']
+        p.position.y = goal_pose['y']
+        p.position.z = goal_pose['z']
+        p.orientation.x = goal_pose['qx']
+        p.orientation.y = goal_pose['qy']
+        p.orientation.z = goal_pose['qz']
+        p.orientation.w = goal_pose['qw']
+
+        self.prev_goal = curr_goal
+        self.prev_mult = mult
+
+        return p
 
 if __name__ == '__main__':
-    publisher()
+    rospy.init_node('goal_pose_node', anonymous=True)
+    square_chain = MarkovChain()

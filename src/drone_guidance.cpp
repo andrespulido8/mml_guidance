@@ -26,7 +26,6 @@ drone_guidance::drone_guidance(ros::NodeHandle &node) {
     
     // register the first simulation time
     prev_time = ros::Time(0);
-    ROS_INFO("After time");
 
     turtle_pose_sub = node.subscribe("/robot0/odom", queueSize,
         &drone_guidance::turtle_odom_cb, this);
@@ -42,10 +41,12 @@ drone_guidance::~drone_guidance() {
 
 void drone_guidance::desired_msg() {
     // Construct desired state message
-    quad_des_state.pose.x = turtle_min_pose[0];
-    quad_des_state.pose.y = turtle_min_pose[1];
-    quad_des_state.pose.yaw = turtle_min_pose[2];
-    quad_des_state.velocity_valid = true;
+    quad_des_state.pose.x =  turtle_min_pose[0];
+    quad_des_state.pose.y = -turtle_min_pose[1];  // -1 to transform to NED frame
+    quad_des_state.pose.z = -1.5;
+//    quad_des_state.pose.yaw = turtle_min_pose[2];
+    quad_des_state.position_valid = true;
+    quad_des_state.velocity_valid = false;
     des_state_pub.publish(quad_des_state);
 
 }
