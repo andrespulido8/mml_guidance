@@ -3,11 +3,13 @@ from fileinput import filename
 import numpy as np
 import rospy
 from geometry_msgs.msg import Pose
-
+from nav_msgs.msg import Odometry
 
 class MarkovChain():
     def __init__(self):
         self.n_states = 5
+
+        self.tolerance_radius = 0.2
 
         #self.visited_states = np.zeros(self.n_states) 
         self.init_time = np.array(rospy.get_time())
@@ -16,13 +18,15 @@ class MarkovChain():
         
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node") 
-        pose_pub = rospy.Publisher('goal_pose', Pose, queue_size=1)
+        pose_pub = rospy.Publisher('goal_pose', Pose, queue_size=2)
+        rospy.Subscriber('/odom', Odometry, self.odom_cb, queue_size=3)
         self.goal_pose_square()
         rate = rospy.Rate(10)  # Hz
+        self.p = Pose()
 
         while not rospy.is_shutdown():
-            p = self.pub_goal_pose()
-            pose_pub.publish(p)
+            self.pub_goal_pose()
+            pose_pub.publish(self.p)
             rate.sleep()
 
     def goal_pose_square(self):
@@ -36,42 +40,51 @@ class MarkovChain():
         self.goal_list.append({'curr_goal':2, 'x': 2*k,  'y': -1*k, 'z': z, 'qx': qx, 'qy': qy, 'qz': 0,     'qw': 1})
         self.goal_list.append({'curr_goal':3, 'x': 2*k,  'y': 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 0.707, 'qw': 0.707})
         self.goal_list.append({'curr_goal':4, 'x': 0*k,  'y': 1*k,  'z': z, 'qx': qx, 'qy': qy, 'qz': 1,     'qw': 0})  # 180 degress orientation
+
         self.trans_matrix = np.array([[0. , 0. , 1. , 0. , 0. ],
                                       [0. , 0. , 0.5, 0.5, 0. ],
                                       [0. , 0. , 0. , 1. , 0. ],
                                       [0. , 0. , 0. , 0. , 1. ],
                                       [0. , 1. , 0. , 0. , 0. ]])
 
+    def odom_cb(self, msg):
+        self.position = np.array([msg.pose.pose.position.x, 
+                                    msg.pose.pose.position.y])
+
     def pub_goal_pose(self):
-        """ Gets time and publishes a goal pose every 10 seconds """
-        time_step = 5 
+        """ Gets time and publishes a goal pose every time_step seconds or after the goal is reached within tolerance_radius"""
+        #if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
+        #    self.prev_goal = self.prev_goal + 1
+        #    self.create_pose_msg(self.goal_list[self.prev_goal])
+        time_step = 10  # seconds 
         now = rospy.get_time() - self.init_time
         mult = np.floor(now/time_step)
         curr_goal = self.prev_goal 
-        change = True if mult > self.prev_mult else False
+        # change goal pose if time is greater than time_step
+        change = True if mult > self.prev_mult else False  
 
         if now > 0 and now < time_step:  
             curr_goal = 0  # Start at the first state
         elif change:
             curr_goal = np.random.choice(np.arange(self.n_states),p=self.trans_matrix[curr_goal,:])
-
+        
         goal_pose = self.goal_list[curr_goal]
         if curr_goal is not self.prev_goal:
             rospy.logwarn("New goal pose: x={}, y={} with index {}".format(goal_pose['x'], goal_pose['y'], curr_goal))
-
-        p = Pose()
-        p.position.x = goal_pose['x']
-        p.position.y = goal_pose['y']
-        p.position.z = goal_pose['z']
-        p.orientation.x = goal_pose['qx']
-        p.orientation.y = goal_pose['qy']
-        p.orientation.z = goal_pose['qz']
-        p.orientation.w = goal_pose['qw']
-
+        # Publish the goal pose
+        self.create_pose_msg(goal_pose)
+        # Restart previous values
         self.prev_goal = curr_goal
         self.prev_mult = mult
 
-        return p
+    def create_pose_msg(self, goal_pose):
+        self.p.position.x = goal_pose['x']
+        self.p.position.y = goal_pose['y']
+        self.p.position.z = goal_pose['z']
+        self.p.orientation.x = goal_pose['qx']
+        self.p.orientation.y = goal_pose['qy']
+        self.p.orientation.z = goal_pose['qz']
+        self.p.orientation.w = goal_pose['qw']
 
 if __name__ == '__main__':
     rospy.init_node('goal_pose_node', anonymous=True)

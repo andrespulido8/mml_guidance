@@ -29,15 +29,20 @@
 	<node name="reef_control_pid" pkg="reef_control" type="reef_control_node" output="screen"/>
 
 	<group ns="robot0">
+		<!--<node pkg="turtlebot_pid" name="turtlebot_pid_node" type="turtlebot_pid_node" output="screen"> (Pauls PID)-->
+		<!--<node pkg="nonlinear_turtle" name="turtlebot_nonlinear_controller" type="nonlinear_control_sim" output="screen"> (Zach's nonlinear control)-->
 		<node pkg="andres_turtlebot_pid" name="turtlebot_pid" type="turtlebot_pid.py" output="screen">
 			<remap from="/cmd_vel" to="/robot0/cmd_vel"/>
 			<remap from="/odom" to="/robot0/odom"/>
-			<remap from="/goal_pose" to="/robot0/goal_pose"/>
+			<remap from="/goal_pose" to="/robot0/goal_pose"/> 
+			<!--<remap from="/tb3_1/target_pose" to="/robot0/goal_pose"/>-->
 		</node>
 		<node pkg="mml" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
 			<remap from="/goal_pose" to="/robot0/goal_pose"/>
 		</node>
 	</group>
+
 	<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>
+	<!--<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen"/>-->
 
 </launch>

@@ -44,6 +44,7 @@ void drone_guidance::desired_msg() {
     quad_des_state.pose.x =  turtle_min_pose[0];
     quad_des_state.pose.y = -turtle_min_pose[1];  // -1 to transform to NED frame
     quad_des_state.pose.z = -1.5;
+    quad_des_state.pose.yaw = turtle_min_pose[2];
 //    quad_des_state.pose.yaw = turtle_min_pose[2];
     quad_des_state.position_valid = true;
     quad_des_state.velocity_valid = false;
