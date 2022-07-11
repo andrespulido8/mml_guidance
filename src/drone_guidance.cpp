@@ -17,9 +17,9 @@ drone_guidance::drone_guidance(ros::NodeHandle &node) {
     // Maximum angular velocity possibly applied
     double PhiMax = 0.8;
     
-    turtle_min_pose[0] = 0;
-    turtle_min_pose[1] = 0;
-    turtle_min_pose[2] = 0;
+    turtle_state[0] = 0;
+    turtle_state[1] = 0;
+    turtle_state[2] = 0;
 
     ROS_INFO("Initializing drone guidance class");
     queueSize = 5;
@@ -41,11 +41,10 @@ drone_guidance::~drone_guidance() {
 
 void drone_guidance::desired_msg() {
     // Construct desired state message
-    quad_des_state.pose.x =  turtle_min_pose[0];
-    quad_des_state.pose.y = -turtle_min_pose[1];  // -1 to transform to NED frame
+    quad_des_state.pose.x =  turtle_state[0];
+    quad_des_state.pose.y = -turtle_state[1];  // -1 to transform to NED frame
     quad_des_state.pose.z = -1.5;
-    quad_des_state.pose.yaw = turtle_min_pose[2];
-//    quad_des_state.pose.yaw = turtle_min_pose[2];
+    quad_des_state.pose.yaw = turtle_state[2];
     quad_des_state.position_valid = true;
     quad_des_state.velocity_valid = false;
     des_state_pub.publish(quad_des_state);
@@ -56,9 +55,9 @@ void drone_guidance::turtle_odom_cb(const nav_msgs::Odometry &msg) {
 
     // this function register the current pose of the robot thanks to gazebo
     //ROS_INFO("Received odometry message! now computing PID");
-    turtle_min_pose[0] = msg.pose.pose.position.x;
-    turtle_min_pose[1] = msg.pose.pose.position.y;
-    turtle_min_pose[2] = tf::getYaw(msg.pose.pose.orientation);
+    turtle_state[0] = msg.pose.pose.position.x;
+    turtle_state[1] = msg.pose.pose.position.y;
+    turtle_state[2] = tf::getYaw(msg.pose.pose.orientation);
     dt = (msg.header.stamp - prev_time).toSec();
     prev_time = msg.header.stamp;
     desired_msg();

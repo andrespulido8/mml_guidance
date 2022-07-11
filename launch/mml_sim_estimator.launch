@@ -42,7 +42,7 @@
 		</node>
 	</group>
 
-	<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>
-	<!--<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen"/>-->
+	<!--<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
+	<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen"/>
 
 </launch>
