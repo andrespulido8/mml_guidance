@@ -5,6 +5,8 @@ import rospy
 from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
 from nav_msgs.msg import Odometry
+#from mag_pf_pkg.msg import ParticleMean
+#from mag_pf_pkg.msg import Particle
 
 class guidance():
     def __init__(self):
@@ -33,6 +35,9 @@ class guidance():
         self.quad_odom_sub = rospy.Subscriber(
             '/multirotor/truth/NWU', Odometry, self.quad_odom_cb, queue_size=3)
         self.ds = DesiredState()
+        #self.particle_pub = rospy.Publisher('xyTh_estimate', ParticleMean(), queue_size=1)
+        #self.mean_msg = ParticleMean() 
+        #self.particle_msg = Particle()
 
     def particle_filter(self):
         self.predict()
@@ -50,8 +55,6 @@ class guidance():
         Input: State of the particles
         Output: Predicted state of the particles
         """
-        #self.particles_pred_position = self.particles[:,:2] + self.linear_velocity*0.1
-        #self.particles_pred_angle = self.particles[:,2] + self.angular_velocity*0.1
         self.particles[:,0] = self.particles[:,0] + self.linear_velocity[0]*0.1
         self.particles[:,1] = self.particles[:,1] + self.linear_velocity[1]*0.1
         self.particles[:,2] = self.particles[:,2] + self.angular_velocity[0]*0.1
@@ -156,6 +159,20 @@ class guidance():
         self.ds.pose.yaw = 0
         self.ds.position_valid = True
         self.ds.velocity_valid = False
+
+    def pub_pf(self):
+        self.mean_msg.mean.x = self.particles[:,0].mean()
+        self.mean_msg.mean.y = self.particles[:,1].mean() 
+        self.mean_msg.mean.yaw = self.particles[:,2].mean()
+        for ii in range(self.N):
+            self.particle_msg.x = self.particles[ii,0]
+            self.particle_msg.y = self.particles[ii,1]
+            self.particle_msg.yaw = self.particles[ii,2]
+            self.particle_msg.weight = self.weights[ii]
+            self.mean_msg.all_particle.push_back(self.particle_msg) 
+        self.mean_msg.cov = self.noise_covariance
+
+        self.particle_pub.pub.publish(self.mean_msg)
 
 if __name__ == '__main__':
     try:

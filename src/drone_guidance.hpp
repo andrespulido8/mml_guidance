@@ -72,7 +72,7 @@ class drone_guidance {
     double VMin;
     double PhiMax;
     reef_msgs::DesiredState quad_des_state;
-    std::array<double, 3> turtle_min_pose;
+    std::array<double, 3> turtle_state;
     ros::Time prev_time;
     double dt = 0;
 };
