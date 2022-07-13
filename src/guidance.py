@@ -1,12 +1,12 @@
 #!/usr/bin/env python
-from fileinput import filename
 import numpy as np
 import rospy
 from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
 from nav_msgs.msg import Odometry
-#from mag_pf_pkg.msg import ParticleMean
-#from mag_pf_pkg.msg import Particle
+from mag_pf_pkg.msg import ParticleMean
+from mag_pf_pkg.msg import Particle
+import scipy.stats as stats
 
 class guidance():
     def __init__(self):
@@ -19,6 +19,7 @@ class guidance():
         ## PARTICLE FILTER  ##
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] 
         AVL_dims = np.array([[-2, -2], [2, 2]])  
+        AVL_dims = np.array([[1.2, -1.3], [1.4, -1.2]]) # turtlebot hardcoded values 
         # number of particles
         self.N  = 10 
         # uniform distribution of particles (x, y, theta)
@@ -35,15 +36,18 @@ class guidance():
         self.quad_odom_sub = rospy.Subscriber(
             '/multirotor/truth/NWU', Odometry, self.quad_odom_cb, queue_size=3)
         self.ds = DesiredState()
-        #self.particle_pub = rospy.Publisher('xyTh_estimate', ParticleMean(), queue_size=1)
-        #self.mean_msg = ParticleMean() 
-        #self.particle_msg = Particle()
+        # Particle filter ROS stuff
+        self.particle_pub = rospy.Publisher('xyTh_estimate', ParticleMean, queue_size=1)
+        #self.err_estimate_pub = rospy.Publisher('err_estimate', PointStamped(), queue_size=1)
+        self.mean_msg = ParticleMean() 
+        self.particle_msg = Particle()
 
     def particle_filter(self):
         self.predict()
         self.update()
         if self.neff(self.weights) < self.N/2:
             self.resample()
+        self.pub_pf()
 
         self.pub_desired_state()
         self.pose_pub.publish(self.ds)
@@ -81,8 +85,11 @@ class guidance():
         particles which don't match the measurements very well.
         """
         noisy_pose = self.add_noise(np.repeat([actual_pose],self.N, axis=0), self.noise_covariance)
-        pos_weight = np.linalg.norm(particles[:,:2] - noisy_pose[:,:2], axis=1)
-        angle_weight = np.abs(particles[:,2] - noisy_pose[:,2])
+        distance = np.linalg.norm(particles[:,:2] - noisy_pose[:,:2], axis=1)
+        # draw from a normal distribution with mean 0 and standard deviation 0.1
+        pos_weight = stats.norm(0, 1).pdf(distance) 
+        angle_err = np.abs(particles[:,2] - noisy_pose[:,2])
+        angle_weight = stats.norm(0, 0.1).pdf(angle_err) 
         pos_weight = self.normalize(pos_weight)
         angle_weight = self.normalize(angle_weight)
         weight *= pos_weight + angle_weight
@@ -91,7 +98,7 @@ class guidance():
     @staticmethod
     def normalize(x):
         """Normalize a vector to have L2 norm equal to 1"""
-        return (x - np.min(x)) / (np.max(x) - np.min(x))
+        return (x - np.min(x)) / (np.max(x) - np.min(x)) if np.max(x) != np.min(x) else x
     
     def resample(self):
         """The resample step in the Bayes algorithm uses the resampling algorithm to update the belief in the system state.
@@ -117,6 +124,7 @@ class guidance():
                                         msg.pose.pose.orientation.w])
         # covariance of the pose of the turtlebot [x, y, theta]
         self.noise_covariance = np.diag([msg.pose.covariance[0], msg.pose.covariance[7], msg.pose.covariance[14]]) 
+        self.full_cov = np.array(msg.pose.covariance)
         self.linear_velocity = np.array([msg.twist.twist.linear.x,
                                             msg.twist.twist.linear.y])
         self.angular_velocity = np.array([msg.twist.twist.angular.z])
@@ -169,10 +177,11 @@ class guidance():
             self.particle_msg.y = self.particles[ii,1]
             self.particle_msg.yaw = self.particles[ii,2]
             self.particle_msg.weight = self.weights[ii]
-            self.mean_msg.all_particle.push_back(self.particle_msg) 
-        self.mean_msg.cov = self.noise_covariance
+            self.mean_msg.all_particle.append(self.particle_msg) 
+        self.mean_msg.cov = self.noise_covariance.flatten('C')
+        #self.mean_msg.cov = self.full_cov
 
-        self.particle_pub.pub.publish(self.mean_msg)
+        self.particle_pub.publish(self.mean_msg)
 
 if __name__ == '__main__':
     try:

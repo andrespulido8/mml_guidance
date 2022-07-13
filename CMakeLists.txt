@@ -11,9 +11,9 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   nav_msgs
   reef_msgs
-  gazebo
   roscpp
   rospy
+  mag_pf_pkg
 )
 
 ## System dependencies are found with CMake's conventions
