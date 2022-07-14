@@ -5,7 +5,7 @@
 	<node pkg="mag_pf_visualization" type="mag_pf_visualization_node.py" name="mag_pf_visualization" output="screen">
 	<!-- <remap from="xyTh_estimate" to="/mml_check/xyTh_estimate"/>-->
 	<remap from="odom" to="/robot0/odom"/>
-	<remap from="err_estimate" to="/mml_check/err_estimate"/>
+	<!-- <remap from="err_estimate" to="/mml_check/err_estimate"/>-->
 	<remap from="joy" to="/mmlCheck/joy"/>
 	</node>
 </launch>
