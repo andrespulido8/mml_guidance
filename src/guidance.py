@@ -9,61 +9,69 @@ from mag_pf_pkg.msg import Particle
 from geometry_msgs.msg import PointStamped
 import scipy.stats as stats
 
-class guidance():
+
+class Guidance():
     def __init__(self):
-        ## Initialization of variables
+        # Initialization of variables
         self.turtle_pose = np.array([0, 0, 0])
         self.linear_velocity = np.array([0, 0])
         self.angular_velocity = np.array([0])
         deg2rad = np.pi/180
 
         ## PARTICLE FILTER  ##
-        # boundary of the lab [[x_min, y_min], [x_max, y_,max]] 
-        AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]]) # road network outline 
+        # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
+        AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
         # number of particles
-        self.N  = 500 
-        self.update_time = 10
+        self.N = 1000
+        self.measurement_update_time = 2.5
         # uniform distribution of particles (x, y, theta)
-        #self.particles = np.random.uniform([AVL_dims[0,0],AVL_dims[0,1],-np.pi],
-        #                        [AVL_dims[1,0],AVL_dims[1,1],np.pi], (self.N, 3))  
+        self.particles = np.random.uniform([AVL_dims[0,0],AVL_dims[0,1],-np.pi],
+                               [AVL_dims[1,0],AVL_dims[1,1],np.pi], (self.N, 3))
         self.weights = np.ones(self.N) / self.N
-        self.measurement_covariance = np.array([[0.1, 0, 0], [0, 0.1, 0], [0, 0, deg2rad*5]])
+        self.measurement_covariance = np.array(
+            [[0.1, 0, 0], [0, 0.1, 0], [0, 0, deg2rad*5]])
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
-        self.proces_covariance = np.array([[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad*5]])  #make this per unit
-        self.particles = np.random.multivariate_normal(np.array([1.3, -1.26, 0]), self.measurement_covariance, self.N)
+        self.proces_covariance = np.array(
+            [[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad*5]])  
+        #self.particles = np.random.multivariate_normal(
+        #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
         rospy.loginfo("Number of particles: %d", self.particles.shape[0])
 
         self.initial_time = rospy.get_time()
         self.time_reset = 0
         self.last_time = 0
 
-        ## ROS stuff
-        rospy.loginfo("Initializing markov_goal_pose node") 
-        self.pose_pub = rospy.Publisher('desired_state', DesiredState, queue_size=1)
+        # ROS stuff
+        rospy.loginfo("Initializing markov_goal_pose node")
+        self.pose_pub = rospy.Publisher(
+            'desired_state', DesiredState, queue_size=1)
         self.turtle_odom_sub = rospy.Subscriber(
             '/robot0/odom', Odometry, self.turtle_odom_cb, queue_size=1)
         self.quad_odom_sub = rospy.Subscriber(
             '/multirotor/truth/NWU', Odometry, self.quad_odom_cb, queue_size=1)
         self.ds = DesiredState()
         # Particle filter ROS stuff
-        self.particle_pub = rospy.Publisher('xyTh_estimate', ParticleMean, queue_size=1)
-        self.err_estimate_pub = rospy.Publisher('err_estimate', PointStamped, queue_size=1)
-        self.err_msg = PointStamped() 
-        self.mean_msg = ParticleMean() 
+        self.particle_pub = rospy.Publisher(
+            'xyTh_estimate', ParticleMean, queue_size=1)
+        self.err_estimate_pub = rospy.Publisher(
+            'err_estimate', PointStamped, queue_size=1)
+        self.err_msg = PointStamped()
+        self.mean_msg = ParticleMean()
         self.particle_msg = Particle()
 
     def particle_filter(self):
         self.predict()
-        if rospy.get_time() - self.time_reset - self.initial_time > self.update_time:
-            # update particles every update_time seconds
+        if rospy.get_time() - self.time_reset - self.initial_time > self.measurement_update_time:
+            # update particles every measurement_update_time seconds
             self.time_reset = rospy.get_time()
-            rospy.logwarn("Updating weight of particles")
+            rospy.loginfo("Updating weight of particles")
             #rospy.loginfo("Neff: %f < %f", self.neff(self.weights), self.N/2)
             self.update()
-        
+
         if self.neff(self.weights) < self.N/2:
-            rospy.logwarn("Resampling particles. Neff: %f < %f", self.neff(self.weights), self.N/2)
+            rospy.logwarn("Resampling particles. Neff: %f < %f",
+                          self.neff(self.weights), self.N/2)
             self.resample()
         self.pub_pf()
 
@@ -77,24 +85,30 @@ class guidance():
         Input: State of the particles
         Output: Predicted (propagated) state of the particles
         """
-        dt = rospy.get_time() - self.last_time - self.initial_time
-        for ii in range(self.N):
-            delta_theta =  self.angular_velocity[0]*dt
-            self.particles[ii,2] = self.particles[ii,2] + delta_theta + (delta_theta/(2*np.pi))*self.add_noise(0, self.proces_covariance[2,2])
-            if np.abs(self.particles[ii,2]) > np.pi:
-                # Wraps angle
-                self.particles[ii,2] = self.particles[ii,2] - np.sign(self.particles[ii,2]) * 2 * np.pi
-            delta_distance = self.linear_velocity[0]*dt + self.linear_velocity[0]*dt*self.add_noise(0, self.proces_covariance[0,0])  
-            self.particles[ii,:2]  =  self.particles[ii,:2] + np.array([delta_distance*np.cos(self.particles[ii,2]), 
-                                                                        delta_distance*np.sin(self.particles[ii,2])])
+        t = rospy.get_time()
+        dt = t - self.last_time - self.initial_time
 
-        self.last_time = rospy.get_time() - self.initial_time
-    
+        delta_theta = self.angular_velocity[0]*dt
+        for ii in range(self.N):
+            self.particles[ii, 2] = self.particles[ii, 2] + delta_theta + \
+                (delta_theta/(2*np.pi)) * \
+                self.add_noise(0, self.proces_covariance[2, 2])
+            if np.abs(self.particles[ii, 2]) > np.pi:
+                # Wraps angle
+                self.particles[ii, 2] = self.particles[ii, 2] - \
+                    np.sign(self.particles[ii, 2]) * 2 * np.pi
+            delta_distance = self.linear_velocity[0]*dt + self.linear_velocity[0]*dt*self.add_noise(
+                0, self.proces_covariance[0, 0])
+            self.particles[ii, :2] = self.particles[ii, :2] + np.array([delta_distance*np.cos(self.particles[ii, 2]),
+                                                                        delta_distance*np.sin(self.particles[ii, 2])])
+
+        self.last_time = t - self.initial_time
+
     @staticmethod
     def add_noise(mean, covariance):
-        """Add noise to the mean from a gaussian distribution with covariance matrix""" 
+        """Add noise to the mean from a gaussian distribution with covariance matrix"""
         if type(mean) is np.ndarray:
-            size = mean.shape[0] 
+            size = mean.shape[0]
             noise = np.random.multivariate_normal(np.zeros(size), covariance)
         else:
             noise = np.random.normal(0, covariance)
@@ -108,21 +122,25 @@ class guidance():
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) state of the particles
         """
-        self.weights = self.get_weight(self.particles, self.noisy_turtle_pose, self.weights)
-        self.weights = self.weights / np.sum(self.weights) if np.sum(self.weights) > 0 else self.weights
-    
+        self.weights = self.get_weight(
+            self.particles, self.noisy_turtle_pose, self.weights)
+        self.weights = self.weights / \
+            np.sum(self.weights) if np.sum(self.weights) > 0 else self.weights
+
     def get_weight(self, particles, y_expected, weight):
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
         """
         for ii in range(self.N):
-            #The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
-            #likelihood, but it does not matter since it can be factored
+            # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
+            # likelihood, but it does not matter since it can be factored
             # and then cancelled out during the normalization.
-            like = -0.5*(particles[ii,:] - y_expected)@self.noise_inv@(particles[ii,:] - y_expected)
+            like = -0.5 * \
+                (particles[ii, :] -
+                 y_expected)@self.noise_inv@(particles[ii, :] - y_expected)
             weight[ii] = weight[ii]*np.exp(like)
 
-            #another way to implement the above line
+            # another way to implement the above line
             #weight[ii] *= stats.multivariate_normal.pdf(x=particles[ii,:], mean=y_expected, cov=self.measurement_covariance)
         return weight
 
@@ -133,45 +151,49 @@ class guidance():
         Inputs: Updated state of the particles
         Outputs: Resampled updated state of the particles
         """
-        self.weights = self.weights / np.sum(self.weights) if np.sum(self.weights) > 0 else self.weights
+        self.weights = self.weights / \
+            np.sum(self.weights) if np.sum(self.weights) > 0 else self.weights
         indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
         self.particles = self.particles[indexes]
         self.weights = self.weights[indexes]
-        #Roughening. See Bootstrap Filter from Crassidis and Junkins.
+        # Roughening. See Bootstrap Filter from Crassidis and Junkins.
         G = 0.2
-        E = np.array([0,0,0])
+        E = np.array([0, 0, 0])
         for ii in range(self.turtle_pose.shape[0]):
-            E[ii] = np.max(self.particles[ii,:])- np.min(self.particles[ii,:])
+            E[ii] = np.max(self.particles[ii, :]) - \
+                np.min(self.particles[ii, :])
         cov = (G*E*self.N**(-1/3))**2
         P_sigmas = np.diag(cov)
 
         for ii in range(self.N):
-            self.particles[ii, :] = self.add_noise(self.particles[ii, :], P_sigmas)
+            self.particles[ii, :] = self.add_noise(
+                self.particles[ii, :], P_sigmas)
 
-    
     def neff(self, weights):
         """Compute the effective number of particles"""
         return 1. / np.sum(np.square(weights))
 
     def turtle_odom_cb(self, msg):
-        turtle_position = np.array([msg.pose.pose.position.x, 
-                                         msg.pose.pose.position.y])
+        turtle_position = np.array([msg.pose.pose.position.x,
+                                    msg.pose.pose.position.y])
         turtle_orientation = np.array([msg.pose.pose.orientation.x,
-                                        msg.pose.pose.orientation.y,
-                                        msg.pose.pose.orientation.z,
-                                        msg.pose.pose.orientation.w])
+                                       msg.pose.pose.orientation.y,
+                                       msg.pose.pose.orientation.z,
+                                       msg.pose.pose.orientation.w])
         # Gazebo covariance of the pose of the turtlebot [x, y, theta]
-        #self.covariance = np.diag([msg.pose.covariance[0], msg.pose.covariance[7], msg.pose.covariance[14]]) 
+        #self.covariance = np.diag([msg.pose.covariance[0], msg.pose.covariance[7], msg.pose.covariance[14]])
         self.linear_velocity = np.array([msg.twist.twist.linear.x,
-                                            msg.twist.twist.linear.y])
+                                         msg.twist.twist.linear.y])
         self.angular_velocity = np.array([msg.twist.twist.angular.z])
 
         _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
-        self.turtle_pose = np.array([turtle_position[0], turtle_position[1], theta_z]) 
-        self.noisy_turtle_pose = self.add_noise(self.turtle_pose, self.measurement_covariance) 
+        self.turtle_pose = np.array(
+            [turtle_position[0], turtle_position[1], theta_z])
+        self.noisy_turtle_pose = self.add_noise(
+            self.turtle_pose, self.measurement_covariance)
 
         self.particle_filter()
-                                    
+
     @staticmethod
     def euler_from_quaternion(q):
         """
@@ -194,10 +216,10 @@ class guidance():
         return np.array([roll_x, pitch_y, yaw_z])  # in radians
 
     def quad_odom_cb(self, msg):
-        self.quad_position = np.array([msg.pose.pose.position.x, 
-                                         msg.pose.pose.position.y])
+        self.quad_position = np.array([msg.pose.pose.position.x,
+                                       msg.pose.pose.position.y])
         self.pose_pub.publish(self.ds)
-    
+
     def pub_desired_state(self):
         self.ds.pose.x = self.turtle_pose[0]
         self.ds.pose.y = -self.turtle_pose[1]
@@ -208,30 +230,33 @@ class guidance():
 
     def pub_pf(self):
         self.mean_msg = ParticleMean()
-        self.mean_msg.mean.x = self.particles[:,0].mean()
-        self.mean_msg.mean.y = self.particles[:,1].mean() 
-        self.mean_msg.mean.yaw = self.particles[:,2].mean()
+        self.mean_msg.mean.x = self.particles[:, 0].mean()
+        self.mean_msg.mean.y = self.particles[:, 1].mean()
+        self.mean_msg.mean.yaw = self.particles[:, 2].mean()
         for ii in range(self.N):
             self.particle_msg = Particle()
-            self.particle_msg.x = self.particles[ii,0]
-            self.particle_msg.y = self.particles[ii,1]
-            self.particle_msg.yaw = self.particles[ii,2]
+            self.particle_msg.x = self.particles[ii, 0]
+            self.particle_msg.y = self.particles[ii, 1]
+            self.particle_msg.yaw = self.particles[ii, 2]
             self.particle_msg.weight = self.weights[ii]
-            self.mean_msg.all_particle.append(self.particle_msg) 
+            self.mean_msg.all_particle.append(self.particle_msg)
         self.mean_msg.cov = self.measurement_covariance.flatten('C')
         #self.mean_msg.cov = self.full_cov
-        self.err_msg.point.x = self.particles[:, 0].mean() - self.turtle_pose[0]
-        self.err_msg.point.y = self.particles[:, 1].mean() - self.turtle_pose[1]
-        self.err_msg.point.z = self.particles[:, 2].mean() - self.turtle_pose[2]
+        self.err_msg.point.x = self.particles[:, 0].mean(
+        ) - self.turtle_pose[0]
+        self.err_msg.point.y = self.particles[:, 1].mean(
+        ) - self.turtle_pose[1]
+        self.err_msg.point.z = self.particles[:, 2].mean(
+        ) - self.turtle_pose[2]
 
         self.particle_pub.publish(self.mean_msg)
         self.err_estimate_pub.publish(self.err_msg)
 
+
 if __name__ == '__main__':
     try:
         rospy.init_node('guidance', anonymous=True)
-        square_chain = guidance()
+        square_chain = Guidance()
         rospy.spin()
     except rospy.ROSInterruptException:
         pass
-

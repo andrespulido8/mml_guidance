@@ -25,10 +25,12 @@
 		<remap from="odom" to="multirotor/truth/NED"/> 
 	</node>
 
+	<!-- Launches the reef control node -->
 	<rosparam file="$(find sim_helper)/params/$(arg vehicle)_pid.yaml"/>
 	<node name="reef_control_pid" pkg="reef_control" type="reef_control_node" output="screen"/>
 
 	<group ns="robot0">
+		<!-- Launches the turtlebot controller -->
 		<!--<node pkg="turtlebot_pid" name="turtlebot_pid_node" type="turtlebot_pid_node" output="screen"> (Pauls PID)-->
 		<!--<node pkg="nonlinear_turtle" name="turtlebot_nonlinear_controller" type="nonlinear_control_sim" output="screen"> (Zach's nonlinear control)-->
 		<node pkg="andres_turtlebot_pid" name="turtlebot_pid" type="turtlebot_pid.py" output="screen">
@@ -37,12 +39,20 @@
 			<remap from="/goal_pose" to="/robot0/goal_pose"/> 
 			<!--<remap from="/tb3_1/target_pose" to="/robot0/goal_pose"/>-->
 		</node>
+		<!-- Launches the turtlebot trajectory generator-->
 		<node pkg="mml" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
 			<remap from="/goal_pose" to="/robot0/goal_pose"/>
 		</node>
 	</group>
 
+	<!-- Launches the drone guidance-->
 	<!--<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
 	<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen"/>
 
+	<!-- Records data-->
+    <arg name="record_bag" default="false"/>
+    <arg name="bag_name" default="/home/andrespulido/Documents/bags/mml"/>
+	<group if="$(arg record_bag)">
+    	<node name="record" pkg="rosbag" type="record" args="-O $(arg bag_name) robot0/odom multirotor/truth/NWU"/>
+	</group>
 </launch>
