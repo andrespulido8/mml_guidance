@@ -23,7 +23,7 @@ class Guidance():
         AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
         # number of particles
         self.N = 1000
-        self.measurement_update_time = 2.5
+        self.measurement_update_time = 2.
         # uniform distribution of particles (x, y, theta)
         self.particles = np.random.uniform([AVL_dims[0,0],AVL_dims[0,1],-np.pi],
                                [AVL_dims[1,0],AVL_dims[1,1],np.pi], (self.N, 3))
@@ -34,6 +34,7 @@ class Guidance():
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.proces_covariance = np.array(
             [[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad*5]])  
+        self.var = self.measurement_covariance
         #self.particles = np.random.multivariate_normal(
         #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
         rospy.loginfo("Number of particles: %d", self.particles.shape[0])
@@ -73,6 +74,7 @@ class Guidance():
             rospy.logwarn("Resampling particles. Neff: %f < %f",
                           self.neff(self.weights), self.N/2)
             self.resample()
+        self.estimate()
         self.pub_pf()
 
         self.pub_desired_state()
@@ -89,29 +91,35 @@ class Guidance():
         dt = t - self.last_time - self.initial_time
 
         delta_theta = self.angular_velocity[0]*dt
+        self.particles[:, 2] = self.particles[:, 2] + delta_theta + \
+            (delta_theta/(2*np.pi)) * \
+            self.add_noise(np.zeros(self.N), self.proces_covariance[2, 2], size=self.N)
+        self.yaw_mean = np.mean(self.particles[:, 2])
         for ii in range(self.N):
-            self.particles[ii, 2] = self.particles[ii, 2] + delta_theta + \
-                (delta_theta/(2*np.pi)) * \
-                self.add_noise(0, self.proces_covariance[2, 2])
             if np.abs(self.particles[ii, 2]) > np.pi:
                 # Wraps angle
                 self.particles[ii, 2] = self.particles[ii, 2] - \
                     np.sign(self.particles[ii, 2]) * 2 * np.pi
-            delta_distance = self.linear_velocity[0]*dt + self.linear_velocity[0]*dt*self.add_noise(
-                0, self.proces_covariance[0, 0])
-            self.particles[ii, :2] = self.particles[ii, :2] + np.array([delta_distance*np.cos(self.particles[ii, 2]),
-                                                                        delta_distance*np.sin(self.particles[ii, 2])])
-
+        delta_distance = self.linear_velocity[0]*dt + self.linear_velocity[0]*dt*self.add_noise(
+            0, self.proces_covariance[0, 0], size=self.N)
+        self.particles[:, :2] = self.particles[:, :2] + np.array([delta_distance*np.cos(self.particles[:, 2]),
+                                                                    delta_distance*np.sin(self.particles[:, 2])]).T
+ 
         self.last_time = t - self.initial_time
 
     @staticmethod
-    def add_noise(mean, covariance):
+    def add_noise(mean, covariance, size=1):
         """Add noise to the mean from a gaussian distribution with covariance matrix"""
-        if type(mean) is np.ndarray:
-            size = mean.shape[0]
-            noise = np.random.multivariate_normal(np.zeros(size), covariance)
+        if type(mean) is np.ndarray and type(covariance) is np.ndarray:
+            if mean.ndim > 1:
+                size = mean.shape[0]
+                noise = np.random.multivariate_normal(np.zeros(mean.shape[1]), covariance, size)
+            else:
+                size = mean.shape[0]
+                #print('shape of mean: ', mean.shape)
+                noise = np.random.multivariate_normal(np.zeros(size), covariance)
         else:
-            noise = np.random.normal(0, covariance)
+            noise = np.random.normal(0, covariance, size)
 
         return mean + noise
 
@@ -127,7 +135,7 @@ class Guidance():
         self.weights = self.weights / \
             np.sum(self.weights) if np.sum(self.weights) > 0 else self.weights
 
-    def get_weight(self, particles, y_expected, weight):
+    def get_weight(self, particles, y_act, weight):
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
         """
@@ -137,7 +145,7 @@ class Guidance():
             # and then cancelled out during the normalization.
             like = -0.5 * \
                 (particles[ii, :] -
-                 y_expected)@self.noise_inv@(particles[ii, :] - y_expected)
+                 y_act)@self.noise_inv@(particles[ii, :] - y_act)
             weight[ii] = weight[ii]*np.exp(like)
 
             # another way to implement the above line
@@ -168,6 +176,12 @@ class Guidance():
         for ii in range(self.N):
             self.particles[ii, :] = self.add_noise(
                 self.particles[ii, :], P_sigmas)
+
+    def estimate(self):
+        """returns mean and variance of the weighted particles"""
+        if np.sum(self.weights) > 0.0:
+            self.weighted_mean = np.average(self.particles, weights=self.weights, axis=0)
+            self.var  = np.average((self.particles - self.weighted_mean)**2, weights=self.weights, axis=0)
 
     def neff(self, weights):
         """Compute the effective number of particles"""
@@ -232,7 +246,7 @@ class Guidance():
         self.mean_msg = ParticleMean()
         self.mean_msg.mean.x = self.particles[:, 0].mean()
         self.mean_msg.mean.y = self.particles[:, 1].mean()
-        self.mean_msg.mean.yaw = self.particles[:, 2].mean()
+        self.mean_msg.mean.yaw = self.yaw_mean 
         for ii in range(self.N):
             self.particle_msg = Particle()
             self.particle_msg.x = self.particles[ii, 0]
@@ -240,7 +254,7 @@ class Guidance():
             self.particle_msg.yaw = self.particles[ii, 2]
             self.particle_msg.weight = self.weights[ii]
             self.mean_msg.all_particle.append(self.particle_msg)
-        self.mean_msg.cov = self.measurement_covariance.flatten('C')
+        self.mean_msg.cov = np.diag(self.var).flatten('C')
         #self.mean_msg.cov = self.full_cov
         self.err_msg.point.x = self.particles[:, 0].mean(
         ) - self.turtle_pose[0]
