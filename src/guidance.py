@@ -23,7 +23,7 @@ class Guidance():
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
         AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
         # number of particles
-        self.N = 1000
+        self.N = 500
         self.measurement_update_time = 2.
         # uniform distribution of particles (x, y, theta)
         self.particles = np.random.uniform([AVL_dims[0,0],AVL_dims[0,1],-np.pi],
@@ -58,8 +58,8 @@ class Guidance():
             'xyTh_estimate', ParticleMean, queue_size=1)
         self.err_estimate_pub = rospy.Publisher(
             'err_estimate', PointStamped, queue_size=1)
-        #self.entropy_pub = rospy.Publisher(
-        #    'entropy', Float32, queue_size=1)
+        self.entropy_pub = rospy.Publisher(
+            'entropy', Float32, queue_size=1)
 
     def particle_filter(self):
         self.predict()
@@ -75,6 +75,8 @@ class Guidance():
                           self.neff(self.weights), self.N/2)
             self.resample()
         self.estimate()
+
+        self.H = self.entropy_particle(self.particles, self.weights, self.noisy_turtle_pose)
 
         self.pub_pf()
         self.pub_desired_state()
@@ -186,6 +188,28 @@ class Guidance():
         """Compute the effective number of particles"""
         return 1. / np.sum(np.square(weights))
 
+    def entropy_particle(self, particles, weights, y_act):
+        """Compute the entropy of the particle distribution"""
+        process_part_like = np.zeros(self.N)
+        # likelihoof of measurement p(zt|xt)
+        like_meas = stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
+        #print('like_meas: ', like_meas)
+        #print('lik_meas shape: ', like_meas.shape)
+        # likelihood of particle p(xt|xt-1)
+        for ii in range(self.N):
+            # maybe kinematics with gaussian
+            like_particle = stats.multivariate_normal.pdf(x=particles, mean=self.particles[ii,:], cov=self.proces_covariance)
+            #print('like_particle: ', like_particle)
+            #print('lik_particle shape: ', like_particle.shape)
+            process_part_like[ii] = np.sum(like_particle)
+            # process part like is repeating every loop
+        #print('process_part_like: ', process_part_like)
+        #print('sum of process_part_like: ', np.sum(process_part_like))
+        entropy = np.log(np.sum(like_meas*weights)) - np.sum(np.log(like_meas*process_part_like*np.sum(weights)*self.N)*weights)
+        #self.entropy_particle_pub.publish(entropy)
+        #TODO: finish entropy
+        return entropy
+
     def turtle_odom_cb(self, msg):
         turtle_position = np.array([msg.pose.pose.position.x,
                                     msg.pose.pose.position.y])
@@ -263,6 +287,10 @@ class Guidance():
         ) - self.turtle_pose[1]
         err_msg.point.z = self.particles[:, 2].mean(
         ) - self.turtle_pose[2]
+
+        entropy_msg = Float32()
+        entropy_msg.data = self.H
+        self.entropy_pub.publish(entropy_msg)
 
         self.particle_pub.publish(mean_msg)
         self.err_estimate_pub.publish(err_msg)
