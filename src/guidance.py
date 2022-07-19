@@ -4,6 +4,7 @@ import rospy
 #from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Float32
 from mag_pf_pkg.msg import ParticleMean
 from mag_pf_pkg.msg import Particle
 from geometry_msgs.msg import PointStamped
@@ -51,15 +52,14 @@ class Guidance():
             '/robot0/odom', Odometry, self.turtle_odom_cb, queue_size=1)
         self.quad_odom_sub = rospy.Subscriber(
             '/multirotor/truth/NWU', Odometry, self.quad_odom_cb, queue_size=1)
-        self.ds = DesiredState()
+
         # Particle filter ROS stuff
         self.particle_pub = rospy.Publisher(
             'xyTh_estimate', ParticleMean, queue_size=1)
         self.err_estimate_pub = rospy.Publisher(
             'err_estimate', PointStamped, queue_size=1)
-        self.err_msg = PointStamped()
-        self.mean_msg = ParticleMean()
-        self.particle_msg = Particle()
+        #self.entropy_pub = rospy.Publisher(
+        #    'entropy', Float32, queue_size=1)
 
     def particle_filter(self):
         self.predict()
@@ -75,10 +75,9 @@ class Guidance():
                           self.neff(self.weights), self.N/2)
             self.resample()
         self.estimate()
-        self.pub_pf()
 
+        self.pub_pf()
         self.pub_desired_state()
-        self.pose_pub.publish(self.ds)
 
     def predict(self):
         """Uses the process model to propagate the belief in the system state.
@@ -149,7 +148,7 @@ class Guidance():
             weight[ii] = weight[ii]*np.exp(like)
 
             # another way to implement the above line
-            #weight[ii] *= stats.multivariate_normal.pdf(x=particles[ii,:], mean=y_expected, cov=self.measurement_covariance)
+            #weight[ii] *= stats.multivariate_normal.pdf(x=particles[ii,:], mean=y_act, cov=self.measurement_covariance)
         return weight
 
     def resample(self):
@@ -232,39 +231,41 @@ class Guidance():
     def quad_odom_cb(self, msg):
         self.quad_position = np.array([msg.pose.pose.position.x,
                                        msg.pose.pose.position.y])
-        self.pose_pub.publish(self.ds)
 
     def pub_desired_state(self):
-        self.ds.pose.x = self.turtle_pose[0]
-        self.ds.pose.y = -self.turtle_pose[1]
-        self.ds.pose.z = -1.5
-        self.ds.pose.yaw = 0
-        self.ds.position_valid = True
-        self.ds.velocity_valid = False
+        ds = DesiredState()
+        ds.pose.x = self.turtle_pose[0]
+        ds.pose.y = -self.turtle_pose[1]
+        ds.pose.z = -1.5
+        ds.pose.yaw = 0
+        ds.position_valid = True
+        ds.velocity_valid = False
+        self.pose_pub.publish(ds)
 
     def pub_pf(self):
-        self.mean_msg = ParticleMean()
-        self.mean_msg.mean.x = self.particles[:, 0].mean()
-        self.mean_msg.mean.y = self.particles[:, 1].mean()
-        self.mean_msg.mean.yaw = self.yaw_mean 
+        mean_msg = ParticleMean()
+        mean_msg.mean.x = self.particles[:, 0].mean()
+        mean_msg.mean.y = self.particles[:, 1].mean()
+        mean_msg.mean.yaw = self.yaw_mean 
         for ii in range(self.N):
-            self.particle_msg = Particle()
-            self.particle_msg.x = self.particles[ii, 0]
-            self.particle_msg.y = self.particles[ii, 1]
-            self.particle_msg.yaw = self.particles[ii, 2]
-            self.particle_msg.weight = self.weights[ii]
-            self.mean_msg.all_particle.append(self.particle_msg)
-        self.mean_msg.cov = np.diag(self.var).flatten('C')
+            particle_msg = Particle()
+            particle_msg.x = self.particles[ii, 0]
+            particle_msg.y = self.particles[ii, 1]
+            particle_msg.yaw = self.particles[ii, 2]
+            particle_msg.weight = self.weights[ii]
+            mean_msg.all_particle.append(particle_msg)
+        mean_msg.cov = np.diag(self.var).flatten('C')
         #self.mean_msg.cov = self.full_cov
-        self.err_msg.point.x = self.particles[:, 0].mean(
+        err_msg = PointStamped()
+        err_msg.point.x = self.particles[:, 0].mean(
         ) - self.turtle_pose[0]
-        self.err_msg.point.y = self.particles[:, 1].mean(
+        err_msg.point.y = self.particles[:, 1].mean(
         ) - self.turtle_pose[1]
-        self.err_msg.point.z = self.particles[:, 2].mean(
+        err_msg.point.z = self.particles[:, 2].mean(
         ) - self.turtle_pose[2]
 
-        self.particle_pub.publish(self.mean_msg)
-        self.err_estimate_pub.publish(self.err_msg)
+        self.particle_pub.publish(mean_msg)
+        self.err_estimate_pub.publish(err_msg)
 
 
 if __name__ == '__main__':
