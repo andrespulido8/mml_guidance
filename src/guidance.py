@@ -17,7 +17,7 @@ class Guidance():
         self.turtle_pose = np.array([0, 0, 0])
         self.linear_velocity = np.array([0, 0])
         self.angular_velocity = np.array([0])
-        deg2rad = np.pi/180
+        deg2rad = lambda deg : np.pi*deg/180
 
         ## PARTICLE FILTER  ##
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
@@ -28,17 +28,24 @@ class Guidance():
         # uniform distribution of particles (x, y, theta)
         self.particles = np.random.uniform([AVL_dims[0,0],AVL_dims[0,1],-np.pi],
                                [AVL_dims[1,0],AVL_dims[1,1],np.pi], (self.N, 3))
+        self.prev_particles = np.copy(self.particles)
         self.weights = np.ones(self.N) / self.N
+        self.prev_weights = np.ones(self.N) / self.N
         self.measurement_covariance = np.array(
-            [[0.1, 0, 0], [0, 0.1, 0], [0, 0, deg2rad*5]])
+            [[0.1, 0, 0], [0, 0.1, 0], [0, 0, deg2rad(5)]])
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.proces_covariance = np.array(
-            [[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad*5]])  
+            [[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad(5)]])  
         self.var = self.measurement_covariance
         #self.particles = np.random.multivariate_normal(
         #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
-        rospy.loginfo("Number of particles: %d", self.particles.shape[0])
+        rospy.loginfo("Number of particles for the Bayes Filter: %d", self.particles.shape[0])
+
+        # Measurement Model
+        self.height = 1.5
+        camera_angle = np.array([deg2rad(69), deg2rad(42)])  # camera angle in radians (horizontal, vertical)
+        self.FOV = np.tan(camera_angle) * self.height
 
         self.initial_time = rospy.get_time()
         self.time_reset = 0
@@ -76,7 +83,7 @@ class Guidance():
             self.resample()
         self.estimate()
 
-        self.H = self.entropy_particle(self.particles, self.weights, self.noisy_turtle_pose)
+        #self.H = self.entropy_particle(self.particles, self.weights, self.prev_weights, self.noisy_turtle_pose)
 
         self.pub_pf()
         self.pub_desired_state()
@@ -91,19 +98,20 @@ class Guidance():
         t = rospy.get_time()
         dt = t - self.last_time - self.initial_time
 
+        self.prev_particles = np.copy(self.particles)
         delta_theta = self.angular_velocity[0]*dt
-        self.particles[:, 2] = self.particles[:, 2] + delta_theta + \
+        self.particles[:, 2] = self.prev_particles[:, 2] + delta_theta + \
             (delta_theta/(2*np.pi)) * \
             self.add_noise(np.zeros(self.N), self.proces_covariance[2, 2], size=self.N)
-        self.yaw_mean = np.mean(self.particles[:, 2])
         for ii in range(self.N):
             if np.abs(self.particles[ii, 2]) > np.pi:
                 # Wraps angle
                 self.particles[ii, 2] = self.particles[ii, 2] - \
                     np.sign(self.particles[ii, 2]) * 2 * np.pi
+        self.yaw_mean = np.mean(self.particles[:, 2])
         delta_distance = self.linear_velocity[0]*dt + self.linear_velocity[0]*dt*self.add_noise(
             0, self.proces_covariance[0, 0], size=self.N)
-        self.particles[:, :2] = self.particles[:, :2] + np.array([delta_distance*np.cos(self.particles[:, 2]),
+        self.particles[:, :2] = self.prev_particles[:, :2] + np.array([delta_distance*np.cos(self.particles[:, 2]),
                                                                     delta_distance*np.sin(self.particles[:, 2])]).T
  
         self.last_time = t - self.initial_time
@@ -131,8 +139,9 @@ class Guidance():
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) state of the particles
         """
+        self.prev_weights = np.copy(self.weights)
         self.weights = self.get_weight(
-            self.particles, self.noisy_turtle_pose, self.weights)
+            self.particles, self.noisy_turtle_pose, self.prev_weights)
         self.weights = self.weights / \
             np.sum(self.weights) if np.sum(self.weights) > 0 else self.weights
 
@@ -188,24 +197,26 @@ class Guidance():
         """Compute the effective number of particles"""
         return 1. / np.sum(np.square(weights))
 
-    def entropy_particle(self, particles, weights, y_act):
+    def entropy_particle(self, particles, weights, prev_weights, y_act):
         """Compute the entropy of the particle distribution"""
         process_part_like = np.zeros(self.N)
-        # likelihoof of measurement p(zt|xt)
+        # likelihoof of measurement p(zt|xt) MAYBE WRONG, DOING p(xt|zt)
         like_meas = stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
         #print('like_meas: ', like_meas)
         #print('lik_meas shape: ', like_meas.shape)
         # likelihood of particle p(xt|xt-1)
         for ii in range(self.N):
+            # p(xt|xt−1)
             # maybe kinematics with gaussian
-            like_particle = stats.multivariate_normal.pdf(x=particles, mean=self.particles[ii,:], cov=self.proces_covariance)
+            # maybe get weight wrt to previous state (distance)
+            like_particle = stats.multivariate_normal.pdf(x=particles, mean=self.prev_particles[ii,:], cov=self.proces_covariance)
             #print('like_particle: ', like_particle)
             #print('lik_particle shape: ', like_particle.shape)
             process_part_like[ii] = np.sum(like_particle)
-            # process part like is repeating every loop
+
         #print('process_part_like: ', process_part_like)
         #print('sum of process_part_like: ', np.sum(process_part_like))
-        entropy = np.log(np.sum(like_meas*weights)) - np.sum(np.log(like_meas*process_part_like*np.sum(weights)*self.N)*weights)
+        entropy = np.log(np.sum(like_meas*prev_weights)) - np.sum(np.log(like_meas*process_part_like*np.sum(prev_weights)*self.N)*weights)
         #self.entropy_particle_pub.publish(entropy)
         #TODO: finish entropy
         return entropy
@@ -260,7 +271,7 @@ class Guidance():
         ds = DesiredState()
         ds.pose.x = self.turtle_pose[0]
         ds.pose.y = -self.turtle_pose[1]
-        ds.pose.z = -1.5
+        ds.pose.z = -self.height
         ds.pose.yaw = 0
         ds.position_valid = True
         ds.velocity_valid = False
@@ -288,9 +299,9 @@ class Guidance():
         err_msg.point.z = self.particles[:, 2].mean(
         ) - self.turtle_pose[2]
 
-        entropy_msg = Float32()
-        entropy_msg.data = self.H
-        self.entropy_pub.publish(entropy_msg)
+        #entropy_msg = Float32()
+        #entropy_msg.data = self.H
+        #self.entropy_pub.publish(entropy_msg)
 
         self.particle_pub.publish(mean_msg)
         self.err_estimate_pub.publish(err_msg)
