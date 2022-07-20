@@ -49,10 +49,4 @@
 	<!--<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
 	<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen"/>
 
-	<!-- Records data-->
-    <arg name="record_bag" default="false"/>
-    <arg name="bag_name" default="/home/andrespulido/Documents/bags/mml"/>
-	<group if="$(arg record_bag)">
-    	<node name="record" pkg="rosbag" type="record" args="-O $(arg bag_name) robot0/odom multirotor/truth/NWU"/>
-	</group>
 </launch>
