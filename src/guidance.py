@@ -41,6 +41,7 @@ class Guidance():
         self.proces_covariance = np.array(
             [[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad(5)]])  
         self.var = self.measurement_covariance
+        self.H_gauss = 0
         #self.particles = np.random.multivariate_normal(
         #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
         rospy.loginfo("Number of particles for the Bayes Filter: %d", self.particles.shape[0])
@@ -62,6 +63,7 @@ class Guidance():
             '/robot0/odom', Odometry, self.turtle_odom_cb, queue_size=1)
         self.quad_odom_sub = rospy.Subscriber(
             '/multirotor/truth/NWU', Odometry, self.quad_odom_cb, queue_size=1)
+        #    '/xyEstimate', Odometry, self.quad_odom_cb, queue_size=1)
 
         # Particle filter ROS stuff
         self.particle_pub = rospy.Publisher(
@@ -70,6 +72,8 @@ class Guidance():
             'err_estimate', PointStamped, queue_size=1)
         self.entropy_pub = rospy.Publisher(
             'entropy', Float32, queue_size=1)
+        self.entropy_g_pub = rospy.Publisher(
+            'entropy_gauss', Float32, queue_size=1)
         self.update_pub = rospy.Publisher(
             'is_update', Bool, queue_size=1)
         
@@ -91,13 +95,20 @@ class Guidance():
             self.update_msg.data = False  # no update
 
         if self.neff(self.weights) < self.N/2:
+            #if self.neff(self.weights) < 1:
+            #    rospy.logwarn("Uniformly resampling particles")
+            #    self.particles = np.random.uniform([self.AVL_dims[0,0],self.AVL_dims[0,1],-np.pi],
+            #                           [self.AVL_dims[1,0],self.AVL_dims[1,1],np.pi], (self.N, 3))
+            #    self.prev_particles = np.copy(self.particles)
+            #    self.weights = np.ones(self.N) / self.N
+            #else:
             rospy.logwarn("Resampling particles. Neff: %f < %f",
                           self.neff(self.weights), self.N/2)
             self.resample()
 
         self.estimate()
 
-        #self.H = self.entropy_particle(self.particles, self.weights, self.prev_weights, self.noisy_turtle_pose)
+        self.H = self.entropy_particle(self.particles, self.weights, self.prev_weights, self.noisy_turtle_pose)
 
         self.pub_pf()
         self.pub_desired_state()
@@ -117,11 +128,27 @@ class Guidance():
         self.particles[:, 2] = self.prev_particles[:, 2] + delta_theta + \
             (delta_theta/(2*np.pi)) * \
             self.add_noise(np.zeros(self.N), self.proces_covariance[2, 2], size=self.N)
+
+        #if self.yaw_mean > np.pi:
+        #    self.yaw_mean -= 2*np.pi
+        #elif self.yaw_mean < -np.pi:
+        #    self.yaw_mean += 2*np.pi
         for ii in range(self.N):
+            # Positive angles 
+            #if self.particles[ii, 2] > 2*np.pi:
+            #    self.particles[ii, 2] -= 2*np.pi
+            #elif self.particles[ii, 2] < 0:
+            #    self.particles[ii, 2] += 2*np.pi
+            # Mine
             if np.abs(self.particles[ii, 2]) > np.pi:
                 # Wraps angle
                 self.particles[ii, 2] = self.particles[ii, 2] - \
                     np.sign(self.particles[ii, 2]) * 2 * np.pi
+            # Humberto
+            #if self.particles[ii, 2] >= 2*np.pi:
+            #    self.particles[ii, 2] -= 2 * np.pi
+            #elif self.particles[ii, 2] < -2*np.pi:
+            #    self.particles[ii, 2] += 2 * np.pi
 
         # Component mean in the complex plane to prevent wrong average
         self.yaw_mean = np.arctan2(np.sum(self.weights*np.sin(self.particles[:, 2])), np.sum(self.weights*np.cos(self.particles[:, 2])))
@@ -211,6 +238,8 @@ class Guidance():
         if np.sum(self.weights) > 0.0: 
             self.weighted_mean = np.append(np.average(self.particles[:,:2], weights=self.weights, axis=0), self.yaw_mean)
             self.var  = np.average((self.particles - self.weighted_mean)**2, weights=self.weights, axis=0)
+            # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
+            self.H_gauss = np.log((2*np.pi*np.e)**(3)*np.linalg.det(np.diag(self.var)))/2
 
     def neff(self, weights):
         """Compute the effective number of particles"""
@@ -228,17 +257,16 @@ class Guidance():
             # p(xt|xt−1)
             # maybe kinematics with gaussian
             # maybe get weight wrt to previous state (distance)
-            like_particle = stats.multivariate_normal.pdf(x=particles, mean=self.prev_particles[ii,:], cov=self.proces_covariance)
+            like_particle = stats.multivariate_normal.pdf(x=self.prev_particles, mean=particles[ii,:], cov=self.proces_covariance)
+            process_part_like[ii] = np.sum(like_particle)
             #print('like_particle: ', like_particle)
             #print('lik_particle shape: ', like_particle.shape)
-            process_part_like[ii] = np.sum(like_particle)
 
         #print('process_part_like: ', process_part_like)
         #print('sum of process_part_like: ', np.sum(process_part_like))
-        entropy = np.log(np.sum(like_meas*prev_weights)) - np.sum(np.log(like_meas*process_part_like*np.sum(prev_weights)*self.N)*weights)
-        #self.entropy_particle_pub.publish(entropy)
-        #TODO: finish entropy
-        return entropy
+        entropy = np.log(np.sum(like_meas*prev_weights)) - np.sum(np.log(like_meas*process_part_like*prev_weights)*weights)
+
+        return np.clip(entropy, -1000, 1000)
 
     def turtle_odom_cb(self, msg):
         if self.init_finished:
@@ -318,9 +346,12 @@ class Guidance():
         err_msg.point.y = self.weighted_mean[1] - self.turtle_pose[1]
         err_msg.point.z = self.weighted_mean[2] - self.turtle_pose[2]
 
-        #entropy_msg = Float32()
-        #entropy_msg.data = self.H
-        #self.entropy_pub.publish(entropy_msg)
+        entropy_msg = Float32()
+        entropy_msg.data = self.H
+        self.entropy_pub.publish(entropy_msg)
+        entropy_G_msg = Float32()
+        entropy_G_msg.data = self.H_gauss
+        self.entropy_g_pub.publish(entropy_G_msg)
 
         self.particle_pub.publish(mean_msg)
         self.err_estimate_pub.publish(err_msg)
