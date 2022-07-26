@@ -51,7 +51,6 @@
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>geometry_msgs</build_depend>
   <build_depend>nav_msgs</build_depend>
-  <build_depend>gazebo</build_depend>
   <build_depend>reef_msgs</build_depend>
   <build_depend>mag_pf_pkg</build_depend>
   <build_depend>roscpp</build_depend>
@@ -60,14 +59,12 @@
   <build_export_depend>geometry_msgs</build_export_depend>
   <build_export_depend>reef_msgs</build_export_depend>
   <build_export_depend>mag_pf_pkg</build_export_depend>
-  <build_export_depend>gazebo</build_export_depend>
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>rospy</build_export_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>reef_msgs</exec_depend>
   <exec_depend>mag_pf_pkg</exec_depend>
-  <exec_depend>gazebo</exec_depend>
   <exec_depend>roscpp</exec_depend>
   <exec_depend>rospy</exec_depend>
 
