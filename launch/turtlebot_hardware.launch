@@ -1,0 +1,29 @@
+<launch>
+
+    <!--Change default to the name of the rigid body you are tracking in optitrak-->
+    <arg name="rigid_body"  default="robo0_turtlebot"/>
+
+    <!--Node that converts optitrak data to more user friendly forms: NWU & NED pose message topics-->
+    <node pkg="ros_vrpn_client" name="$(arg rigid_body)" type="ros_vrpn_client" args="_vrpn_server_ip:=192.168.1.104" required="true" output="screen"/>
+
+    <!--Needed for turning on physical turtlebot-->
+    <include file = "$(find turtlebot_bringup)/launch/minimal.launch" />
+
+    <!--Namespace used to group relevant topics together to prevent overlap when using multiple agents-->
+    <group ns = "$(arg rigid_body)">
+
+        <!--turtlebot PID-->
+        <!--Example node: pkg=package your code is located, name=identifier for ROS (can be anything), type=c++ executable or python script to be run-->
+        <node pkg="andres_turtlebot_pid" name="turtlebot_pid" type="andres_turtlebot_pid_node" output="screen">
+            <!--Remaping topics: from=original_topic to=new_topic-->          
+            <remap from="/odom" to="nwu/pose_stamped"/>
+            <remap from="cmd_vel" to="/mobile_base/commands/velocity"/>
+        </node>
+
+        <!-- Road Network -->
+		<node pkg="mml" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
+			<remap from="/goal_pose" to="/robo0_turtlebot/goal_pose"/>
+		</node>
+    </group>
+
+</launch>
