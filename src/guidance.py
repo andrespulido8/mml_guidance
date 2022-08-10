@@ -4,11 +4,11 @@ import rospy
 #from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float32
+from geometry_msgs.msg import PoseStamped
 from mag_pf_pkg.msg import ParticleMean
 from mag_pf_pkg.msg import Particle
 from geometry_msgs.msg import PointStamped
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32, Float32MultiArray 
 import scipy.stats as stats
 
 
@@ -17,6 +17,7 @@ class Guidance():
         self.init_finished = False
         # Initialization of variables
         self.turtle_pose = np.array([0, 0, 0])
+        self.quad_position = np.array([0, 0])
         self.noisy_turtle_pose = np.array([0, 0, 0])
         self.linear_velocity = np.array([0, 0])
         self.angular_velocity = np.array([0])
@@ -42,6 +43,7 @@ class Guidance():
             [[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad(5)]])  
         self.var = self.measurement_covariance
         self.H_gauss = 0
+        self.weighted_mean = np.array([0, 0, 0])    
         #self.particles = np.random.multivariate_normal(
         #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
         rospy.loginfo("Number of particles for the Bayes Filter: %d", self.particles.shape[0])
@@ -49,8 +51,9 @@ class Guidance():
         # Measurement Model
         self.height = 1.5
         camera_angle = np.array([deg2rad(69), deg2rad(42)])  # camera angle in radians (horizontal, vertical)
-        self.FOV = np.tan(camera_angle) * self.height
-
+        self.FOV_dims = np.tan(camera_angle) * self.height
+        self.FOV = np.array([self.quad_position[0] - self.FOV_dims[0], self.quad_position[0] + self.FOV_dims[0],
+                            self.quad_position[1] - self.FOV_dims[1], self.quad_position[1] + self.FOV_dims[1]]) 
         self.initial_time = rospy.get_time()
         self.time_reset = 0
         self.last_time = 0
@@ -62,7 +65,7 @@ class Guidance():
         self.turtle_odom_sub = rospy.Subscriber(
             '/robot0/odom', Odometry, self.turtle_odom_cb, queue_size=1)
         self.quad_odom_sub = rospy.Subscriber(
-            '/multirotor/truth/NWU', Odometry, self.quad_odom_cb, queue_size=1)
+            '/pose_stamped', PoseStamped, self.quad_odom_cb, queue_size=1)
         #    '/xyEstimate', Odometry, self.quad_odom_cb, queue_size=1)
 
         # Particle filter ROS stuff
@@ -76,6 +79,8 @@ class Guidance():
             'entropy_gauss', Float32, queue_size=1)
         self.update_pub = rospy.Publisher(
             'is_update', Bool, queue_size=1)
+        self.fov_pub = rospy.Publisher(
+            'fov_coord', Float32MultiArray, queue_size=1)
         
         self.init_finished = True 
 
@@ -151,6 +156,7 @@ class Guidance():
             #    self.particles[ii, 2] += 2 * np.pi
 
         # Component mean in the complex plane to prevent wrong average
+        # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
         self.yaw_mean = np.arctan2(np.sum(self.weights*np.sin(self.particles[:, 2])), np.sum(self.weights*np.cos(self.particles[:, 2])))
         delta_distance = self.linear_velocity[0]*dt + self.linear_velocity[0]*dt*self.add_noise(
             0, self.proces_covariance[0, 0], size=self.N)
@@ -190,6 +196,15 @@ class Guidance():
 
         self.update_msg = Bool()
         self.update_msg.data = True
+
+    def is_in_FOV(self, sparticles):
+        """Check if the particles are in the FOV of the camera.
+        Input: State of the particles
+        Output: Index of the particles in the FOV
+        """
+        is_inside = np.logical_and(sparticles[:, 0] > self.FOV[0] , sparticles[:, 0] < self.FOV[1], 
+                                   sparticles[:, 1] > self.FOV[2] , sparticles[:, 1] < self.FOV[3]) 
+        return is_inside
 
     def get_weight(self, particles, y_act, weight):
         """Particles that are closer to the noisy measurements are weighted higher than
@@ -237,7 +252,10 @@ class Guidance():
         """returns mean and variance of the weighted particles"""
         if np.sum(self.weights) > 0.0: 
             self.weighted_mean = np.append(np.average(self.particles[:,:2], weights=self.weights, axis=0), self.yaw_mean)
-            self.var  = np.average((self.particles - self.weighted_mean)**2, weights=self.weights, axis=0)
+            angle_diff = self.particles[:, 2] - self.weighted_mean[2]
+            angle_diff_sq = ((angle_diff + np.pi) % (2*np.pi) - np.pi)**2
+            yaw_var = np.arctan2(np.sum(self.weights*np.sin(angle_diff_sq)), np.sum(self.weights*np.cos(angle_diff_sq)))
+            self.var  = np.append(np.average((self.particles[:,:2] - self.weighted_mean[:2])**2, weights=self.weights, axis=0), yaw_var)
             # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
             self.H_gauss = np.log((2*np.pi*np.e)**(3)*np.linalg.det(np.diag(self.var)))/2
 
@@ -248,23 +266,44 @@ class Guidance():
     def entropy_particle(self, particles, weights, prev_weights, y_act):
         """Compute the entropy of the particle distribution"""
         process_part_like = np.zeros(self.N)
-        # likelihoof of measurement p(zt|xt) MAYBE WRONG, DOING p(xt|zt)
+        # likelihoof of measurement p(zt|xt) 
         like_meas = stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
-        #print('like_meas: ', like_meas)
-        #print('lik_meas shape: ', like_meas.shape)
+
         # likelihood of particle p(xt|xt-1)
         for ii in range(self.N):
-            # p(xt|xt−1)
             # maybe kinematics with gaussian
             # maybe get weight wrt to previous state (distance)
             like_particle = stats.multivariate_normal.pdf(x=self.prev_particles, mean=particles[ii,:], cov=self.proces_covariance)
             process_part_like[ii] = np.sum(like_particle)
-            #print('like_particle: ', like_particle)
-            #print('lik_particle shape: ', like_particle.shape)
 
-        #print('process_part_like: ', process_part_like)
-        #print('sum of process_part_like: ', np.sum(process_part_like))
-        entropy = np.log(np.sum(like_meas*prev_weights)) - np.sum(np.log(like_meas*process_part_like*prev_weights)*weights)
+        # Numerical stability
+        cutoff = 1e-4
+        like_meas[like_meas < cutoff] = np.nan
+        prev_weights[prev_weights < cutoff] = np.nan
+        # remove the nans from the likelihoods
+        #like_meas = like_meas[~np.isnan(like_meas)]
+        process_part_like[process_part_like < cutoff] = np.nan
+        product = like_meas*prev_weights
+        product[product < cutoff*0.01] = np.nan
+        first_term = np.log(np.nansum(product))
+        first_term = first_term if np.isfinite(first_term) else 0.0
+
+        entropy =  first_term - np.nansum(np.log(prev_weights)*weights) \
+                - np.nansum(weights*np.log(like_meas)) - np.nansum(weights*np.log(process_part_like))
+
+        if np.abs(entropy) > 30:
+            print('first term: ', np.log(np.nansum(like_meas*prev_weights)))
+            print('second term: ', np.nansum(np.log(prev_weights)*weights))
+            print('third term: ', np.nansum(weights*np.log(like_meas)))
+            print('fourth term: ', np.nansum(weights*np.log(process_part_like)))
+            #print('like_meas min: ', like_meas.min())
+            #print('like_meas max: ', like_meas.max())
+            #print('like_meas mean: ', like_meas.mean())
+            #print('like_meas std: ', like_meas.std())
+
+            # print if first term is -inf
+            if np.isinf(np.log(np.nansum(like_meas*prev_weights))):
+                rospy.logwarn('first term of entropy is -inf. Likelihood is very small')
 
         return np.clip(entropy, -1000, 1000)
 
@@ -312,8 +351,10 @@ class Guidance():
 
     def quad_odom_cb(self, msg):
         if self.init_finished:
-            self.quad_position = np.array([msg.pose.pose.position.x,
-                                        msg.pose.pose.position.y])
+            self.quad_position = np.array([msg.pose.position.x,
+                                        msg.pose.position.y])
+            self.FOV = np.array([self.quad_position[0] - self.FOV_dims[0], self.quad_position[0] + self.FOV_dims[0],
+                                self.quad_position[1] - self.FOV_dims[1], self.quad_position[1] + self.FOV_dims[1]]) 
             self.particle_filter()
 
     def pub_desired_state(self):
@@ -345,17 +386,23 @@ class Guidance():
         err_msg.point.x = self.weighted_mean[0] - self.turtle_pose[0]
         err_msg.point.y = self.weighted_mean[1] - self.turtle_pose[1]
         err_msg.point.z = self.weighted_mean[2] - self.turtle_pose[2]
-
+        # Entropy pub
         entropy_msg = Float32()
         entropy_msg.data = self.H
         self.entropy_pub.publish(entropy_msg)
         entropy_G_msg = Float32()
         entropy_G_msg.data = self.H_gauss
         self.entropy_g_pub.publish(entropy_G_msg)
-
+        # Particle pub
         self.particle_pub.publish(mean_msg)
         self.err_estimate_pub.publish(err_msg)
         self.update_pub.publish(self.update_msg)
+        # FOV pub
+        fov_msg = Float32MultiArray()
+        fov_matrix = np.array([[self.FOV[0],self.FOV[2]], [self.FOV[0], self.FOV[3]],
+                        [self.FOV[1], self.FOV[2]], [self.FOV[1], self.FOV[3]]])
+        fov_msg.data = fov_matrix.flat
+        self.fov_pub.publish(fov_msg)
 
 
 if __name__ == '__main__':
