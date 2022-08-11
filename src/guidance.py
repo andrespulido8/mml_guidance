@@ -82,6 +82,7 @@ class Guidance():
         self.fov_pub = rospy.Publisher(
             'fov_coord', Float32MultiArray, queue_size=1)
         
+        rospy.sleep(1)
         self.init_finished = True 
 
     def particle_filter(self):
@@ -99,15 +100,18 @@ class Guidance():
             self.update_msg = Bool()
             self.update_msg.data = False  # no update
 
-        if self.neff(self.weights) < self.N/2:
-            #if self.neff(self.weights) < 1:
-            #    rospy.logwarn("Uniformly resampling particles")
-            #    self.particles = np.random.uniform([self.AVL_dims[0,0],self.AVL_dims[0,1],-np.pi],
-            #                           [self.AVL_dims[1,0],self.AVL_dims[1,1],np.pi], (self.N, 3))
-            #    self.prev_particles = np.copy(self.particles)
-            #    self.weights = np.ones(self.N) / self.N
-            #else:
-            rospy.logwarn("Resampling particles. Neff: %f < %f",
+        if self.neff(self.weights) < self.N/2 and self.update_msg.data:
+            if self.neff(self.weights) < self.N/50:
+                # particles are basically lost, reinitialize
+                rospy.logwarn("Uniformly resampling particles")
+                self.particles = np.random.uniform([self.AVL_dims[0,0],self.AVL_dims[0,1],-np.pi],
+                                       [self.AVL_dims[1,0],self.AVL_dims[1,1],np.pi], (self.N, 3))
+                self.prev_particles = np.copy(self.particles)
+                self.weights = np.ones(self.N) / self.N
+            else:
+                rospy.logwarn("Resampling particles. Neff: %f < %f",
+                              self.neff(self.weights), self.N/2)
+                self.resample()
                           self.neff(self.weights), self.N/2)
             self.resample()
 
@@ -126,44 +130,31 @@ class Guidance():
         Output: Predicted (propagated) state of the particles
         """
         t = rospy.get_time()
-        dt = t - self.last_time - self.initial_time
+        dt = t - last_time - self.initial_time
 
-        self.prev_particles = np.copy(self.particles)
+        prev_particles = np.copy(particles)
         delta_theta = self.angular_velocity[0]*dt
-        self.particles[:, 2] = self.prev_particles[:, 2] + delta_theta + \
+        particles[:, 2] = prev_particles[:, 2] + delta_theta + \
             (delta_theta/(2*np.pi)) * \
             self.add_noise(np.zeros(self.N), self.proces_covariance[2, 2], size=self.N)
 
-        #if self.yaw_mean > np.pi:
-        #    self.yaw_mean -= 2*np.pi
-        #elif self.yaw_mean < -np.pi:
-        #    self.yaw_mean += 2*np.pi
         for ii in range(self.N):
-            # Positive angles 
-            #if self.particles[ii, 2] > 2*np.pi:
-            #    self.particles[ii, 2] -= 2*np.pi
-            #elif self.particles[ii, 2] < 0:
-            #    self.particles[ii, 2] += 2*np.pi
-            # Mine
-            if np.abs(self.particles[ii, 2]) > np.pi:
+            if np.abs(particles[ii, 2]) > np.pi:
                 # Wraps angle
-                self.particles[ii, 2] = self.particles[ii, 2] - \
-                    np.sign(self.particles[ii, 2]) * 2 * np.pi
-            # Humberto
-            #if self.particles[ii, 2] >= 2*np.pi:
-            #    self.particles[ii, 2] -= 2 * np.pi
-            #elif self.particles[ii, 2] < -2*np.pi:
-            #    self.particles[ii, 2] += 2 * np.pi
+                particles[ii, 2] = particles[ii, 2] - \
+                    np.sign(particles[ii, 2]) * 2 * np.pi
 
         # Component mean in the complex plane to prevent wrong average
         # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
-        self.yaw_mean = np.arctan2(np.sum(self.weights*np.sin(self.particles[:, 2])), np.sum(self.weights*np.cos(self.particles[:, 2])))
+        self.yaw_mean = np.arctan2(np.sum(weights*np.sin(particles[:, 2])), np.sum(weights*np.cos(particles[:, 2])))
         delta_distance = self.linear_velocity[0]*dt + self.linear_velocity[0]*dt*self.add_noise(
             0, self.proces_covariance[0, 0], size=self.N)
-        self.particles[:, :2] = self.prev_particles[:, :2] + np.array([delta_distance*np.cos(self.particles[:, 2]),
-                                                                       delta_distance*np.sin(self.particles[:, 2])]).T
+        particles[:, :2] = prev_particles[:, :2] + np.array([delta_distance*np.cos(particles[:, 2]),
+                                                                       delta_distance*np.sin(particles[:, 2])]).T
 
-        self.last_time = t - self.initial_time
+        last_time = t - self.initial_time
+
+        return particles, prev_particles, last_time
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
@@ -251,11 +242,14 @@ class Guidance():
     def estimate(self):
         """returns mean and variance of the weighted particles"""
         if np.sum(self.weights) > 0.0: 
-            self.weighted_mean = np.append(np.average(self.particles[:,:2], weights=self.weights, axis=0), self.yaw_mean)
+            self.weighted_mean = np.append(np.average(self.particles[:,:2],
+                                weights=self.weights, axis=0), self.yaw_mean)
             angle_diff = self.particles[:, 2] - self.weighted_mean[2]
             angle_diff_sq = ((angle_diff + np.pi) % (2*np.pi) - np.pi)**2
-            yaw_var = np.arctan2(np.sum(self.weights*np.sin(angle_diff_sq)), np.sum(self.weights*np.cos(angle_diff_sq)))
-            self.var  = np.append(np.average((self.particles[:,:2] - self.weighted_mean[:2])**2, weights=self.weights, axis=0), yaw_var)
+            yaw_var = np.arctan2(np.sum(self.weights*np.sin(angle_diff_sq)), 
+                                 np.sum(self.weights*np.cos(angle_diff_sq)))
+            self.var  = np.append(np.average((self.particles[:,:2] - self.weighted_mean[:2])**2,
+                                                        weights=self.weights, axis=0), yaw_var)
             # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
             self.H_gauss = np.log((2*np.pi*np.e)**(3)*np.linalg.det(np.diag(self.var)))/2
 
@@ -305,7 +299,7 @@ class Guidance():
             if np.isinf(np.log(np.nansum(like_meas*prev_weights))):
                 rospy.logwarn('first term of entropy is -inf. Likelihood is very small')
 
-        return np.clip(entropy, -1000, 1000)
+        return np.clip(entropy, -20, 1000)
 
     def turtle_odom_cb(self, msg):
         if self.init_finished:
@@ -363,7 +357,7 @@ class Guidance():
             ds.pose.x = self.turtle_pose[0]
             ds.pose.y = -self.turtle_pose[1]
             ds.pose.z = -self.height
-            ds.pose.yaw = 0
+            ds.pose.yaw = 1.571  # 90 degrees
             ds.position_valid = True
             ds.velocity_valid = False
             self.pose_pub.publish(ds)
@@ -400,8 +394,9 @@ class Guidance():
         # FOV pub
         fov_msg = Float32MultiArray()
         fov_matrix = np.array([[self.FOV[0],self.FOV[2]], [self.FOV[0], self.FOV[3]],
-                        [self.FOV[1], self.FOV[2]], [self.FOV[1], self.FOV[3]]])
-        fov_msg.data = fov_matrix.flat
+                        [self.FOV[1], self.FOV[3]], [self.FOV[1], self.FOV[2]],
+                        [self.FOV[0],self.FOV[2]]])
+        fov_msg.data = fov_matrix.flatten('C')
         self.fov_pub.publish(fov_msg)
 
 
