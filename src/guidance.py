@@ -24,6 +24,7 @@ class Guidance():
         deg2rad = lambda deg : np.pi*deg/180
 
         ## PARTICLE FILTER  ##
+        self.is_viz = rospy.get_param('/is_viz', False)
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
         self.AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
         # number of particles
@@ -44,6 +45,8 @@ class Guidance():
         self.var = np.diag(self.measurement_covariance)
         self.H_gauss = 0
         self.weighted_mean = np.array([0, 0, 0])    
+        self.actions = np.array([[0.1, 0], [0, 0.1], [-0.1, 0], [0, -0.1]])
+        # Use multivariate normal if you know the initial condition
         #self.particles = np.random.multivariate_normal(
         #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
         rospy.loginfo("Number of particles for the Bayes Filter: %d", self.particles.shape[0])
@@ -68,19 +71,20 @@ class Guidance():
             '/pose_stamped', PoseStamped, self.quad_odom_cb, queue_size=1)
         #    '/xyEstimate', Odometry, self.quad_odom_cb, queue_size=1)
 
-        # Particle filter ROS stuff
-        self.particle_pub = rospy.Publisher(
-            'xyTh_estimate', ParticleMean, queue_size=1)
-        self.err_estimate_pub = rospy.Publisher(
-            'err_estimate', PointStamped, queue_size=1)
-        self.entropy_pub = rospy.Publisher(
-            'entropy', Float32, queue_size=1)
-        self.entropy_g_pub = rospy.Publisher(
-            'entropy_gauss', Float32, queue_size=1)
-        self.update_pub = rospy.Publisher(
-            'is_update', Bool, queue_size=1)
-        self.fov_pub = rospy.Publisher(
-            'fov_coord', Float32MultiArray, queue_size=1)
+        if self.is_viz:
+            # Particle filter ROS stuff
+            self.particle_pub = rospy.Publisher(
+                'xyTh_estimate', ParticleMean, queue_size=1)
+            self.err_estimate_pub = rospy.Publisher(
+                'err_estimate', PointStamped, queue_size=1)
+            self.entropy_pub = rospy.Publisher(
+                'entropy', Float32, queue_size=1)
+            self.entropy_g_pub = rospy.Publisher(
+                'entropy_gauss', Float32, queue_size=1)
+            self.update_pub = rospy.Publisher(
+                'is_update', Bool, queue_size=1)
+            self.fov_pub = rospy.Publisher(
+                'fov_coord', Float32MultiArray, queue_size=1)
         
         rospy.sleep(1)
         self.init_finished = True 
@@ -89,7 +93,7 @@ class Guidance():
         t = rospy.get_time()
 
         # Prediction step
-        self.particles,self.prev_particles,self.last_time  = self.predict(self.particles,
+        self.particles, self.last_time  = self.predict(self.particles,
                                      self.prev_particles, self.weights, self.last_time)
 
         if t - self.time_reset - self.initial_time > self.measurement_update_time:
@@ -111,15 +115,36 @@ class Guidance():
                 self.prev_particles = np.copy(self.particles)
                 self.weights = np.ones(self.N) / self.N
             else:
+                # some are good but some are bad, resample
                 rospy.logwarn("Resampling particles. Neff: %f < %f",
                               self.neff(self.weights), self.N/2)
                 self.resample()
 
         self.estimate()
 
-        self.H = self.entropy_particle(self.particles, self.weights, self.prev_weights, self.noisy_turtle_pose)
+        # Entropy of current distribution
+        self.H = self.entropy_particle(self.prev_particles, self.prev_weights,
+                    self.particles, self.weights, self.noisy_turtle_pose)
+        
+        ### Guidance
+        #expected_part, self.last_time  = self.predict(self.particles,
+        #                             self.prev_particles, self.weights, self.last_time)
+        ## Future measurement
+        #candidates_index = np.random.choice(np.arange(self.N), size=None
+        #                                                , p=None)
+        #update_index = self.is_in_FOV(self.particles)
+        #z_hat = self.add_noise(
+        #        expected_part[candidates_index], self.measurement_covariance)
+        #self.update()
+        ## H(x_{t+1} | \hat{z}_{t+1})
+        #self.H1 = self.entropy_particle(self.particles, self.weights,
+        #            expected_part, self.expected_weights, z_hat)
+        ## Information Gain
+        #I = self.H - self.H1
 
-        self.pub_pf()
+        if self.is_viz:
+            self.pub_pf() 
+
         self.pub_desired_state()
 
     def predict(self, particles, prev_particles, weights, last_time):
@@ -257,7 +282,7 @@ class Guidance():
         """Compute the number of effective particles"""
         return 1. / np.sum(np.square(weights))
 
-    def entropy_particle(self, particles, weights, prev_weights, y_act):
+    def entropy_particle(self, prev_particles, prev_weights, particles, weights, y_act):
         """Compute the entropy of the particle distribution"""
         process_part_like = np.zeros(self.N)
         # likelihoof of measurement p(zt|xt) 
@@ -267,7 +292,7 @@ class Guidance():
         for ii in range(self.N):
             # maybe kinematics with gaussian
             # maybe get weight wrt to previous state (distance)
-            like_particle = stats.multivariate_normal.pdf(x=self.prev_particles, mean=particles[ii,:], cov=self.proces_covariance)
+            like_particle = stats.multivariate_normal.pdf(x=prev_particles, mean=particles[ii,:], cov=self.proces_covariance)
             process_part_like[ii] = np.sum(like_particle)
 
         # Numerical stability
@@ -281,6 +306,9 @@ class Guidance():
         product[product < cutoff*0.01] = np.nan
         first_term = np.log(np.nansum(product))
         first_term = first_term if np.isfinite(first_term) else 0.0
+        #second_term = np.nansum(np.log(prev_weights)*weights)
+        #third_term = np.nansum(weights*np.log(like_meas))
+        #fourth_term = np.nansum(weights*np.log(process_part_like))
 
         entropy =  first_term - np.nansum(np.log(prev_weights)*weights) \
                 - np.nansum(weights*np.log(like_meas)) - np.nansum(weights*np.log(process_part_like))
@@ -347,19 +375,26 @@ class Guidance():
         if self.init_finished:
             self.quad_position = np.array([msg.pose.position.x,
                                         msg.pose.position.y])
+            #self.quad_yaw = self.euler_from_quaternion(msg.pose.orientation)[2]  # TODO: unwrap message before function
             self.FOV = np.array([self.quad_position[0] - self.FOV_dims[0], self.quad_position[0] + self.FOV_dims[0],
                                 self.quad_position[1] - self.FOV_dims[1], self.quad_position[1] + self.FOV_dims[1]]) 
             self.particle_filter()
 
-    def pub_desired_state(self):
+    def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
         if self.init_finished:
             ds = DesiredState()
-            ds.pose.x = self.turtle_pose[0]
-            ds.pose.y = -self.turtle_pose[1]
+            if is_velocity:
+                ds.velocity.x = xvel 
+                ds.velocity.y = yvel
+                ds.position_valid = False
+                ds.velocity_valid = True
+            else:
+                ds.pose.x = self.turtle_pose[0]
+                ds.pose.y = -self.turtle_pose[1]
+                ds.pose.yaw = 1.571  # 90 degrees
+                ds.position_valid = True
+                ds.velocity_valid = False
             ds.pose.z = -self.height
-            ds.pose.yaw = 1.571  # 90 degrees
-            ds.position_valid = True
-            ds.velocity_valid = False
             self.pose_pub.publish(ds)
 
     def pub_pf(self):
