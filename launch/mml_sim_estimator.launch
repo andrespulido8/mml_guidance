@@ -1,5 +1,7 @@
 <!-- launch file for MML demo -->
 <launch>
+	<arg name="is_visualization" default="false"/>
+
 	<!-- Launches the reef estimator -->
 	<arg name="control_mode" value="altitude_hold"/>
 	<arg name="vehicle" default="sim"/>
@@ -47,6 +49,8 @@
 
 	<!-- Launches the drone guidance-->
 	<!--<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
+
+  	<param name="is_viz" value="$(arg is_visualization)"/>
 	<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen"/>
 
 </launch>

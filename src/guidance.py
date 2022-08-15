@@ -41,7 +41,7 @@ class Guidance():
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.proces_covariance = np.array(
             [[0.02, 0, 0], [0, 0.02, 0], [0, 0, deg2rad(5)]])  
-        self.var = self.measurement_covariance
+        self.var = np.diag(self.measurement_covariance)
         self.H_gauss = 0
         self.weighted_mean = np.array([0, 0, 0])    
         #self.particles = np.random.multivariate_normal(
@@ -88,7 +88,9 @@ class Guidance():
     def particle_filter(self):
         t = rospy.get_time()
 
-        self.predict()
+        # Prediction step
+        self.particles,self.prev_particles,self.last_time  = self.predict(self.particles,
+                                     self.prev_particles, self.weights, self.last_time)
 
         if t - self.time_reset - self.initial_time > self.measurement_update_time:
             # update particles every measurement_update_time seconds
@@ -112,8 +114,6 @@ class Guidance():
                 rospy.logwarn("Resampling particles. Neff: %f < %f",
                               self.neff(self.weights), self.N/2)
                 self.resample()
-                          self.neff(self.weights), self.N/2)
-            self.resample()
 
         self.estimate()
 
@@ -122,7 +122,7 @@ class Guidance():
         self.pub_pf()
         self.pub_desired_state()
 
-    def predict(self):
+    def predict(self, particles, prev_particles, weights, last_time):
         """Uses the process model to propagate the belief in the system state.
         In our case, the process model is the motion of the turtlebot in 2D with added gaussian noise. 
         In MML the predict step is a forward pass on the NN.
@@ -154,7 +154,7 @@ class Guidance():
 
         last_time = t - self.initial_time
 
-        return particles, prev_particles, last_time
+        return particles, last_time
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
@@ -254,7 +254,7 @@ class Guidance():
             self.H_gauss = np.log((2*np.pi*np.e)**(3)*np.linalg.det(np.diag(self.var)))/2
 
     def neff(self, weights):
-        """Compute the effective number of particles"""
+        """Compute the number of effective particles"""
         return 1. / np.sum(np.square(weights))
 
     def entropy_particle(self, particles, weights, prev_weights, y_act):
