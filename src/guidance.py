@@ -105,6 +105,10 @@ class Guidance:
         self.init_finished = True
 
     def particle_filter(self):
+        """Main function of the particle filter
+        where the predict, update, resample, estimate
+        and publish PF values for visualization is done
+        """
         t = rospy.get_time()
 
         # print('check')
@@ -159,7 +163,7 @@ class Guidance:
         to then compute the expected entropy reduction (EER) over predicted
         measurements. The next action is the one that minimizes the EER.
         """
-        print("check2")
+        # print("check2")
         now = rospy.get_time() - self.initial_time
         # Entropy of current distribution
         # TODO: consider only updating this when there is an update
@@ -277,8 +281,9 @@ class Guidance:
         return mean + noise
 
     def update(self, weights, particles, noisy_turtle_pose):
-        """Uses the measurement model to update the belief in the system state.
-        In our case, the measurement model is the position of the turtlebot in 2D.
+        """Updates the belief in the system state.
+        In our case, the measurement model is the position and orientation of the
+        turtlebot with added noise from a gaussian distribution.
         In MML the update step is the camera model.
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) weight of the particles
@@ -373,11 +378,15 @@ class Guidance:
             )
 
     def neff(self, weights):
-        """Compute the number of effective particles"""
+        """Compute the number of effective particles
+        Source: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
+        """
         return 1.0 / np.sum(np.square(weights))
 
     def entropy_particle(self, prev_particles, prev_weights, particles, weights, y_act):
-        """Compute the entropy of the particle distribution"""
+        """Compute the entropy of the particle distribution based on the equation in the
+        paper: Y. Boers, H. Driessen, A. Bagchi, and P. Mandal, 'Particle filter based entropy'
+        """
         process_part_like = np.zeros(self.N)
         # likelihoof of measurement p(zt|xt)
         like_meas = stats.multivariate_normal.pdf(
@@ -433,6 +442,30 @@ class Guidance:
 
         return np.clip(entropy, -20, 1000)
 
+    @staticmethod
+    def euler_from_quaternion(q):
+        """
+        Convert a quaternion into euler angles (roll, pitch, yaw)
+        roll is rotation around x in radians (counterclockwise)
+        pitch is rotation around y in radians (counterclockwise)
+        yaw is rotation around z in radians (counterclockwise)
+        """
+        x = q[0]
+        y = q[1]
+        z = q[2]
+        w = q[3]
+        t0 = +2.0 * (w * x + y * z)
+        t1 = +1.0 - 2.0 * (x * x + y * y)
+        roll_x = np.arctan2(t0, t1)
+        t2 = +2.0 * (w * y - z * x)
+        t2 = +1.0 if t2 > +1.0 else t2
+        t2 = -1.0 if t2 < -1.0 else t2
+        pitch_y = np.arcsin(t2)
+        t3 = +2.0 * (w * z + x * y)
+        t4 = +1.0 - 2.0 * (y * y + z * z)
+        yaw_z = np.arctan2(t3, t4)
+        return np.array([roll_x, pitch_y, yaw_z])  # in radians
+
     def turtle_odom_cb(self, msg):
         if self.init_finished:
             turtle_position = np.array(
@@ -460,30 +493,6 @@ class Guidance:
             self.noisy_turtle_pose = self.add_noise(
                 self.turtle_pose, self.measurement_covariance
             )
-
-    @staticmethod
-    def euler_from_quaternion(q):
-        """
-        Convert a quaternion into euler angles (roll, pitch, yaw)
-        roll is rotation around x in radians (counterclockwise)
-        pitch is rotation around y in radians (counterclockwise)
-        yaw is rotation around z in radians (counterclockwise)
-        """
-        x = q[0]
-        y = q[1]
-        z = q[2]
-        w = q[3]
-        t0 = +2.0 * (w * x + y * z)
-        t1 = +1.0 - 2.0 * (x * x + y * y)
-        roll_x = np.arctan2(t0, t1)
-        t2 = +2.0 * (w * y - z * x)
-        t2 = +1.0 if t2 > +1.0 else t2
-        t2 = -1.0 if t2 < -1.0 else t2
-        pitch_y = np.arcsin(t2)
-        t3 = +2.0 * (w * z + x * y)
-        t4 = +1.0 - 2.0 * (y * y + z * z)
-        yaw_z = np.arctan2(t3, t4)
-        return np.array([roll_x, pitch_y, yaw_z])  # in radians
 
     def quad_odom_cb(self, msg):
         if self.init_finished:
@@ -538,7 +547,6 @@ class Guidance:
             particle_msg.weight = self.weights[ii]
             mean_msg.all_particle.append(particle_msg)
         mean_msg.cov = np.diag(self.var).flatten("C")
-        # self.mean_msg.cov = self.full_cov
         err_msg = PointStamped()
         err_msg.point.x = self.weighted_mean[0] - self.turtle_pose[0]
         err_msg.point.y = self.weighted_mean[1] - self.turtle_pose[1]
