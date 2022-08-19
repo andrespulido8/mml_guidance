@@ -14,6 +14,7 @@ from std_msgs.msg import Bool, Float32, Float32MultiArray
 class Guidance:
     def __init__(self):
         self.init_finished = False
+        self.is_sim = rospy.get_param("/is_sim", False)        
         # Initialization of variables
         self.turtle_pose = np.array([0, 0, 0])
         self.quad_position = np.array([0, 0])
@@ -23,8 +24,8 @@ class Guidance:
         deg2rad = lambda deg: np.pi * deg / 180
 
         ## PARTICLE FILTER  ##
-        self.is_viz = rospy.get_param("/is_viz", False)
-        # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
+        self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
+        # boundary of the lab [[x_min, y_min], [x_max, y_,max]
         self.AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
         # number of particles
         self.N = 500
@@ -75,15 +76,19 @@ class Guidance:
         self.last_future_time = 0
 
         # ROS stuff
-        rospy.loginfo("Initializing guidance node")
+        rospy.loginfo("Initializing guidance node with parameter is_sim: {}".format(self.is_sim))
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
-        self.turtle_odom_sub = rospy.Subscriber(
-            "/robot0/odom", Odometry, self.turtle_odom_cb, queue_size=1
-        )
-        self.quad_odom_sub = rospy.Subscriber(
-            "/pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
-        )
-        #    '/xyEstimate', Odometry, self.quad_odom_cb, queue_size=1)
+        if self.is_sim:
+            self.turtle_odom_sub = rospy.Subscriber(
+                "/robot0/odom", Odometry, self.turtle_odom_cb, queue_size=1
+            )
+            self.quad_odom_sub = rospy.Subscriber(
+                "/pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
+            )
+        else:
+            self.turtle_odom_sub = rospy.Subscriber(
+                "/turtle_pose_stamped", PoseStamped, self.turtle_odom_cb, queue_size=1
+            )
 
         if self.is_viz:
             # Particle filter ROS stuff
@@ -315,10 +320,10 @@ class Guidance:
             # and then cancelled out during the normalization.
             like = (
                 -0.5
-                * (particles[ii, :] - y_act)
-                @ self.noise_inv
-                @ (particles[ii, :] - y_act)
-            )
+                * np.matmul(np.matmul((particles[ii, :] - y_act) \
+                ,self.noise_inv),  \
+                (particles[ii, :] - y_act))
+                )
             weight[ii] = weight[ii] * np.exp(like)
 
             # another way to implement the above line
@@ -468,31 +473,37 @@ class Guidance:
 
     def turtle_odom_cb(self, msg):
         if self.init_finished:
-            turtle_position = np.array(
-                [msg.pose.pose.position.x, msg.pose.pose.position.y]
-            )
-            turtle_orientation = np.array(
-                [
-                    msg.pose.pose.orientation.x,
-                    msg.pose.pose.orientation.y,
-                    msg.pose.pose.orientation.z,
-                    msg.pose.pose.orientation.w,
-                ]
-            )
-            # Gazebo covariance of the pose of the turtlebot [x, y, theta]
-            # self.covariance = np.diag([msg.pose.covariance[0], msg.pose.covariance[7], msg.pose.covariance[14]])
-            self.linear_velocity = np.array(
-                [msg.twist.twist.linear.x, msg.twist.twist.linear.y]
-            )
-            self.angular_velocity = np.array([msg.twist.twist.angular.z])
+            if self.is_sim:
+                turtle_position = np.array(
+                    [msg.pose.pose.position.x, msg.pose.pose.position.y]
+                )
+                turtle_orientation = np.array(
+                    [
+                        msg.pose.pose.orientation.x,
+                        msg.pose.pose.orientation.y,
+                        msg.pose.pose.orientation.z,
+                        msg.pose.pose.orientation.w,
+                    ]
+                )
+                # Gazebo covariance of the pose of the turtlebot [x, y, theta]
+                # self.covariance = np.diag([msg.pose.covariance[0], msg.pose.covariance[7], msg.pose.covariance[14]])
+                self.linear_velocity = np.array(
+                    [msg.twist.twist.linear.x, msg.twist.twist.linear.y]
+                )
+                self.angular_velocity = np.array([msg.twist.twist.angular.z])
 
-            _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
-            self.turtle_pose = np.array(
-                [turtle_position[0], turtle_position[1], theta_z]
-            )
-            self.noisy_turtle_pose = self.add_noise(
-                self.turtle_pose, self.measurement_covariance
-            )
+                _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
+                self.turtle_pose = np.array(
+                    [turtle_position[0], turtle_position[1], theta_z]
+                )
+                self.noisy_turtle_pose = self.add_noise(
+                    self.turtle_pose, self.measurement_covariance
+                )
+            else:
+                self.turtle_pose = np.array(
+                    [msg.pose.position.x, msg.pose.position.y]
+                )
+                self.pub_desired_state()
 
     def quad_odom_cb(self, msg):
         if self.init_finished:
@@ -529,10 +540,11 @@ class Guidance:
                 ds.velocity_valid = False
             ds.pose.z = -self.height
             self.pose_pub.publish(ds)
-            # Entropy pub
-            entropy_msg = Float32()
-            entropy_msg.data = self.H
-            self.entropy_pub.publish(entropy_msg)
+            if self.is_sim:
+                # Entropy pub
+                entropy_msg = Float32()
+                entropy_msg.data = self.H
+                self.entropy_pub.publish(entropy_msg)
 
     def pub_pf(self):
         mean_msg = ParticleMean()
