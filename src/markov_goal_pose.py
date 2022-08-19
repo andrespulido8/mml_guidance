@@ -1,27 +1,26 @@
 #!/usr/bin/env python
 from fileinput import filename
+
 import numpy as np
 import rospy
 from geometry_msgs.msg import Pose, Point, PoseStamped
 from nav_msgs.msg import Odometry
 
-class MarkovChain():
+
+class MarkovChain:
     def __init__(self):
         self.n_states = 5
 
         self.tolerance_radius = 0.2
 
-        #self.visited_states = np.zeros(self.n_states) 
+        # self.visited_states = np.zeros(self.n_states)
         self.init_time = np.array(rospy.get_time())
-        self.prev_goal = 0 
-        self.prev_mult = 0 
-        
+        self.prev_goal = 0
+        self.prev_mult = 0
+
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node") 
         pose_pub = rospy.Publisher('goal_pose', Pose, queue_size=2)
-	    # pose_pub = rospy.Publisher('goal_pose', PoseStamped, queue_size=2)
-        #rospy.Subscriber('/odom', Odometry, self.odom_cb, queue_size=3)
-        #rospy.Subscriber('/odom', PoseStamped, self.odom_cb, queue_size=3)
         self.goal_pose_square()
         rate = rospy.Rate(10)  # Hz
         # self.p = Pose()
@@ -33,7 +32,7 @@ class MarkovChain():
             rate.sleep()
 
     def goal_pose_square(self):
-        """ Generates an square of sides 2*k"""
+        """Generates an square of sides 2*k"""
         self.goal_list = []
 
         z = 0  			        # turtlebot on the ground
@@ -58,27 +57,32 @@ class MarkovChain():
 	                                msg.pose.pose.position.y])
 	#self.position = np.array([msg.pose.position.x, msg.pose.position.y])
 
-
     def pub_goal_pose(self):
-        """ Gets time and publishes a goal pose every time_step seconds or after the goal is reached within tolerance_radius"""
-        #if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
+        """Gets time and publishes a goal pose every time_step seconds or after the goal is reached within tolerance_radius"""
+        # if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
         #    self.prev_goal = self.prev_goal + 1
         #    self.create_pose_msg(self.goal_list[self.prev_goal])
         time_step = 10  # amount of seconds until next goal pose TODO: change if desired
         now = rospy.get_time() - self.init_time
-        mult = np.floor(now/time_step)
-        curr_goal = self.prev_goal 
+        mult = np.floor(now / time_step)
+        curr_goal = self.prev_goal
         # change goal pose if time is greater than time_step
-        change = True if mult > self.prev_mult else False  
+        change = True if mult > self.prev_mult else False
 
-        if now > 0 and now < time_step:  
+        if now > 0 and now < time_step:
             curr_goal = 0  # Start at the first state
         elif change:
-            curr_goal = np.random.choice(np.arange(self.n_states),p=self.trans_matrix[curr_goal,:])
-        
+            curr_goal = np.random.choice(
+                np.arange(self.n_states), p=self.trans_matrix[curr_goal, :]
+            )
+
         goal_pose = self.goal_list[curr_goal]
-        if curr_goal is not self.prev_goal and not rospy.is_shutdown():
-            rospy.logwarn("New goal pose: x={}, y={} with index {}".format(goal_pose['x'], goal_pose['y'], curr_goal))
+        if curr_goal is not self.prev_goal:
+            rospy.logwarn(
+                "New goal pose: x={}, y={} with index {}".format(
+                    goal_pose["x"], goal_pose["y"], curr_goal
+                )
+            )
         # Publish the goal pose
         self.create_pose_msg(goal_pose)
         # Restart previous values
@@ -96,6 +100,4 @@ class MarkovChain():
 
 if __name__ == '__main__':
     rospy.init_node('goal_pose_node', anonymous=True)
-    
-    #while not rospy.is_shutdown():
     square_chain = MarkovChain()
