@@ -47,7 +47,7 @@
 		</node>
 	</group>
 
-	<!-- Launches the drone guidance-->
+	<!-- Launches the drone guidance (C++)-->
 	<!--<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
 
   	<param name="is_viz" value="$(arg is_visualization)"/>
