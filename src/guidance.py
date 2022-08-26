@@ -5,7 +5,7 @@ import scipy.stats as stats
 from geometry_msgs.msg import PointStamped, PoseStamped
 from mag_pf_pkg.msg import Particle, ParticleMean
 from nav_msgs.msg import Odometry
-
+from rosflight_msgs.msg import RCRaw
 # from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
 from std_msgs.msg import Bool, Float32, Float32MultiArray
@@ -52,6 +52,7 @@ class Guidance:
         self.H_gauss = 0  # just used for comparison
         self.weighted_mean = np.array([0, 0, 0])
         self.actions = np.array([[0.1, 0], [0, 0.1], [-0.1, 0], [0, -0.1]])
+        self.position_following = False
         # Use multivariate normal if you know the initial condition
         # self.particles = np.random.multivariate_normal(
         #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
@@ -89,6 +90,7 @@ class Guidance:
             self.turtle_odom_sub = rospy.Subscriber(
                 "/turtle_pose_stamped", PoseStamped, self.turtle_odom_cb, queue_size=1
             )
+            self.rc_sub = rospy.Subscriber("rc_raw", RCRaw, self.rc_cb, queue_size=1)
 
         if self.is_viz:
             # Particle filter ROS stuff
@@ -523,19 +525,32 @@ class Guidance:
             self.information_driven_guidance()
 
             self.pub_desired_state()
+    
+    def rc_cb(self, msg):
+        if msg.values[6] > 500:
+            self.position_following = True
+        else: 
+            self.position_following = False
 
     def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
         if self.init_finished:
             ds = DesiredState()
-            if is_velocity:
-                ds.velocity.x = xvel
-                ds.velocity.y = yvel
-                ds.position_valid = False
-                ds.velocity_valid = True
-            else:
-                ds.pose.x = self.turtle_pose[0]
-                ds.pose.y = -self.turtle_pose[1]
-                ds.pose.yaw = 1.571  # 90 degrees
+            if self.position_following:
+                if is_velocity:
+                    ds.velocity.x = xvel
+                    ds.velocity.y = yvel
+                    ds.position_valid = False
+                    ds.velocity_valid = True
+                else:
+                    ds.pose.x = self.turtle_pose[0]
+                    ds.pose.y = -self.turtle_pose[1]
+                    ds.pose.yaw = 1.571  # 90 degrees
+                    ds.position_valid = True
+                    ds.velocity_valid = False
+            else: 
+                ds.pose.x = 0
+                ds.pose.y = 0
+                ds.pose.yaw = 1.571
                 ds.position_valid = True
                 ds.velocity_valid = False
             ds.pose.z = -self.height
