@@ -80,7 +80,7 @@
 	<!--<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
 
   	<param name="is_viz" value="$(arg is_visualization)"/>
-	<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen"/>
+	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen"/>
 
     <node if="$(arg record_bag)" name="record" pkg="rosbag" type="record" args="-O $(arg bag_name) pose_stamped attitude attitude/euler rc_raw imu/data sonar status pose_stamped xyz_debug_estimate xyz_estimate velocity/body_level_frame controller_state added_torque total_torque"/>
 
