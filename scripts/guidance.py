@@ -309,7 +309,7 @@ class Guidance:
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
         """
-        for ii in range(self.N):
+        for ii in range(0, self.N):
             # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
             # likelihood, but it does not matter since it can be factored
             # and then cancelled out during the normalization.
