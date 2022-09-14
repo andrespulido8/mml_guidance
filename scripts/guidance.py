@@ -321,6 +321,10 @@ class Guidance:
                 # @ self.noise_inv
                 # @ (particles[ii, :] - y_act)
             )
+            print(self.N)
+            print(weight)
+            print(weight[ii])
+            print(like)
             weight[ii] = weight[ii] * np.exp(like)
 
             # another way to implement the above line
