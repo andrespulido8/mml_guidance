@@ -326,10 +326,10 @@ class Guidance:
             print(weight[ii])
             print(like)
             print(np.exp(like))
-            weight[ii] = weight[ii] * np.exp(like)
+            # weight[ii] = weight[ii] * np.exp(like)
 
             # another way to implement the above line
-        # weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
+            weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
         return weight
 
     def resample(self):
