@@ -316,8 +316,10 @@ class Guidance:
             like = (
                 -0.5
                 * (particles[ii, :] - y_act)
-                @ self.noise_inv
-                @ (particles[ii, :] - y_act)
+                * self.noise_inv
+                * (particles[ii, :] - y_act)
+                # @ self.noise_inv
+                # @ (particles[ii, :] - y_act)
             )
             weight[ii] = weight[ii] * np.exp(like)
 
