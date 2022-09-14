@@ -93,10 +93,10 @@ class Guidance:
             self.err_estimate_pub = rospy.Publisher(
                 "err_estimate", PointStamped, queue_size=1
             )
-            self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
-            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
-            self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
-            self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
+        self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
+        self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
+        self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
+        self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
 
         rospy.loginfo(
             "Number of particles for the Bayes Filter: %d", self.particles.shape[0]
