@@ -507,7 +507,7 @@ class Guidance:
 
             # Hardware/Mocap Code
             self.linear_velocity = np.array(
-                [msg.pose.position.linear.x, msg.pose.position.linear.y]
+                [msg.pose.position.x, msg.pose.position.y]
             )
             self.angular_velocity = np.array([msg.pose.position.z])
 
