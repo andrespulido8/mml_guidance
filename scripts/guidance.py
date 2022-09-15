@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 import numpy as np
 import rospy
 import scipy.stats as stats
@@ -77,8 +77,11 @@ class Guidance:
         # ROS stuff
         rospy.loginfo("Initializing guidance node")
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
+        # self.turtle_odom_sub = rospy.Subscriber(
+        #     "/robot0/odom", Odometry, self.turtle_odom_cb, queue_size=1
+        # )
         self.turtle_odom_sub = rospy.Subscriber(
-            "/robot0/odom", Odometry, self.turtle_odom_cb, queue_size=1
+            "/rail/nwu/pose_stamped", PoseStamped, self.turtle_odom_cb, queue_size=1
         )
         self.quad_odom_sub = rospy.Subscriber(
             "/pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
@@ -93,10 +96,10 @@ class Guidance:
             self.err_estimate_pub = rospy.Publisher(
                 "err_estimate", PointStamped, queue_size=1
             )
-        self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
-        self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
-        self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
-        self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
+            self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
+            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
+            self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
+            self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
 
         rospy.loginfo(
             "Number of particles for the Bayes Filter: %d", self.particles.shape[0]
@@ -309,7 +312,7 @@ class Guidance:
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
         """
-        for ii in range(0, self.N):
+        for ii in range(self.N):
             # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
             # likelihood, but it does not matter since it can be factored
             # and then cancelled out during the normalization.
@@ -321,15 +324,10 @@ class Guidance:
                 # @ self.noise_inv
                 # @ (particles[ii, :] - y_act)
             )
-            # print(self.N)
-            # print(weight)
-            # print(weight[ii])
-            # print(like)
-            # print(np.exp(like))
-            # weight[ii] = weight[ii] * np.exp(like)
+            weight[ii] = weight[ii] * np.exp(like)
 
             # another way to implement the above line
-            weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
+        # weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
         return weight
 
     def resample(self):
@@ -475,23 +473,43 @@ class Guidance:
 
     def turtle_odom_cb(self, msg):
         if self.init_finished:
+            # Code for use with Gazebo
+            # turtle_position = np.array(
+            #     [msg.pose.pose.position.x, msg.pose.pose.position.y]
+            # )
+            # turtle_orientation = np.array(
+                # [
+                #     msg.pose.pose.orientation.x,
+                #     msg.pose.pose.orientation.y,
+                #     msg.pose.pose.orientation.z,
+                #     msg.pose.pose.orientation.w,
+                # ]
+
+            # Code for use with hardware/mocap
             turtle_position = np.array(
-                [msg.pose.pose.position.x, msg.pose.pose.position.y]
+                [msg.pose.position.x, msg.pose.position.y]
             )
             turtle_orientation = np.array(
                 [
-                    msg.pose.pose.orientation.x,
-                    msg.pose.pose.orientation.y,
-                    msg.pose.pose.orientation.z,
-                    msg.pose.pose.orientation.w,
+                    msg.pose.orientation.x,
+                    msg.pose.orientation.y,
+                    msg.pose.orientation.z,
+                    msg.pose.orientation.w,
                 ]
             )
+
             # Gazebo covariance of the pose of the turtlebot [x, y, theta]
             # self.covariance = np.diag([msg.pose.covariance[0], msg.pose.covariance[7], msg.pose.covariance[14]])
+            # self.linear_velocity = np.array(
+            #     [msg.twist.twist.linear.x, msg.twist.twist.linear.y]
+            # )
+            # self.angular_velocity = np.array([msg.twist.twist.angular.z])
+
+            # Hardware/Mocap Code
             self.linear_velocity = np.array(
-                [msg.twist.twist.linear.x, msg.twist.twist.linear.y]
+                [msg.twist.linear.x, msg.twist.linear.y]
             )
-            self.angular_velocity = np.array([msg.twist.twist.angular.z])
+            self.angular_velocity = np.array([msg.twist.angular.z])
 
             _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
             self.turtle_pose = np.array(
