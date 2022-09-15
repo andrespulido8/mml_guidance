@@ -96,10 +96,10 @@ class Guidance:
             self.err_estimate_pub = rospy.Publisher(
                 "err_estimate", PointStamped, queue_size=1
             )
-            self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
-            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
-            self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
-            self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
+        self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
+        self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
+        self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
+        self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
 
         rospy.loginfo(
             "Number of particles for the Bayes Filter: %d", self.particles.shape[0]
@@ -324,10 +324,10 @@ class Guidance:
                 # @ self.noise_inv
                 # @ (particles[ii, :] - y_act)
             )
-            weight[ii] = weight[ii] * np.exp(like)
+            # weight[ii] = weight[ii] * np.exp(like)
 
             # another way to implement the above line
-        # weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
+        weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
         return weight
 
     def resample(self):
