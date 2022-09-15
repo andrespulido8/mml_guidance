@@ -507,9 +507,9 @@ class Guidance:
 
             # Hardware/Mocap Code
             self.linear_velocity = np.array(
-                [msg.twist.linear.x, msg.twist.linear.y]
+                [msg.pose.position.linear.x, msg.pose.position.linear.y]
             )
-            self.angular_velocity = np.array([msg.twist.angular.z])
+            self.angular_velocity = np.array([msg.pose.position.z])
 
             _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
             self.turtle_pose = np.array(
