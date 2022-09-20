@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import numpy as np
 import rospy
 import scipy.stats as stats
@@ -26,7 +26,7 @@ class Guidance:
 
         ## PARTICLE FILTER  ##
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
-        # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
+        # boundary of the lab [[x_min, y_min], [x_max, y_,max]
         self.AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
         # number of particles
         self.N = 500
@@ -82,7 +82,6 @@ class Guidance:
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
         )
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
-
         if self.is_sim:
             self.turtle_odom_sub = rospy.Subscriber(
                 "/robot0/odom", Odometry, self.turtle_odom_cb, queue_size=1
@@ -320,27 +319,18 @@ class Guidance:
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
         """
-        # Update the weights of each particle. There are two methods to compute this:
+        for ii in range(self.N):
+            # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
+            # likelihood, but it does not matter since it can be factored
+            # and then cancelled out during the normalization.
+            like = -0.5 * np.matmul(
+                np.matmul((particles[ii, :] - y_act), self.noise_inv),
+                (particles[ii, :] - y_act),
+            )
+            weight[ii] = weight[ii] * np.exp(like)
 
-        # Method 1: For loop
-        # for ii in range(self.N):
-        #    # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
-        #    # likelihood, but it does not matter since it can be factored
-        #    # and then cancelled out during the normalization.
-        #    like = (
-        #        -0.5
-        #        * (particles[ii, :] - y_act)
-        #        * self.noise_inv
-        #        * (particles[ii, :] - y_act)
-        #        @ self.noise_inv
-        #        @ (particles[ii, :] - y_act)
-        #    )
-        #    weight[ii] = weight[ii] * np.exp(like)
-
-        # Method 2: Vectorized using scipy.stats
-        weight *= stats.multivariate_normal.pdf(
-            x=particles, mean=y_act, cov=self.measurement_covariance
-        )
+            # another way to implement the above line
+        # weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
         return weight
 
     def resample(self):
@@ -516,12 +506,6 @@ class Guidance:
                 self.turtle_pose = np.array([msg.pose.position.x, msg.pose.position.y])
                 self.pub_desired_state()
 
-    def rc_cb(self, msg):
-        if msg.values[6] > 500:
-            self.position_following = True
-        else:
-            self.position_following = False
-
     def quad_odom_cb(self, msg):
         if self.init_finished:
             self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])
@@ -540,6 +524,12 @@ class Guidance:
             self.information_driven_guidance()
 
             self.pub_desired_state()
+
+    def rc_cb(self, msg):
+        if msg.values[6] > 500:
+            self.position_following = True
+        else:
+            self.position_following = False
 
     def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
         if self.init_finished:

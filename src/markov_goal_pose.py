@@ -3,8 +3,7 @@ from fileinput import filename
 
 import numpy as np
 import rospy
-from geometry_msgs.msg import Pose
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Pose, PoseStamped
 
 
 class MarkovChain:
@@ -21,10 +20,10 @@ class MarkovChain:
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node")
         pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
-        rospy.Subscriber("/odom", Odometry, self.odom_cb, queue_size=3)
         self.goal_pose_square()
         rate = rospy.Rate(10)  # Hz
-        self.p = Pose()
+        # self.p = Pose()
+        self.p = PoseStamped().pose
 
         while not rospy.is_shutdown():
             self.pub_goal_pose()
@@ -34,11 +33,12 @@ class MarkovChain:
     def goal_pose_square(self):
         """Generates an square of sides 2*k"""
         self.goal_list = []
+
         z = 0  # turtlebot on the ground
         qx = qy = 0  # no roll or pitch
-        k = 1  # Multiplier  TODO: change this to make square bigger or smaller
-        x_offset = 0  # TODO: change this to not crash to the net
-        y_offset = 0
+        k = 1.25  # Multiplier  TODO: change this to make square bigger or smaller
+        x_offset = -1.25  # TODO: change this to not crash to the net
+        y_offset = 0.2
         self.goal_list.append(
             {
                 "curr_goal": 0,
@@ -54,7 +54,7 @@ class MarkovChain:
         self.goal_list.append(
             {
                 "curr_goal": 1,
-                "x": x_offset + 0,
+                "x": x_offset + 0 * k,
                 "y": y_offset + -1 * k,
                 "z": z,
                 "qx": qx,
@@ -112,6 +112,8 @@ class MarkovChain:
 
     def odom_cb(self, msg):
         self.position = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
+
+    # self.position = np.array([msg.pose.position.x, msg.pose.position.y])
 
     def pub_goal_pose(self):
         """Gets time and publishes a goal pose every time_step seconds or after the goal is reached within tolerance_radius"""
