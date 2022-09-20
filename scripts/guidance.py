@@ -309,22 +309,25 @@ class Guidance:
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
         """
-        for ii in range(self.N):
-            # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
-            # likelihood, but it does not matter since it can be factored
-            # and then cancelled out during the normalization.
-            like = (
-                -0.5
-                * (particles[ii, :] - y_act)
-                * self.noise_inv
-                * (particles[ii, :] - y_act)
-                # @ self.noise_inv
-                # @ (particles[ii, :] - y_act)
-            )
-            weight[ii] = weight[ii] * np.exp(like)
+        #Update the weights of each particle. There are two methods to compute this:
 
-            # another way to implement the above line
-        # weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
+        #Method 1: For loop
+        #for ii in range(self.N):
+        #    # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
+        #    # likelihood, but it does not matter since it can be factored
+        #    # and then cancelled out during the normalization.
+        #    like = (
+        #        -0.5
+        #        * (particles[ii, :] - y_act)
+        #        * self.noise_inv
+        #        * (particles[ii, :] - y_act)
+        #        @ self.noise_inv
+        #        @ (particles[ii, :] - y_act)
+        #    )
+        #    weight[ii] = weight[ii] * np.exp(like)
+
+        #Method 2: Vectorized using scipy.stats
+        weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
         return weight
 
     def resample(self):
