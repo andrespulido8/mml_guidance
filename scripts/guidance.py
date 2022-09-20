@@ -5,16 +5,17 @@ import scipy.stats as stats
 from geometry_msgs.msg import PointStamped, PoseStamped
 from mag_pf_pkg.msg import Particle, ParticleMean
 from nav_msgs.msg import Odometry
-from rosflight_msgs.msg import RCRaw
+
 # from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
+from rosflight_msgs.msg import RCRaw
 from std_msgs.msg import Bool, Float32, Float32MultiArray
 
 
 class Guidance:
     def __init__(self):
         self.init_finished = False
-        self.is_sim = rospy.get_param("/is_sim", False)        
+        self.is_sim = rospy.get_param("/is_sim", False)
         # Initialization of variables
         self.turtle_pose = np.array([0, 0, 0])
         self.quad_position = np.array([0, 0])
@@ -77,7 +78,9 @@ class Guidance:
         self.last_future_time = 0
 
         # ROS stuff
-        rospy.loginfo("Initializing guidance node with parameter is_sim: {}".format(self.is_sim))
+        rospy.loginfo(
+            f"Initializing guidance node with parameter is_sim: {self.is_sim}"
+        )
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
 
         if self.is_sim:
@@ -105,7 +108,6 @@ class Guidance:
             self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
             self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
             self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
-
 
         rospy.loginfo(
             "Number of particles for the Bayes Filter: %d", self.particles.shape[0]
@@ -318,10 +320,10 @@ class Guidance:
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
         """
-        #Update the weights of each particle. There are two methods to compute this:
+        # Update the weights of each particle. There are two methods to compute this:
 
-        #Method 1: For loop
-        #for ii in range(self.N):
+        # Method 1: For loop
+        # for ii in range(self.N):
         #    # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
         #    # likelihood, but it does not matter since it can be factored
         #    # and then cancelled out during the normalization.
@@ -335,8 +337,10 @@ class Guidance:
         #    )
         #    weight[ii] = weight[ii] * np.exp(like)
 
-        #Method 2: Vectorized using scipy.stats
-        weight *= stats.multivariate_normal.pdf(x=particles, mean=y_act, cov=self.measurement_covariance)
+        # Method 2: Vectorized using scipy.stats
+        weight *= stats.multivariate_normal.pdf(
+            x=particles, mean=y_act, cov=self.measurement_covariance
+        )
         return weight
 
     def resample(self):
@@ -509,15 +513,13 @@ class Guidance:
                     self.turtle_pose, self.measurement_covariance
                 )
             else:
-                self.turtle_pose = np.array(
-                    [msg.pose.position.x, msg.pose.position.y]
-                )
+                self.turtle_pose = np.array([msg.pose.position.x, msg.pose.position.y])
                 self.pub_desired_state()
 
     def rc_cb(self, msg):
         if msg.values[6] > 500:
             self.position_following = True
-        else: 
+        else:
             self.position_following = False
 
     def quad_odom_cb(self, msg):
@@ -554,7 +556,7 @@ class Guidance:
                     ds.pose.yaw = 1.571  # 90 degrees
                     ds.position_valid = True
                     ds.velocity_valid = False
-            else: 
+            else:
                 ds.pose.x = 0
                 ds.pose.y = 0
                 ds.pose.yaw = 1.571
@@ -615,4 +617,3 @@ if __name__ == "__main__":
         rospy.spin()
     except rospy.ROSInterruptException:
         pass
-        

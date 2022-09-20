@@ -27,7 +27,7 @@
         <!-- Road Network -->
 		<node pkg="mml" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
 			<remap from="/goal_pose" to="/rail/goal_pose"/>
-		</node> 
+		</node>
     </group>
 
 </launch>
