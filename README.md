@@ -2,6 +2,11 @@
 
 Motion Model Learning (MML) guidance algorithms for turtlebot and quad-copter
 
+## Requirements
+- [Reef estimator simulation](https://github.com/uf-reef-avl/reef_estimator_sim_bundle)
+- [Turtlebot packages](https://automaticaddison.com/how-to-launch-the-turtlebot3-simulation-with-ros/#gazebo)
+- mag_pf and mag_pf_visualization
+
 ## Sim Usage
 
 - To adjust the number of simulated vehicles modify the `./launch/launch_sim.launch` file inside the sim_helper repository.

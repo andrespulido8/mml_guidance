@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>mml</name>
+  <name>mml_guidance</name>
   <version>0.0.0</version>
   <description>The mml package</description>
 
