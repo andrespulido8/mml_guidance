@@ -50,7 +50,7 @@
 
   	<param name="is_viz" value="false"/>
   	<param name="is_sim" value="false"/>
-	<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen">
+	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen">
 	  <remap from='/turtle_pose_stamped' to='/rail/nwu/pose_stamped'/>
 	</node>
 
