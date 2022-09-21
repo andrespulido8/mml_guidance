@@ -544,7 +544,7 @@ class Guidance:
     def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
         if self.init_finished:
             ds = DesiredState()
-            if self.position_following:
+            if self.position_following or self.is_sim:
                 if is_velocity:
                     ds.velocity.x = xvel
                     ds.velocity.y = yvel
