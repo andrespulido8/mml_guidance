@@ -186,41 +186,42 @@ class Guidance:
             self.noisy_turtle_pose,
         )
         entropy_time = rospy.get_time() - self.initial_time
-        # print("Entropy time: ", entropy_time - now)
+        print("Entropy time: ", entropy_time - now)
 
         # print('check3')
-        ### Guidance
-        # future_weight = np.zeros((self.N, self.N_m))
-        # H1 = np.zeros(self.N_m)
-        # I = np.zeros(self.N_m)
+        ## Guidance
+        future_weight = np.zeros((self.N, self.N_m))
+        H1 = np.zeros(self.N_m)
+        I = np.zeros(self.N_m)
 
-        # future_part, self.last_future_time  = self.predict(self.particles,
-        #                self.prev_particles, self.weights, self.last_future_time)
-        ## Future measurement
-        # candidates_index = np.random.choice(a=self.N, size=self.N_m,
-        #                                                p=None)
-        ##update_index = self.is_in_FOV(self.particles)
-        ## Future possible measurements
-        # z_hat = self.add_noise(
-        #        future_part[candidates_index], self.measurement_covariance)
-        # if self.update_msg.data:
-        #    for jj in range(self.N_m):
-        #        future_weight[:,jj] = self.update(self.weights,
-        #                                future_part, z_hat[jj])
-        #        # H(x_{t+1} | \hat{z}_{t+1})
-        #        H1[jj] = self.entropy_particle(self.particles, self.weights,
-        #                    future_part, future_weight[:,jj], z_hat[jj])
-        #        # Information Gain
-        #        I[jj] = self.H - H1[jj]
+        future_part, self.last_future_time  = self.predict(self.particles,
+                       self.prev_particles, self.weights, self.last_future_time)
+        # Future measurement
+        candidates_index = np.random.choice(a=self.N, size=self.N_m,
+                                                        p=None)
+        #update_index = self.is_in_FOV(self.particles)
+        # Future possible measurements
+        z_hat = self.add_noise(
+                future_part[candidates_index], self.measurement_covariance)
+        if self.update_msg.data:
+            for jj in range(self.N_m):
+                future_weight[:,jj] = self.update(self.weights,
+                                        future_part, z_hat[jj])
+                # H(x_{t+1} | \hat{z}_{t+1})
+                H1[jj] = self.entropy_particle(self.particles, self.weights,
+                            future_part, future_weight[:,jj], z_hat[jj])
+                # Information Gain
+                I[jj] = self.H - H1[jj]
 
-        #    EER = I.mean()
-        #    print("H: ", self.H)
-        #    print("H1: ", H1)
-        #    print("I: ", I)
-        #    print("EER: %f" % EER)
+            EER = I.mean()
+            if False:
+                print("H: ", self.H)
+                print("H1: ", H1)
+                print("I: ", I)
+                print("EER: %f" % EER)
 
-        #    print("\n")
-        #    print("EER Time: ", rospy.get_time() - self.initial_time - entropy_time)
+                print("\n")
+            print("EER Time: ", rospy.get_time() - self.initial_time - entropy_time)
 
     def predict(self, particles, prev_particles, weights, last_time):
         """Uses the process model to propagate the belief in the system state.
