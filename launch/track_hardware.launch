@@ -11,7 +11,7 @@
     <arg name="bag_name" default="mml"/>
 
     <node name="rosflight" pkg="rosflight" type="rosflight_io" output="screen">
-        <param name="port" value="/dev/ttyACM0"/>
+        <param name="port" value="/dev/ttyUSB0"/>
     </node>
 
     <rosparam command="load" file="$(find reef_estimator)/params/dodo_camera.yaml" />
@@ -46,11 +46,11 @@
     </node>
 
 	<!-- Launches the drone guidance (C++)-->
-	<!--<node pkg="mml" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
+	<!--<node pkg="mml_guidance" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
 
   	<param name="is_viz" value="false"/>
   	<param name="is_sim" value="false"/>
-	<node pkg="mml" name="drone_guidance" type="guidance.py" output="screen">
+	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen">
 	  <remap from='/turtle_pose_stamped' to='/rail/nwu/pose_stamped'/>
 	</node>
 
