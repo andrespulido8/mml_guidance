@@ -11,7 +11,7 @@ class MarkovChain:
     def __init__(self):
         self.n_states = 5
 
-        self.tolerance_radius = 0.2
+        self.tolerance_radius = 0.05
 
         # self.visited_states = np.zeros(self.n_states)
         self.init_time = np.array(rospy.get_time())
@@ -20,11 +20,11 @@ class MarkovChain:
 
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node") 
-        pose_pub = rospy.Publisher('goal_pose', Pose, queue_size=2)
+        pose_pub = rospy.Publisher('goal_pose', PoseStamped, queue_size=2)
         self.goal_pose_square()
         rate = rospy.Rate(10)  # Hz
         # self.p = Pose()
-        self.p = PoseStamped().pose
+        self.p = PoseStamped()
 
         while not rospy.is_shutdown():
             self.pub_goal_pose()
@@ -90,13 +90,13 @@ class MarkovChain:
         self.prev_mult = mult
 
     def create_pose_msg(self, goal_pose):
-        self.p.position.x = goal_pose['x']
-        self.p.position.y = goal_pose['y']
-        self.p.position.z = goal_pose['z']
-        self.p.orientation.x = goal_pose['qx']
-        self.p.orientation.y = goal_pose['qy']
-        self.p.orientation.z = goal_pose['qz']
-        self.p.orientation.w = goal_pose['qw']
+        self.p.pose.position.x = goal_pose['x']
+        self.p.pose.position.y = goal_pose['y']
+        self.p.pose.position.z = goal_pose['z']
+        self.p.pose.orientation.x = goal_pose['qx']
+        self.p.pose.orientation.y = goal_pose['qy']
+        self.p.pose.orientation.z = goal_pose['qz']
+        self.p.pose.orientation.w = goal_pose['qw']
 
 if __name__ == '__main__':
     rospy.init_node('goal_pose_node', anonymous=True)
