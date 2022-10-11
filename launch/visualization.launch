@@ -1,6 +1,6 @@
 <!-- launch file for MML demo -->
 <launch>
-    <include file="$(find mml)/launch/mml_sim_estimator.launch" >
+    <include file="$(find mml_guidance)/launch/mml_sim_estimator.launch" >
 		<arg name="is_visualization" value="true"/>
 	</include>
 

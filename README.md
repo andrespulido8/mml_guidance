@@ -27,3 +27,6 @@ To make changes to this repo, it is recommended to use the tool [pre-commit](htt
 To install it, run `pip3 install -r requirements.txt` inside this repo, and then install the hooks
 specified in the config file by doing `pre-commit install`. Now to run it against all the files to check
 if it worked, run `pre-commit run --all-files`.
+
+## Profiling
+Run `roslaunch mml mml_sim_estimator.launch` and then `pprofile --format callgrind --out guidance.pprofile /home/andrespulido/catkin_ws/src/mml_guidance/scripts/guidance.py __name:=drone_guidance`. This will run the profiler and save the results in the directory where the command was called.
