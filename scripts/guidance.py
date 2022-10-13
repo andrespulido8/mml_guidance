@@ -30,6 +30,7 @@ class Guidance:
         self.AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
         # number of particles
         self.N = 500
+        # Number of future measurements to consider in EER
         self.N_m = 10
         self.measurement_update_time = 5.0
         # uniform distribution of particles (x, y, theta)
@@ -174,36 +175,35 @@ class Guidance:
         to then compute the expected entropy reduction (EER) over predicted
         measurements. The next action is the one that minimizes the EER.
         """
-        # print("check2")
-        now = rospy.get_time() - self.initial_time
-        # Entropy of current distribution
-        # TODO: consider only updating this when there is an update
-        self.H = self.entropy_particle(
-            self.prev_particles,
-            self.prev_weights,
-            self.particles,
-            self.weights,
-            self.noisy_turtle_pose,
-        )
-        entropy_time = rospy.get_time() - self.initial_time
-        print("Entropy time: ", entropy_time - now)
-
-        # print('check3')
-        ## Guidance
-        future_weight = np.zeros((self.N, self.N_m))
-        H1 = np.zeros(self.N_m)
-        I = np.zeros(self.N_m)
-
-        future_part, self.last_future_time  = self.predict(self.particles,
-                       self.prev_particles, self.weights, self.last_future_time)
-        # Future measurement
-        candidates_index = np.random.choice(a=self.N, size=self.N_m,
-                                                        p=None)
-        #update_index = self.is_in_FOV(self.particles)
-        # Future possible measurements
-        z_hat = self.add_noise(
-                future_part[candidates_index], self.measurement_covariance)
         if self.update_msg.data:
+            # print("check2")
+            now = rospy.get_time() - self.initial_time
+            # Entropy of current distribution
+            self.H_t = self.entropy_particle(
+                self.prev_particles,
+                self.prev_weights,
+                self.particles,
+                self.weights,
+                self.noisy_turtle_pose,
+            )
+            entropy_time = rospy.get_time() - self.initial_time
+            print("Entropy time: ", entropy_time - now)
+
+            # print('check3')
+            ## Guidance
+            future_weight = np.zeros((self.N, self.N_m))
+            H1 = np.zeros(self.N_m)
+            I = np.zeros(self.N_m)
+
+            future_part, self.last_future_time  = self.predict(self.particles,
+                           self.prev_particles, self.weights, self.last_future_time)
+            # Future measurements
+            candidates_index = np.random.choice(a=self.N, size=self.N_m,
+                                                            p=None)  # right now the new choice is uniform  
+            # Future possible measurements
+            z_hat = self.add_noise(
+                    future_part[candidates_index], self.measurement_covariance)
+            #update_index = self.is_in_FOV(self.particles)
             for jj in range(self.N_m):
                 future_weight[:,jj] = self.update(self.weights,
                                         future_part, z_hat[jj])
