@@ -19,7 +19,7 @@ class MarkovChain:
 
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node")
-        pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
+        pose_pub = rospy.Publisher("goal_pose", PoseStamped, queue_size=2)
         self.goal_pose_square()
         rate = rospy.Rate(10)  # Hz
         # self.p = Pose()
