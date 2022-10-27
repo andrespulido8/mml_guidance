@@ -21,6 +21,7 @@ class Guidance:
         self.turtle_pose = np.array([0, 0, 0])
         self.quad_position = np.array([0, 0])
         self.noisy_turtle_pose = np.array([0, 0, 0])
+        self.goal_position = np.array([0, 0])
         self.linear_velocity = np.array([0, 0])
         self.angular_velocity = np.array([0])
         deg2rad = lambda deg: np.pi * deg / 180
@@ -164,13 +165,9 @@ class Guidance:
         if self.is_viz:
             self.estimate()
             self.pub_pf()
-
-    def information_driven_guidance(
-        self,
-    ):
-        """Compute the current entropy and future entropy using particles
-        to then compute the expected entropy reduction (EER) over predicted
-        measurements. The next action is the one that minimizes the EER.
+    
+    def current_entropy(self):
+        """Calculate the current entropy of the particles
         """
         # print("check2")
         now = rospy.get_time() - self.initial_time
@@ -185,6 +182,15 @@ class Guidance:
         entropy_time = rospy.get_time() - self.initial_time
         print("Entropy time: ", entropy_time - now)
 
+
+    def information_driven_guidance(
+        self,
+    ):
+        """Compute the current entropy and future entropy using particles
+        to then compute the expected entropy reduction (EER) over predicted
+        measurements. The next action is the one that minimizes the EER.
+        """
+        now = rospy.get_time() - self.initial_time
         # print('check3')
         ## Guidance
         future_weight = np.zeros((self.N, self.N_m))
@@ -206,18 +212,22 @@ class Guidance:
                 future_parts[candidates_index], self.measurement_covariance)
         # TODO: implement N_m sampled measurements (double loop) 
         for jj in range(self.N_s):
-            if self.is_in_FOV()[0]:
+            future_fov = self.construct_FOV(z_hat[jj]) 
+            # currently next if statement will always be true
+            # N_m implementation will change this by 
+            # checking for measrement outside of fov
+            if self.is_in_FOV(z_hat[jj], future_fov):
                 future_weight[:,jj] = self.update(self.weights,
                                         future_parts, z_hat[jj])
             # H(x_{t+k} | \hat{z}_{t+k})
             H1[jj] = self.entropy_particle(self.particles, self.weights,
                         future_parts, future_weight[:,jj], z_hat[jj])
             # Information Gain
-            I[jj] = self.H - H1[jj]
+            I[jj] = self.H_t - H1[jj]
 
         # EER = I.mean() # implemented when N_m is implemented
         if False:
-            print("H: ", self.H)
+            print("H: ", self.H_t)
             print("H1: ", H1)
             print("I: ", I)
             print("EER: %f" % EER)
@@ -312,15 +322,15 @@ class Guidance:
     def is_in_FOV(self, sparticle, fov): 
         """Check if the particles are in the FOV of the camera.
         Input: Particles, FOV 
-        Output: Index of the particles in the FOV
+        Output: Boolean. True if the particle is in the FOV, False otherwise
         """
         # TODO: check this
-        return np.logical_and(
+        return np.logical_and([
             sparticle[0] > fov[0],
             sparticle[0] < fov[1],
             sparticle[1] > fov[2],
             sparticle[1] < fov[3],
-        )
+        ])
     
     def construct_FOV(self, fov_center=np.array([0, 0])):
         """ Construct the FOV of the camera given the center 
@@ -553,6 +563,7 @@ class Guidance:
             # now = rospy.get_time() - self.initial_time
             self.particle_filter()
             # print("particle filter time: ", rospy.get_time() - self.initial_time - now)
+            self.current_entropy():
             if self.update_msg.data:
                 self.goal_position = self.information_driven_guidance()
 
@@ -588,7 +599,7 @@ class Guidance:
             if self.is_sim:
                 # Entropy pub
                 entropy_msg = Float32()
-                entropy_msg.data = self.H
+                entropy_msg.data = self.H_t
                 self.entropy_pub.publish(entropy_msg)
 
     def pub_pf(self):
