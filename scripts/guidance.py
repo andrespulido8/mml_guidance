@@ -179,15 +179,15 @@ class Guidance:
         if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
             self.H_t = self.entropy_particle(
                 self.prev_particles,
-                self.prev_weights,
+                np.copy(self.prev_weights),
                 self.particles,
-                self.weights,
+                np.copy(self.weights),
                 self.noisy_turtle_pose,
             )
         else: 
             self.H_t = self.entropy_particle(
                 self.prev_particles,
-                self.weights, # current weights are the (t-1) weights because no update
+                np.copy(self.weights), # current weights are the (t-1) weights because no update
                 self.particles,
             )
 
@@ -240,11 +240,9 @@ class Guidance:
                 future_weight[:,jj] = self.update(self.weights,
                                         future_parts, z_hat[jj])
             # H (x_{t+k} | \hat{z}_{t+k})
-            print("weights5: ", self.weights)
             # TODO: figure out how to prevent weights from changing inseide this function
-            H1[jj] = self.entropy_particle(self.particles, self.weights,
+            H1[jj] = self.entropy_particle(self.particles, np.copy(self.weights),
                         future_parts, future_weight[:,jj], z_hat[jj])
-            print("weights6: ", self.weights)
             # Information Gain
             I[jj] = self.H_t - H1[jj]
 
@@ -463,14 +461,14 @@ class Guidance:
         """
         return 1.0 / np.sum(np.square(weights))
 
-    def entropy_particle(self, prev_particles, prev_weights, particles, weights=np.array([]), y_meas=np.array([])):
+    def entropy_particle(self, prev_particles, prev_wgts, particles, wgts=np.array([]), y_meas=np.array([])):
         """Compute the entropy of the particle distribution based on the equation in the
         paper: Y. Boers, H. Driessen, A. Bagchi, and P. Mandal, 'Particle filter based entropy'
         There are two computations, one for the case where the measurement is inside the fov
         and there is an update step before, and one where the measurement is outside the fov. 
         Ouput: entropy: numpy.int64 
         """
-        if weights.size > 0: 
+        if wgts.size > 0: 
             # likelihoof of measurement p(zt|xt)
             # (how likely is each of the particles in the gaussian of the measurement)
             like_meas = stats.multivariate_normal.pdf(
@@ -485,45 +483,45 @@ class Guidance:
                 like_particle = stats.multivariate_normal.pdf(
                     x=prev_particles, mean=particles[ii, :], cov=self.proces_covariance
                 )
-                # TODO: investigate if I need to multiply this by prev_weights
+                # TODO: investigate if I need to multiply this by prev_wgts
                 process_part_like[ii] = np.sum(like_particle)  
 
             # Numerical stability
             cutoff = 1e-4
             like_meas[like_meas < cutoff] = np.nan
-            prev_weights[prev_weights < cutoff] = np.nan
+            prev_wgts[prev_wgts < cutoff] = np.nan
             # remove the nans from the likelihoods
             # like_meas = like_meas[~np.isnan(like_meas)]
             process_part_like[process_part_like < cutoff] = np.nan
-            product = like_meas * prev_weights
+            product = like_meas * prev_wgts
             notnans = product[~np.isnan(product)]
             notnans[notnans < cutoff * 0.01] = np.nan
             product[~np.isnan(product)] = notnans
             first_term = np.log(np.nansum(product))
             first_term = first_term if np.isfinite(first_term) else 0.0
-            # second_term = np.nansum(np.log(prev_weights)*weights)
+            # second_term = np.nansum(np.log(prev_wgts)*weights)
             # third_term = np.nansum(weights*np.log(like_meas))
             # fourth_term = np.nansum(weights*np.log(process_part_like))
 
             entropy = (
                 first_term
-                - np.nansum(np.log(prev_weights) * weights)
-                - np.nansum(weights * np.log(like_meas))
-                - np.nansum(weights * np.log(process_part_like))
+                - np.nansum(np.log(prev_wgts) * wgts)
+                - np.nansum(wgts * np.log(like_meas))
+                - np.nansum(wgts * np.log(process_part_like))
             )
     
             if np.abs(entropy) > 30:
-                print("first term: ", np.log(np.nansum(like_meas * prev_weights)))
-                print("second term: ", np.nansum(np.log(prev_weights) * weights))
-                print("third term: ", np.nansum(weights * np.log(like_meas)))
-                print("fourth term: ", np.nansum(weights * np.log(process_part_like)))
+                print("first term: ", np.log(np.nansum(like_meas * prev_wgts)))
+                print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
+                print("third term: ", np.nansum(wgts * np.log(like_meas)))
+                print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
                 # print('like_meas min: ', like_meas.min())
                 # print('like_meas max: ', like_meas.max())
                 # print('like_meas mean: ', like_meas.mean())
                 # print('like_meas std: ', like_meas.std())
     
                 # print if first term is -inf
-                if np.isinf(np.log(np.nansum(like_meas * prev_weights))):
+                if np.isinf(np.log(np.nansum(like_meas * prev_wgts))):
                     rospy.logwarn("first term of entropy is -inf. Likelihood is very small")
         else:
             # likelihood of particle p(xt|xt-1)
@@ -534,15 +532,15 @@ class Guidance:
                 like_particle = stats.multivariate_normal.pdf(
                     x=prev_particles, mean=particles[ii, :], cov=self.proces_covariance
                 )
-                process_part_like[ii] = np.sum(like_particle*prev_weights)
+                process_part_like[ii] = np.sum(like_particle*prev_wgts)
 
             # Numerical stability
             cutoff = 1e-4
             process_part_like[process_part_like < cutoff] = np.nan
-            prev_weights[prev_weights < cutoff] = np.nan
+            prev_wgts[prev_wgts < cutoff] = np.nan
 
             entropy = (
-                - np.nansum(prev_weights * np.log(process_part_like))
+                - np.nansum(prev_wgts * np.log(process_part_like))
             )
 
         return np.clip(entropy, -20, 1000)
@@ -676,6 +674,7 @@ class Guidance:
         # Particle pub
         self.particle_pub.publish(mean_msg)
         self.err_estimate_pub.publish(err_msg)
+        # TODO: change publisher to service
         self.update_pub.publish(self.update_msg)
         # FOV pub
         fov_msg = Float32MultiArray()
