@@ -129,13 +129,14 @@ class Guidance:
         )
 
         self.update_msg = Bool()
-        reset_time = t - self.time_reset - self.initial_time
-        print("reset time: ", reset_time)
-        if reset_time > self.measurement_update_time:
+        updt_time = t - self.time_reset - self.initial_time
+        #print("reset time: ", reset_time)
+        if updt_time > self.measurement_update_time:
             # update particles every measurement_update_time seconds
-            self.time_reset = t
+            self.time_reset = t - self.initial_time
             rospy.loginfo("Updating weight of particles")
-            if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
+            #if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
+            if True:
                 self.prev_weights = np.copy(self.weights)
                 self.weights = self.update(
                     self.weights, self.particles, self.noisy_turtle_pose
@@ -218,7 +219,6 @@ class Guidance:
             future_parts, last_future_time  = self.predict(future_parts,
                            prev_future_parts, self.weights, last_future_time+0.1)
         # Future measurements
-        print(self.weights)
         prob = np.nan_to_num(self.weights, copy=True, nan=0)
         prob = prob / np.sum(prob)
         candidates_index = np.random.choice(a=self.N, size=self.N_s,
@@ -240,8 +240,11 @@ class Guidance:
                 future_weight[:,jj] = self.update(self.weights,
                                         future_parts, z_hat[jj])
             # H (x_{t+k} | \hat{z}_{t+k})
+            print("weights5: ", self.weights)
+            # TODO: figure out how to prevent weights from changing inseide this function
             H1[jj] = self.entropy_particle(self.particles, self.weights,
                         future_parts, future_weight[:,jj], z_hat[jj])
+            print("weights6: ", self.weights)
             # Information Gain
             I[jj] = self.H_t - H1[jj]
 
