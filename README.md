@@ -3,9 +3,10 @@
 Motion Model Learning (MML) guidance algorithms for turtlebot and quad-copter
 
 ## Requirements
-- [Reef estimator simulation](https://github.com/uf-reef-avl/reef_estimator_sim_bundle). You need to make
- sure all the submodules are up to date and tracking master branch. Do `git submodule update --init --recursive` 
- to update the submodules. Additionally, do `git checkout master` if you are gettig errors from those submodules.
+- [Reef estimator simulation](https://github.com/uf-reef-avl/reef_estimator_sim_bundle). 
+	- You need to make sure all the submodules are up to date and tracking master branch. Do `git submodule update --init --recursive` to update the submodules.
+	- To track master for all submodules, type `git submodule foreach --recursive git checkout master`
+	- Note: to automatically change the number of turtlebots, inside the `sim_helper` repo, type `git remote set-url origin https://github.com/andrespulido8/sim_helper.git. Then `git checkout mml`
 - [Turtlebot packages](https://automaticaddison.com/how-to-launch-the-turtlebot3-simulation-with-ros/#gazebo)
 - [mag_pf](http://10.251.72.180/magnav/mag_pf) and [mag_pf_visualization](http://10.251.72.180/magnav/mag_pf_visualization)
 - [Andres turtlebot PID controller](http://10.251.72.180/andres/andres_turtlebot_pid)
