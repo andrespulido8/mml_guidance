@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from copy import copy
 import numpy as np
 import rospy
 import scipy.stats as stats
@@ -30,7 +29,7 @@ class Guidance:
         ## PARTICLE FILTER  ##
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        self.AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
+        self.AVL_dims = np.array([[-0.6, -1.6], [2.6, 1.6]])  # road network outline
         # number of particles
         self.N = 500
         # Number of future measurements per sampled particle to consider in EER
@@ -39,7 +38,7 @@ class Guidance:
         self.N_s = 10
         # Time steps to propagate in the future for EER
         self.k = 1
-        self.measurement_update_time = 5.0
+        self.measurement_update_time = 0.5
         # uniform distribution of particles (x, y, theta)
         self.particles = np.random.uniform(
             [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
@@ -81,6 +80,10 @@ class Guidance:
         rospy.loginfo(
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
         )
+        if self.is_info_guidance:
+            rospy.loginfo("Quadcopter in mode: Information Gain Guidance")
+        else:
+            rospy.loginfo("Quadcopter in mode: Position Target Tracking")
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
 
         if self.is_sim:
@@ -105,9 +108,10 @@ class Guidance:
                 "err_estimate", PointStamped, queue_size=1
             )
             self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
-            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
+            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32MultiArray, queue_size=1)
             self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
             self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
+            self.des_fov_pub = rospy.Publisher("des_fov_coord", Float32MultiArray, queue_size=1)
 
         rospy.loginfo(
             "Number of particles for the Bayes Filter: %d", self.particles.shape[0]
@@ -134,7 +138,7 @@ class Guidance:
         if updt_time > self.measurement_update_time:
             # update particles every measurement_update_time seconds
             self.time_reset = t - self.initial_time
-            rospy.loginfo("Updating weight of particles")
+            #rospy.loginfo("Updating weight of particles")
             #if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
             if True:
                 self.prev_weights = np.copy(self.weights)
@@ -149,7 +153,7 @@ class Guidance:
         # print('check1')
         self.Neff = self.neff(self.weights)
         if self.Neff < self.N / 2 and self.update_msg.data:
-            if self.Neff < self.N / 50:
+            if self.Neff < self.N / 100:
                 # particles are basically lost, reinitialize
                 rospy.logwarn("Uniformly resampling particles")
                 self.particles = np.random.uniform(
@@ -254,13 +258,13 @@ class Guidance:
             print("EER: %f" % EER)
 
             print("\n")
-        print("EER Time: ", rospy.get_time() - self.initial_time)
+        print("EER Time: ", rospy.get_time() - self.initial_time - now)
 
         action_index = np.argmax(I)
 
-        print("possible actions: ", z_hat[:, :2])
-        print("information gain: ", I)
-        print("Chosen action:", z_hat[action_index, :2])
+        #print("possible actions: ", z_hat[:, :2])
+        #print("information gain: ", I)
+        #print("Chosen action:", z_hat[action_index, :2])
         return z_hat[action_index][:2] 
 
     def predict(self, particles, prev_particles, weights, last_time):
@@ -395,7 +399,7 @@ class Guidance:
         #    weight[ii] = weight[ii] * np.exp(like)
 
         # Method 2: Vectorized using scipy.stats
-        weight *= stats.multivariate_normal.pdf(
+        weight = weight * stats.multivariate_normal.pdf(
             x=particles, mean=y_act, cov=self.measurement_covariance
         )
         return weight
@@ -407,14 +411,11 @@ class Guidance:
         Inputs: Updated state of the particles
         Outputs: Resampled updated state of the particles
         """
-        print(self.weights)
         self.weights = (
             self.weights / np.sum(self.weights)
             if np.sum(self.weights) > 0
             else self.weights
         )
-        print(self.weights)
-        print("Resampling")
         indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
         self.particles = self.particles[indexes]
         self.weights = self.weights[indexes]
@@ -611,6 +612,7 @@ class Guidance:
         if self.init_finished:
             self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])
             # self.quad_yaw = self.euler_from_quaternion(msg.pose.orientation)[2]  # TODO: unwrap message before function
+            self.quad_position[1] = -self.quad_position[1] if not self.is_info_guidance else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position) 
             # now = rospy.get_time() - self.initial_time
             self.particle_filter()
@@ -635,8 +637,8 @@ class Guidance:
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = self.goal_position[1]
                     else:
-                        ds.pose.x = self.turtle_pose[0]
-                        ds.pose.y = self.turtle_pose[1]
+                        ds.pose.x = self.weighted_mean[0]
+                        ds.pose.y = -self.weighted_mean[1]
                     ds.pose.yaw = 1.571  # 90 degrees
                     ds.position_valid = True
                     ds.velocity_valid = False
@@ -688,10 +690,22 @@ class Guidance:
             ]
         )
         fov_msg.data = fov_matrix.flatten("C")
-        # Number of effective particles pub
         self.fov_pub.publish(fov_msg)
-        neff_msg = Float32()
-        neff_msg.data = self.Neff
+        self.des_fov = self.construct_FOV(self.goal_position) 
+        des_fov_matrix = np.array(
+            [
+                [self.des_fov[0], self.des_fov[2]],
+                [self.des_fov[0], self.des_fov[3]],
+                [self.des_fov[1], self.des_fov[3]],
+                [self.des_fov[1], self.des_fov[2]],
+                [self.des_fov[0], self.des_fov[2]],
+            ]
+        )
+        fov_msg.data = des_fov_matrix.flatten("C")
+        self.des_fov_pub.publish(fov_msg)
+        # Number of effective particles pub
+        neff_msg = Float32MultiArray()
+        neff_msg.data = np.array([self.Neff])
         self.n_eff_pub.publish(neff_msg)
 
 
