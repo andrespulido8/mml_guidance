@@ -379,7 +379,7 @@ class Guidance:
             self.quad_position[1] = -self.quad_position[1] if not self.is_info_guidance else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position) 
             # now = rospy.get_time() - self.initial_time
-            self.particle_filter()
+            self.filter.pf_loop()
             # print("particle filter time: ", rospy.get_time() - self.initial_time - now)
             self.current_entropy()
             if self.update_msg.data:

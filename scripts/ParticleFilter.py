@@ -42,7 +42,6 @@ class ParticleFilter():
         self.var = np.diag(self.measurement_covariance)  # variance of particles
 
         self.turtle_pose = np.array([0., 0., 0.])
-        #self.fake_sensor()
         self.udpate_msg = Bool()
         
 
@@ -195,10 +194,7 @@ class ParticleFilter():
             )
             # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
             self.H_gauss = (
-                np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(self.var))) / 2
-            )
-    def fake_sensor(self):
-        self.noisy_turtle_pose = self.turtle_pose + np.random.uniform([-0.01, -0.01, -0.005], [0.01, 0.01, 0.005], (3,))
+                np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(self.var))) / 2 )
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
@@ -218,11 +214,11 @@ class ParticleFilter():
 
         return mean + noise
 
-    def neff(self, weights):
+    def neff(self):
         """Compute the number of effective particles
         Source: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
         """
-        return 1.0 / np.sum(np.square(weights))
+        return 1.0 / np.sum(np.square(self.weights))
 
     def pub_pf(self):
         mean_msg = ParticleMean()
