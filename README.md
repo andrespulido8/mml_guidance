@@ -3,24 +3,33 @@
 Motion Model Learning (MML) guidance algorithms for turtlebot and quad-copter
 
 ## Requirements
-- [Reef estimator simulation](https://github.com/uf-reef-avl/reef_estimator_sim_bundle)
+- [Reef estimator simulation](https://github.com/uf-reef-avl/reef_estimator_sim_bundle). 
+	- You need to make sure all the submodules are up to date and tracking master branch. Do `git submodule update --init --recursive` to update the submodules.
+	- To track master for all submodules, type `git submodule foreach --recursive git checkout master`
+	- Note: to automatically change the number of turtlebots, inside the `sim_helper` repo, type `git remote set-url origin https://github.com/andrespulido8/sim_helper.git. Then `git checkout mml`
 - [Turtlebot packages](https://automaticaddison.com/how-to-launch-the-turtlebot3-simulation-with-ros/#gazebo)
-- mag_pf and mag_pf_visualization
+- [mag_pf](http://10.251.72.180/magnav/mag_pf) and [mag_pf_visualization](http://10.251.72.180/magnav/mag_pf_visualization)
+- [Andres turtlebot PID controller](http://10.251.72.180/andres/andres_turtlebot_pid)
 
 ## Sim Usage
 
-- To adjust the number of simulated vehicles modify the `./launch/launch_sim.launch` file inside the sim_helper repository.
-- Change the `spawn_turtles` argument inside the previously mentioned launch file to `robot0`.
-- Wait a few seconds until __Autopilot ARMED__ and __RC override active__ are printed and then in another terminal run `roslaunch mml mml_sim_estimator.launch` from the launch directory.
-
-## Visualization
-To visualize the particle filter and the motion model, run `roslaunch mml visualization.launch`.
-
-## Train
-- To turn off the Gazebo GUI to make the sim faster, change the argument `gui` to `false` in `camera_multirotor.launch` inside the **sim_helper** package from REEF github
+1. To adjust the number of simulated vehicles modify the `./launch/launch_sim.launch` file inside the sim_helper repository.
+2. Change the `spawn_turtles` argument inside the previously mentioned launch file to `robot0`.
+3. In the `sim_helper` repository run `python scripts/Master.py` to start the simulation.
+4. Wait a few seconds until __Autopilot ARMED__ and __RC override active__ are printed and then in another terminal 
+run `roslaunch mml_guidance mml_sim_estimator.launch` from the launch directory.
 
 ## Hardware Usage
-To run only the turtlebot, do `roslaunch mml turtlebot_hardware.launch`.
+To run only the turtlebot, do `roslaunch mml_guidance turtlebot_hardware.launch`.
+To run only the quadcopter, do `roslaunch mml_guidance track_hardware.launch`.
+
+## Visualization
+To visualize the particle filter and the motion model, run `roslaunch mml_guidance visualization.launch` instead of 
+`mml_sim_estimator.launch`.
+
+## Train
+To turn off the Gazebo GUI to make the sim faster, change the argument `gui` to `false` in `camera_multirotor.launch` 
+inside the **sim_helper** package from REEF github
 
 ## Contributing Guide
 To make changes to this repo, it is recommended to use the tool [pre-commit](https://pre-commit.com/).
@@ -29,4 +38,6 @@ specified in the config file by doing `pre-commit install`. Now to run it agains
 if it worked, run `pre-commit run --all-files`.
 
 ## Profiling
-Run `roslaunch mml mml_sim_estimator.launch` and then `pprofile --format callgrind --out guidance.pprofile /home/andrespulido/catkin_ws/src/mml_guidance/scripts/guidance.py __name:=drone_guidance`. This will run the profiler and save the results in the directory where the command was called.
+Run `roslaunch mml_guidance mml_sim_estimator.launch` and then 
+`pprofile --format callgrind --out guidance.pprofile /home/andrespulido/catkin_ws/src/mml_guidance/scripts/guidance.py __name:=drone_guidance`. 
+This will run the profiler and save the results in the directory where the command was called.

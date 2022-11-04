@@ -120,6 +120,11 @@ class MarkovChain:
                     goal_pose["x"], goal_pose["y"], self.prev_goal
                 )
             )
+        ## Publish the goal pose
+        #self.create_pose_msg(goal_pose)
+        ## Restart previous values
+        #self.prev_goal = curr_goal
+        #self.prev_mult = mult
 
     def create_pose_msg(self, goal_pose):
         self.p.position.x = goal_pose["x"]

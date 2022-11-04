@@ -16,10 +16,12 @@ class Guidance:
     def __init__(self):
         self.init_finished = False
         self.is_sim = rospy.get_param("/is_sim", False)
+        self.is_info_guidance = True  # False is for tracking turtlebot
         # Initialization of variables
         self.turtle_pose = np.array([0, 0, 0])
         self.quad_position = np.array([0, 0])
         self.noisy_turtle_pose = np.array([0, 0, 0])
+        self.goal_position = np.array([0, 0])
         self.linear_velocity = np.array([0, 0])
         self.angular_velocity = np.array([0])
         deg2rad = lambda deg: np.pi * deg / 180
@@ -27,11 +29,16 @@ class Guidance:
         ## PARTICLE FILTER  ##
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        self.AVL_dims = np.array([[-0.5, -1.5], [2.5, 1.5]])  # road network outline
+        self.AVL_dims = np.array([[-0.6, -1.6], [2.6, 1.6]])  # road network outline
         # number of particles
         self.N = 500
-        self.N_m = 10
-        self.measurement_update_time = 5.0
+        # Number of future measurements per sampled particle to consider in EER
+        self.N_m = 1
+        # Number of sampled particles
+        self.N_s = 10
+        # Time steps to propagate in the future for EER
+        self.k = 1
+        self.measurement_update_time = 0.5
         # uniform distribution of particles (x, y, theta)
         self.particles = np.random.uniform(
             [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
@@ -64,23 +71,19 @@ class Guidance:
             [deg2rad(69), deg2rad(42)]
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
-        self.FOV = np.array(
-            [
-                self.quad_position[0] - self.FOV_dims[0] / 2,
-                self.quad_position[0] + self.FOV_dims[0] / 2,
-                self.quad_position[1] - self.FOV_dims[1] / 2,
-                self.quad_position[1] + self.FOV_dims[1] / 2,
-            ]
-        )
+        self.FOV = self.construct_FOV(self.quad_position) 
         self.initial_time = rospy.get_time()
         self.time_reset = 0
         self.last_time = 0
-        self.last_future_time = 0
 
         # ROS stuff
         rospy.loginfo(
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
         )
+        if self.is_info_guidance:
+            rospy.loginfo("Quadcopter in mode: Information Gain Guidance")
+        else:
+            rospy.loginfo("Quadcopter in mode: Position Target Tracking")
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
 
         if self.is_sim:
@@ -105,9 +108,10 @@ class Guidance:
                 "err_estimate", PointStamped, queue_size=1
             )
             self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
-            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
+            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32MultiArray, queue_size=1)
             self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
             self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
+            self.des_fov_pub = rospy.Publisher("des_fov_coord", Float32MultiArray, queue_size=1)
 
         rospy.loginfo(
             "Number of particles for the Bayes Filter: %d", self.particles.shape[0]
@@ -129,14 +133,19 @@ class Guidance:
         )
 
         self.update_msg = Bool()
-        if t - self.time_reset - self.initial_time > self.measurement_update_time:
+        updt_time = t - self.time_reset - self.initial_time
+        #print("reset time: ", reset_time)
+        if updt_time > self.measurement_update_time:
             # update particles every measurement_update_time seconds
-            self.time_reset = t
-            rospy.loginfo("Updating weight of particles")
-            self.prev_weights = np.copy(self.weights)
-            self.weights = self.update(
-                self.weights, self.particles, self.noisy_turtle_pose
-            )
+            self.time_reset = t - self.initial_time
+            #rospy.loginfo("Updating weight of particles")
+            #if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
+            if True:
+                self.prev_weights = np.copy(self.weights)
+                self.weights = self.update(
+                    self.weights, self.particles, self.noisy_turtle_pose
+                )
+
             self.update_msg.data = True
         else:
             self.update_msg.data = False  # no update
@@ -144,7 +153,7 @@ class Guidance:
         # print('check1')
         self.Neff = self.neff(self.weights)
         if self.Neff < self.N / 2 and self.update_msg.data:
-            if self.Neff < self.N / 50:
+            if self.Neff < self.N / 100:
                 # particles are basically lost, reinitialize
                 rospy.logwarn("Uniformly resampling particles")
                 self.particles = np.random.uniform(
@@ -167,61 +176,96 @@ class Guidance:
             self.estimate()
             self.pub_pf()
 
+    def current_entropy(self):
+        # print("check2")
+        now = rospy.get_time() - self.initial_time
+        # Entropy of current distribution
+        if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
+            self.H_t = self.entropy_particle(
+                self.prev_particles,
+                np.copy(self.prev_weights),
+                self.particles,
+                np.copy(self.weights),
+                self.noisy_turtle_pose,
+            )
+        else: 
+            self.H_t = self.entropy_particle(
+                self.prev_particles,
+                np.copy(self.weights), # current weights are the (t-1) weights because no update
+                self.particles,
+            )
+
+        entropy_time = rospy.get_time() - self.initial_time
+        #print("Entropy time: ", entropy_time - now)
+
+
     def information_driven_guidance(
         self,
     ):
         """Compute the current entropy and future entropy using particles
         to then compute the expected entropy reduction (EER) over predicted
         measurements. The next action is the one that minimizes the EER.
+        Output:
+        goal_position: the position of the measurement that resulted in the 
+        maximum EER
         """
-        # print("check2")
         now = rospy.get_time() - self.initial_time
-        # Entropy of current distribution
-        # TODO: consider only updating this when there is an update
-        self.H = self.entropy_particle(
-            self.prev_particles,
-            self.prev_weights,
-            self.particles,
-            self.weights,
-            self.noisy_turtle_pose,
-        )
-        entropy_time = rospy.get_time() - self.initial_time
-        print("Entropy time: ", entropy_time - now)
-
         # print('check3')
         ## Guidance
-        future_weight = np.zeros((self.N, self.N_m))
-        H1 = np.zeros(self.N_m)
-        I = np.zeros(self.N_m)
+        future_weight = np.zeros((self.N, self.N_s))
+        H1 = np.zeros(self.N_s)
+        I = np.zeros(self.N_s)
 
-        future_part, self.last_future_time  = self.predict(self.particles,
-                       self.prev_particles, self.weights, self.last_future_time)
-        # Future measurement
-        candidates_index = np.random.choice(a=self.N, size=self.N_m,
-                                                        p=None)
-        #update_index = self.is_in_FOV(self.particles)
+        prev_future_parts = np.copy(self.prev_particles)
+        future_parts = np.copy(self.particles)
+        last_future_time = np.copy(self.last_time)
+        for k in range(self.k):
+            future_parts, last_future_time  = self.predict(future_parts,
+                           prev_future_parts, self.weights, last_future_time+0.1)
+        # Future measurements
+        prob = np.nan_to_num(self.weights, copy=True, nan=0)
+        prob = prob / np.sum(prob)
+        candidates_index = np.random.choice(a=self.N, size=self.N_s,
+                                           p=prob)  # right now the new choice is uniform  
         # Future possible measurements
+        # TODO: implement N_m sampled measurements 
         z_hat = self.add_noise(
-                future_part[candidates_index], self.measurement_covariance)
-        if self.update_msg.data:
-            for jj in range(self.N_m):
+                future_parts[candidates_index], self.measurement_covariance)
+        # TODO: implement N_m sampled measurements (double loop) 
+        for jj in range(self.N_s):
+            k_fov = self.construct_FOV(z_hat[jj])
+            # currently next if statement will always be true
+            # N_m implementation will change this by 
+            # checking for measrement outside of fov
+            if self.is_in_FOV(z_hat[jj], k_fov):
+                # TODO: read Janes math to see exactly how EER is computed
+                # the expectation can be either over all possible measurements
+                # or over only the measurements from each sampled particle (1 in this case)
                 future_weight[:,jj] = self.update(self.weights,
-                                        future_part, z_hat[jj])
-                # H(x_{t+1} | \hat{z}_{t+1})
-                H1[jj] = self.entropy_particle(self.particles, self.weights,
-                            future_part, future_weight[:,jj], z_hat[jj])
-                # Information Gain
-                I[jj] = self.H - H1[jj]
+                                        future_parts, z_hat[jj])
+            # H (x_{t+k} | \hat{z}_{t+k})
+            # TODO: figure out how to prevent weights from changing inseide this function
+            H1[jj] = self.entropy_particle(self.particles, np.copy(self.weights),
+                        future_parts, future_weight[:,jj], z_hat[jj])
+            # Information Gain
+            I[jj] = self.H_t - H1[jj]
 
-            EER = I.mean()
-            if False:
-                print("H: ", self.H)
-                print("H1: ", H1)
-                print("I: ", I)
-                print("EER: %f" % EER)
+        # EER = I.mean() # implemented when N_m is implemented
+        if False:
+            print("H: ", self.H_t)
+            print("H1: ", H1)
+            print("I: ", I)
+            print("EER: %f" % EER)
 
-                print("\n")
-            print("EER Time: ", rospy.get_time() - self.initial_time - entropy_time)
+            print("\n")
+        print("EER Time: ", rospy.get_time() - self.initial_time - now)
+
+        action_index = np.argmax(I)
+
+        #print("possible actions: ", z_hat[:, :2])
+        #print("information gain: ", I)
+        #print("Chosen action:", z_hat[action_index, :2])
+        return z_hat[action_index][:2] 
 
     def predict(self, particles, prev_particles, weights, last_time):
         """Uses the process model to propagate the belief in the system state.
@@ -304,18 +348,34 @@ class Guidance:
         weights = weights / np.sum(weights) if np.sum(weights) > 0 else weights
         return weights
 
-    def is_in_FOV(self, sparticles):
+    def is_in_FOV(self, sparticle, fov)-> bool: 
         """Check if the particles are in the FOV of the camera.
-        Input: State of the particles
-        Output: Index of the particles in the FOV
+        Input: Particle, FOV 
+        Output: Boolean, True if the particle is in the FOV, False otherwise 
         """
-        is_inside = np.logical_and(
-            sparticles[:, 0] > self.FOV[0],
-            sparticles[:, 0] < self.FOV[1],
-            sparticles[:, 1] > self.FOV[2],
-            sparticles[:, 1] < self.FOV[3],
+        return np.all([
+            sparticle[0] > fov[0],
+            sparticle[0] < fov[1],
+            sparticle[1] > fov[2],
+            sparticle[1] < fov[3],
+        ])
+    
+    def construct_FOV(self, fov_center=np.array([0, 0]))->np.ndarray:
+        """ Construct the FOV of the camera given the center 
+        of the FOV and the dimensions of the FOV
+        Input: Center of the FOV
+        Output: FOV dimensions in the form (x_min, x_max, y_min, y_max)
+        """
+        fov = np.array(
+            [
+                fov_center[0] - self.FOV_dims[0] / 2,
+                fov_center[0] + self.FOV_dims[0] / 2,
+                fov_center[1] - self.FOV_dims[1] / 2,
+                fov_center[1] + self.FOV_dims[1] / 2,
+            ]
         )
-        return is_inside
+        return fov
+
 
     def get_weight(self, particles, y_act, weight):
         """Particles that are closer to the noisy measurements are weighted higher than
@@ -339,7 +399,7 @@ class Guidance:
         #    weight[ii] = weight[ii] * np.exp(like)
 
         # Method 2: Vectorized using scipy.stats
-        weight *= stats.multivariate_normal.pdf(
+        weight = weight * stats.multivariate_normal.pdf(
             x=particles, mean=y_act, cov=self.measurement_covariance
         )
         return weight
@@ -402,62 +462,87 @@ class Guidance:
         """
         return 1.0 / np.sum(np.square(weights))
 
-    def entropy_particle(self, prev_particles, prev_weights, particles, weights, y_act):
+    def entropy_particle(self, prev_particles, prev_wgts, particles, wgts=np.array([]), y_meas=np.array([])):
         """Compute the entropy of the particle distribution based on the equation in the
         paper: Y. Boers, H. Driessen, A. Bagchi, and P. Mandal, 'Particle filter based entropy'
+        There are two computations, one for the case where the measurement is inside the fov
+        and there is an update step before, and one where the measurement is outside the fov. 
+        Ouput: entropy: numpy.int64 
         """
-        process_part_like = np.zeros(self.N)
-        # likelihoof of measurement p(zt|xt)
-        like_meas = stats.multivariate_normal.pdf(
-            x=particles, mean=y_act, cov=self.measurement_covariance
-        )
-
-        # likelihood of particle p(xt|xt-1)
-        for ii in range(self.N):
-            # maybe kinematics with gaussian
-            # maybe get weight wrt to previous state (distance)
-            like_particle = stats.multivariate_normal.pdf(
-                x=prev_particles, mean=particles[ii, :], cov=self.proces_covariance
+        if wgts.size > 0: 
+            # likelihoof of measurement p(zt|xt)
+            # (how likely is each of the particles in the gaussian of the measurement)
+            like_meas = stats.multivariate_normal.pdf(
+                x=particles, mean=y_meas, cov=self.measurement_covariance
             )
-            process_part_like[ii] = np.sum(like_particle)
 
-        # Numerical stability
-        cutoff = 1e-4
-        like_meas[like_meas < cutoff] = np.nan
-        prev_weights[prev_weights < cutoff] = np.nan
-        # remove the nans from the likelihoods
-        # like_meas = like_meas[~np.isnan(like_meas)]
-        process_part_like[process_part_like < cutoff] = np.nan
-        product = like_meas * prev_weights
-        notnans = product[~np.isnan(product)]
-        notnans[notnans < cutoff * 0.01] = np.nan
-        product[~np.isnan(product)] = notnans
-        first_term = np.log(np.nansum(product))
-        first_term = first_term if np.isfinite(first_term) else 0.0
-        # second_term = np.nansum(np.log(prev_weights)*weights)
-        # third_term = np.nansum(weights*np.log(like_meas))
-        # fourth_term = np.nansum(weights*np.log(process_part_like))
+            # likelihood of particle p(xt|xt-1)
+            process_part_like = np.zeros(self.N)
+            for ii in range(self.N):
+                # maybe kinematics with gaussian
+                # maybe get weight wrt to previous state (distance)
+                like_particle = stats.multivariate_normal.pdf(
+                    x=prev_particles, mean=particles[ii, :], cov=self.proces_covariance
+                )
+                # TODO: investigate if I need to multiply this by prev_wgts
+                process_part_like[ii] = np.sum(like_particle)  
 
-        entropy = (
-            first_term
-            - np.nansum(np.log(prev_weights) * weights)
-            - np.nansum(weights * np.log(like_meas))
-            - np.nansum(weights * np.log(process_part_like))
-        )
+            # Numerical stability
+            cutoff = 1e-4
+            like_meas[like_meas < cutoff] = np.nan
+            prev_wgts[prev_wgts < cutoff] = np.nan
+            # remove the nans from the likelihoods
+            # like_meas = like_meas[~np.isnan(like_meas)]
+            process_part_like[process_part_like < cutoff] = np.nan
+            product = like_meas * prev_wgts
+            notnans = product[~np.isnan(product)]
+            notnans[notnans < cutoff * 0.01] = np.nan
+            product[~np.isnan(product)] = notnans
+            first_term = np.log(np.nansum(product))
+            first_term = first_term if np.isfinite(first_term) else 0.0
+            # second_term = np.nansum(np.log(prev_wgts)*weights)
+            # third_term = np.nansum(weights*np.log(like_meas))
+            # fourth_term = np.nansum(weights*np.log(process_part_like))
 
-        if np.abs(entropy) > 30:
-            print("first term: ", np.log(np.nansum(like_meas * prev_weights)))
-            print("second term: ", np.nansum(np.log(prev_weights) * weights))
-            print("third term: ", np.nansum(weights * np.log(like_meas)))
-            print("fourth term: ", np.nansum(weights * np.log(process_part_like)))
-            # print('like_meas min: ', like_meas.min())
-            # print('like_meas max: ', like_meas.max())
-            # print('like_meas mean: ', like_meas.mean())
-            # print('like_meas std: ', like_meas.std())
+            entropy = (
+                first_term
+                - np.nansum(np.log(prev_wgts) * wgts)
+                - np.nansum(wgts * np.log(like_meas))
+                - np.nansum(wgts * np.log(process_part_like))
+            )
+    
+            if np.abs(entropy) > 30:
+                print("first term: ", np.log(np.nansum(like_meas * prev_wgts)))
+                print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
+                print("third term: ", np.nansum(wgts * np.log(like_meas)))
+                print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
+                # print('like_meas min: ', like_meas.min())
+                # print('like_meas max: ', like_meas.max())
+                # print('like_meas mean: ', like_meas.mean())
+                # print('like_meas std: ', like_meas.std())
+    
+                # print if first term is -inf
+                if np.isinf(np.log(np.nansum(like_meas * prev_wgts))):
+                    rospy.logwarn("first term of entropy is -inf. Likelihood is very small")
+        else:
+            # likelihood of particle p(xt|xt-1)
+            process_part_like = np.zeros(self.N)
+            for ii in range(self.N):
+                # maybe kinematics with gaussian
+                # maybe get weight wrt to previous state (distance)
+                like_particle = stats.multivariate_normal.pdf(
+                    x=prev_particles, mean=particles[ii, :], cov=self.proces_covariance
+                )
+                process_part_like[ii] = np.sum(like_particle*prev_wgts)
 
-            # print if first term is -inf
-            if np.isinf(np.log(np.nansum(like_meas * prev_weights))):
-                rospy.logwarn("first term of entropy is -inf. Likelihood is very small")
+            # Numerical stability
+            cutoff = 1e-4
+            process_part_like[process_part_like < cutoff] = np.nan
+            prev_wgts[prev_wgts < cutoff] = np.nan
+
+            entropy = (
+                - np.nansum(prev_wgts * np.log(process_part_like))
+            )
 
         return np.clip(entropy, -20, 1000)
 
@@ -527,18 +612,14 @@ class Guidance:
         if self.init_finished:
             self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])
             # self.quad_yaw = self.euler_from_quaternion(msg.pose.orientation)[2]  # TODO: unwrap message before function
-            self.FOV = np.array(
-                [
-                    self.quad_position[0] - self.FOV_dims[0] / 2,
-                    self.quad_position[0] + self.FOV_dims[0] / 2,
-                    self.quad_position[1] - self.FOV_dims[1] / 2,
-                    self.quad_position[1] + self.FOV_dims[1] / 2,
-                ]
-            )
+            self.quad_position[1] = -self.quad_position[1] if not self.is_info_guidance else self.quad_position[1]
+            self.FOV = self.construct_FOV(self.quad_position) 
             # now = rospy.get_time() - self.initial_time
             self.particle_filter()
             # print("particle filter time: ", rospy.get_time() - self.initial_time - now)
-            self.information_driven_guidance()
+            self.current_entropy()
+            if self.update_msg.data:
+                self.goal_position = self.information_driven_guidance()
 
             self.pub_desired_state()
 
@@ -552,8 +633,12 @@ class Guidance:
                     ds.position_valid = False
                     ds.velocity_valid = True
                 else:
-                    ds.pose.x = self.turtle_pose[0]
-                    ds.pose.y = -self.turtle_pose[1]
+                    if self.is_info_guidance:
+                        ds.pose.x = self.goal_position[0]
+                        ds.pose.y = self.goal_position[1]
+                    else:
+                        ds.pose.x = self.weighted_mean[0]
+                        ds.pose.y = -self.weighted_mean[1]
                     ds.pose.yaw = 1.571  # 90 degrees
                     ds.position_valid = True
                     ds.velocity_valid = False
@@ -568,7 +653,7 @@ class Guidance:
             if self.is_sim:
                 # Entropy pub
                 entropy_msg = Float32()
-                entropy_msg.data = self.H
+                entropy_msg.data = self.H_t
                 self.entropy_pub.publish(entropy_msg)
 
     def pub_pf(self):
@@ -591,6 +676,7 @@ class Guidance:
         # Particle pub
         self.particle_pub.publish(mean_msg)
         self.err_estimate_pub.publish(err_msg)
+        # TODO: change publisher to service
         self.update_pub.publish(self.update_msg)
         # FOV pub
         fov_msg = Float32MultiArray()
@@ -604,10 +690,22 @@ class Guidance:
             ]
         )
         fov_msg.data = fov_matrix.flatten("C")
-        # Number of effective particles pub
         self.fov_pub.publish(fov_msg)
-        neff_msg = Float32()
-        neff_msg.data = self.Neff
+        self.des_fov = self.construct_FOV(self.goal_position) 
+        des_fov_matrix = np.array(
+            [
+                [self.des_fov[0], self.des_fov[2]],
+                [self.des_fov[0], self.des_fov[3]],
+                [self.des_fov[1], self.des_fov[3]],
+                [self.des_fov[1], self.des_fov[2]],
+                [self.des_fov[0], self.des_fov[2]],
+            ]
+        )
+        fov_msg.data = des_fov_matrix.flatten("C")
+        self.des_fov_pub.publish(fov_msg)
+        # Number of effective particles pub
+        neff_msg = Float32MultiArray()
+        neff_msg.data = np.array([self.Neff])
         self.n_eff_pub.publish(neff_msg)
 
 
