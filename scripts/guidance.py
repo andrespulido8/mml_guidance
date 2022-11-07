@@ -29,8 +29,7 @@ class Guidance:
 
         ## PARTICLE FILTER  ##
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
-        # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        self.AVL_dims = np.array([[-0.6, -1.6], [2.6, 1.6]])  # road network outline
+
         # number of particles
         self.N = 500
         # Number of future measurements per sampled particle to consider in EER
@@ -83,19 +82,8 @@ class Guidance:
             self.rc_sub = rospy.Subscriber("rc_raw", RCRaw, self.rc_cb, queue_size=1)
 
         if self.is_viz:
-            # Particle filter ROS stuff
-            self.particle_pub = rospy.Publisher(
-                "xyTh_estimate", ParticleMean, queue_size=1
-            )
-            self.err_estimate_pub = rospy.Publisher(
-                "err_estimate", PointStamped, queue_size=1
-            )
             self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
-            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32MultiArray, queue_size=1)
-            self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
-            self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
-            self.des_fov_pub = rospy.Publisher("des_fov_coord", Float32MultiArray, queue_size=1)
-
+            
         rospy.loginfo(
             "Number of particles for the Bayes Filter: %d", self.particles.shape[0]
         )

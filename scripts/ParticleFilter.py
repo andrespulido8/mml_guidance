@@ -28,7 +28,7 @@ class ParticleFilter():
         self.initial_time = time.time()
         self.last_time = 0.
         self.time_reset = 0.
-        self.measurement_update_time = 5.0
+        self.measurement_update_time = 0.5
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.measurement_covariance = np.array(
@@ -43,6 +43,20 @@ class ParticleFilter():
 
         self.turtle_pose = np.array([0., 0., 0.])
         self.udpate_msg = Bool()
+        if self.is_viz:
+            # Particle filter ROS stuff
+            self.particle_pub = rospy.Publisher(
+                "xyTh_estimate", ParticleMean, queue_size=1
+            )
+            self.err_estimate_pub = rospy.Publisher(
+                "err_estimate", PointStamped, queue_size=1
+            )
+
+        self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32MultiArray, queue_size=1)
+        self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
+        self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
+        self.des_fov_pub = rospy.Publisher("des_fov_coord", Float32MultiArray, queue_size=1)
+
         
 
     def pf_loop(self):
