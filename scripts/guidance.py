@@ -612,7 +612,7 @@ class Guidance:
         if self.init_finished:
             self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])
             # self.quad_yaw = self.euler_from_quaternion(msg.pose.orientation)[2]  # TODO: unwrap message before function
-            self.quad_position[1] = -self.quad_position[1] if not self.is_info_guidance else self.quad_position[1]
+            #self.quad_position[1] = -self.quad_position[1] if not self.is_info_guidance else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position) 
             # now = rospy.get_time() - self.initial_time
             self.particle_filter()
@@ -635,7 +635,7 @@ class Guidance:
                 else:
                     if self.is_info_guidance:
                         ds.pose.x = self.goal_position[0]
-                        ds.pose.y = self.goal_position[1]
+                        ds.pose.y = -self.goal_position[1]
                     else:
                         ds.pose.x = self.weighted_mean[0]
                         ds.pose.y = -self.weighted_mean[1]
