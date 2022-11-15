@@ -16,6 +16,7 @@ class MarkovChain:
         self.init_time = np.array(rospy.get_time())
         self.prev_goal = 0
         self.prev_mult = 0
+        self.position = np.array([0, 0])
 
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node")
@@ -94,6 +95,10 @@ class MarkovChain:
             }
         )  # 180 degrees orientation
 
+        # transition matrix:
+        # prob og going from state i to state j 
+        # in the goal_list states where i is the 
+        # row and j is the column
         self.trans_matrix = np.array(
             [
                 [0.0, 1.0, 0.0, 0.0, 0.0],
@@ -107,11 +112,10 @@ class MarkovChain:
     def odom_cb(self, msg):
         self.position = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
 
-    # self.position = np.array([msg.pose.position.x, msg.pose.position.y])
-
     def pub_goal_pose(self):
         """Publishes a goal pose after the goal is reached within tolerance_radius"""
-        if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
+        goal_pose = self.goal_list[self.prev_goal]
+        if np.linalg.norm(self.position - np.array([goal_pose['x'], goal_pose['y']])) < self.tolerance_radius:
             self.prev_goal = np.random.choice(len(self.goal_list), p=self.trans_matrix[self.prev_goal])
 
             goal_pose = self.goal_list[self.prev_goal]
@@ -120,9 +124,9 @@ class MarkovChain:
                     goal_pose["x"], goal_pose["y"], self.prev_goal
                 )
             )
-        ## Publish the goal pose
-        #self.create_pose_msg(goal_pose)
-        ## Restart previous values
+        # Publish the goal pose
+        self.create_pose_msg(goal_pose)
+        # Restart previous values
         #self.prev_goal = curr_goal
         #self.prev_mult = mult
 
