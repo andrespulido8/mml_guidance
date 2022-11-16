@@ -39,7 +39,7 @@ class MarkovChain:
 
         z = 0  # turtlebot on the ground
         qx = qy = 0  # no roll or pitch
-        k = 1.25  # Multiplier  change this to make square bigger or smaller
+        k = 0.8  # Multiplier  change this to make square bigger or smaller
         x_offset = -1.25  # change this to not crash to the net
         y_offset = 0.2
         self.goal_list.append(
