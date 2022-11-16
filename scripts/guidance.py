@@ -418,7 +418,7 @@ class Guidance:
                 else:
                     if self.is_info_guidance:
                         ds.pose.x = self.goal_position[0]
-                        ds.pose.y = self.goal_position[1]
+                        ds.pose.y = -self.goal_position[1]
                     else:
                         ds.pose.x = self.weighted_mean[0]
                         ds.pose.y = -self.weighted_mean[1]
@@ -433,7 +433,7 @@ class Guidance:
                 ds.velocity_valid = False
             ds.pose.z = -self.height
             self.pose_pub.publish(ds)
-            if self.is_sim:
+            if self.is_sim and self.is_viz:
                 # Entropy pub
                 entropy_msg = Float32()
                 entropy_msg.data = self.H_t
