@@ -1,26 +1,34 @@
 #!/usr/bin/env python
-from fileinput import filename
-
 import numpy as np
 import rospy
 from geometry_msgs.msg import Pose, PoseStamped
+from nav_msgs.msg import Odometry
 
 
 class MarkovChain:
     def __init__(self):
-        self.n_states = 5
+        self.is_time_mode = (
+            True  # Change this to False if you want to use distance mode
+        )
 
-        self.tolerance_radius = 0.1
+        self.tolerance_radius = 0.2  # meters
 
         # self.visited_states = np.zeros(self.n_states)
         self.init_time = np.array(rospy.get_time())
-        self.prev_goal = 0
+        self.prev_goal_in = 0
         self.prev_mult = 0
         self.position = np.array([0, 0])
+        self.check_dist = True
 
         # ROS stuff
-        rospy.loginfo("Initializing markov_goal_pose node")
+        self.is_sim = rospy.get_param("/is_sim", False)
+        rospy.loginfo(
+            f"Initializing markov_goal_pose node with parameter is_sim: {self.is_sim}"
+        )
         self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
+        self.turtle_odom_sub = rospy.Subscriber(
+            "/robot0/odom", Odometry, self.odom_cb, queue_size=1
+        )
         self.goal_pose_square()
         # self.p = Pose()
         self.p = PoseStamped().pose
@@ -31,8 +39,8 @@ class MarkovChain:
 
         z = 0  # turtlebot on the ground
         qx = qy = 0  # no roll or pitch
-        k = 1.25  # Multiplier  TODO: change this to make square bigger or smaller
-        x_offset = -1.25  # TODO: change this to not crash to the net
+        k = 1.25  # Multiplier  change this to make square bigger or smaller
+        x_offset = -1.25  # change this to not crash to the net
         y_offset = 0.2
         self.goal_list.append(
             {
@@ -94,10 +102,11 @@ class MarkovChain:
                 "qw": 0,
             }
         )  # 180 degrees orientation
+        self.n_states = len(self.goal_list)
 
         # transition matrix:
-        # prob og going from state i to state j 
-        # in the goal_list states where i is the 
+        # prob of going from state i to state j
+        # in the goal_list states where i is the
         # row and j is the column
         self.trans_matrix = np.array(
             [
@@ -110,25 +119,53 @@ class MarkovChain:
         )
 
     def odom_cb(self, msg):
-        self.position = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
+        if self.is_sim:
+            self.position = np.array(
+                [msg.pose.pose.position.x, msg.pose.pose.position.y]
+            )
+        else:
+            self.position = np.array([msg.pose.position.x, msg.pose.position.y])
 
     def pub_goal_pose(self):
         """Publishes a goal pose after the goal is reached within tolerance_radius"""
-        goal_pose = self.goal_list[self.prev_goal]
-        if np.linalg.norm(self.position - np.array([goal_pose['x'], goal_pose['y']])) < self.tolerance_radius:
-            self.prev_goal = np.random.choice(len(self.goal_list), p=self.trans_matrix[self.prev_goal])
+        curr_goal_in = np.copy(self.prev_goal_in)
+        curr_goal_pose = self.goal_list[self.prev_goal_in]
+        if self.is_time_mode:
+            time_step = 10  # amount of seconds until next goal pose change if desired
+            now = rospy.get_time() - self.init_time
+            mult = np.floor(now / time_step)
+            # change goal pose if time is greater than time_step
+            change = True if mult > self.prev_mult else False
 
-            goal_pose = self.goal_list[self.prev_goal]
-            self.create_pose_msg(goal_pose)
-            rospy.logwarn("New goal pose: x={}, y={} with index {}".format(
-                    goal_pose["x"], goal_pose["y"], self.prev_goal
+            if now > 0 and now < time_step:
+                curr_goal_in = 0  # Start at the first state
+            elif change:
+                curr_goal_in = np.random.choice(
+                    np.arange(self.n_states), p=self.trans_matrix[curr_goal_in, :]
+                )
+
+            self.prev_mult = mult
+        else:
+            # print("dist to goal: ", np.linalg.norm(self.position - np.array([goal_pose['x'], goal_pose['y']])))
+            dist_to_goal = np.linalg.norm(
+                self.position - np.array([curr_goal_pose["x"], curr_goal_pose["y"]])
+            )
+            if dist_to_goal < self.tolerance_radius:
+                curr_goal_in = np.random.choice(
+                    np.arange(self.n_states), p=self.trans_matrix[self.prev_goal_in, :]
+                )
+
+        goal_pose = self.goal_list[curr_goal_in]
+        if curr_goal_in != self.prev_goal_in:
+            rospy.logwarn(
+                "New goal pose: x={}, y={} with index {}".format(
+                    goal_pose["x"], goal_pose["y"], curr_goal_in
                 )
             )
+        # Restart previous values
+        self.prev_goal_in = np.copy(curr_goal_in)
         # Publish the goal pose
         self.create_pose_msg(goal_pose)
-        # Restart previous values
-        #self.prev_goal = curr_goal
-        #self.prev_mult = mult
 
     def create_pose_msg(self, goal_pose):
         self.p.position.x = goal_pose["x"]
@@ -145,6 +182,6 @@ if __name__ == "__main__":
     rate = rospy.Rate(10)  # Hz
     square_chain = MarkovChain()
     while not rospy.is_shutdown():
-            square_chain.pub_goal_pose()
-            square_chain.pose_pub.publish(square_chain.p)
-            rate.sleep()
+        square_chain.pub_goal_pose()
+        square_chain.pose_pub.publish(square_chain.p)
+        rate.sleep()
