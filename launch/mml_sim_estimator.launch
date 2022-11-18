@@ -43,6 +43,7 @@
 			<!--<remap from="/tb3_1/target_pose" to="/robot0/goal_pose"/>-->
 		</node>
 		<!-- Launches the turtlebot trajectory generator-->
+		<param name="is_sim" value="$(arg is_simulation)"/>
 		<node pkg="mml_guidance" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
 			<remap from="/goal_pose" to="/robot0/goal_pose"/>
 		</node>

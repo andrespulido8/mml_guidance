@@ -1,50 +1,51 @@
 import numpy as np
-import time # For testing in the absence of rospy.get_time()
-
 import rospy
 from geometry_msgs.msg import PointStamped, PoseStamped
-from std_msgs.msg import Bool, Float32, Float32MultiArray
 from mag_pf_pkg.msg import Particle, ParticleMean
 from scipy import stats
+from std_msgs.msg import Bool, Float32, Float32MultiArray
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
 
-class ParticleFilter():
+
+class ParticleFilter:
     def __init__(self, num_particles=1000):
         self.init_done = False
         deg2rad = lambda deg: np.pi * deg / 180
 
-        self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
         self.AVL_dims = np.array([[-0.75, -1.75], [2.75, 1.75]])  # road network outline
 
         self.N = num_particles
         # uniform distribution of particles (x, y, theta)
         self.particles = np.random.uniform(
-            [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi/10.],
-            [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi/10.],
+            [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi / 10.0],
+            [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi / 10.0],
             (self.N, 3),
         )
         self.prev_particles = np.copy(self.particles)
-        self.initial_time = rospy.get_time()
-        self.last_time = 0.
-        self.time_reset = 0.
-        self.measurement_update_time = 0.5
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.measurement_covariance = np.array(
-            [[0.1, 0., 0.], [0., 0.1, 0.], [0., 0., deg2rad(5)]]
+            [[0.1, 0.0, 0.0], [0.0, 0.1, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.process_covariance = np.array(
-            [[0.02, 0., 0.], [0., 0.02, 0.], [0., 0., deg2rad(5)]]
+            [[0.02, 0.0, 0.0], [0.0, 0.02, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
         self.var = np.diag(self.measurement_covariance)  # variance of particles
 
-        self.turtle_pose = np.array([0., 0., 0.])
+        self.initial_time = rospy.get_time()
+        self.last_time = 0.0
+        self.time_reset = 0.0
+        self.measurement_update_time = 2.0  # seconds
+
+        self.turtle_pose = np.array([0.0, 0.0, 0.0])
         self.udpate_msg = Bool()
+        # ROS
+        self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
         if self.is_viz:
             # Particle filter ROS stuff
             self.particle_pub = rospy.Publisher(
@@ -54,36 +55,41 @@ class ParticleFilter():
                 "err_estimate", PointStamped, queue_size=1
             )
 
-        self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32MultiArray, queue_size=1)
+        self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
         self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
         self.init_done = True
-        
 
-    def pf_loop(self, noisy_measurement):
+    def pf_loop(
+        self,
+        noisy_measurement,
+        ang_vel=np.array([ANG_VEL]),
+        lin_vel=np.array([FWD_VEL]),
+    ):
         """Main function of the particle filter
         where the predict, update, resample, estimate
-        and publish PF values for visualization is done
+        and publish PF values for visualization if needed
         """
         t = rospy.get_time() - self.initial_time
 
-        self.particles, self.last_time = self.predict(self.particles, 
-                self.prev_particles, self.weights, 
-                self.last_time, angular_velocity=np.array([ANG_VEL]), 
-                linear_velocity=np.array([FWD_VEL])
-                )
+        self.particles, self.last_time = self.predict(
+            self.particles,
+            self.prev_particles,
+            self.weights,
+            self.last_time,
+            angular_velocity=ang_vel,
+            linear_velocity=lin_vel,
+        )
 
         self.update_msg = Bool()
-        updt_time = t - self.time_reset 
-        if updt_time  > self.measurement_update_time:
-            self.time_reset = t 
-            #rospy.loginfo("Updating weight of particles")
+        updt_time = t - self.time_reset
+        if updt_time > self.measurement_update_time:
+            self.time_reset = t
+            # rospy.loginfo("Updating weight of particles")
             self.prev_weights = np.copy(self.weights)
-            self.weights = self.update(
-                self.weights, self.particles, noisy_measurement
-            )
-            self.update_msg.data=True
+            self.weights = self.update(self.weights, self.particles, noisy_measurement)
+            self.update_msg.data = True
         else:
-            self.update_msg.data=False
+            self.update_msg.data = False
 
         self.Neff = self.neff(self.weights)
         if self.Neff < self.N / 2 and self.update_msg.data:
@@ -118,14 +124,22 @@ class ParticleFilter():
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) weight of the particles
         """
-        weights *= stats.multivariate_normal.pdf(
+        weights = weights * stats.multivariate_normal.pdf(
             x=particles, mean=noisy_turtle_pose, cov=self.measurement_covariance
         )
 
         weights = weights / np.sum(weights) if np.sum(weights) > 0 else weights
         return weights
 
-    def predict(self, particles, prev_particles, wgts, last_time, angular_velocity, linear_velocity):
+    def predict(
+        self,
+        particles,
+        prev_particles,
+        wgts,
+        last_time,
+        angular_velocity,
+        linear_velocity,
+    ):
         """Uses the process model to propagate the belief in the system state.
         In our case, the process model is the motion of the turtlebot in 2D with added gaussian noise.
         In MML the predict step is a forward pass on the NN.
@@ -158,9 +172,10 @@ class ParticleFilter():
             np.sum(wgts * np.sin(particles[:, 2])),
             np.sum(wgts * np.cos(particles[:, 2])),
         )
-        delta_distance = linear_velocity[0] * dt + linear_velocity[
-            0
-        ] * dt * self.add_noise(0, self.process_covariance[0, 0], size=self.N)
+        norm_lin_vel = np.linalg.norm(linear_velocity)
+        delta_distance = norm_lin_vel * dt + norm_lin_vel * dt * self.add_noise(
+            0, self.process_covariance[0, 0], size=self.N
+        )
         particles[:, :2] = (
             prev_particles[:, :2]
             + np.array(
@@ -171,7 +186,7 @@ class ParticleFilter():
             ).T
         )
 
-        last_time = t - self.initial_time
+        last_time = t
 
         return particles, last_time
 
@@ -224,7 +239,8 @@ class ParticleFilter():
             )
             # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
             self.H_gauss = (
-                np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(self.var))) / 2 )
+                np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(self.var))) / 2
+            )
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
@@ -251,28 +267,28 @@ class ParticleFilter():
         return 1.0 / np.sum(np.square(wgts))
 
     def pub_pf(self):
-        mean_msg = ParticleMean()
-        mean_msg.mean.x = self.weighted_mean[0]
-        mean_msg.mean.y = self.weighted_mean[1]
-        mean_msg.mean.yaw = self.weighted_mean[2]
+        part_msg = ParticleMean()
+        part_msg.mean.x = self.weighted_mean[0]
+        part_msg.mean.y = self.weighted_mean[1]
+        part_msg.mean.yaw = self.weighted_mean[2]
         for ii in range(self.N):
             particle_msg = Particle()
             particle_msg.x = self.particles[ii, 0]
             particle_msg.y = self.particles[ii, 1]
             particle_msg.yaw = self.particles[ii, 2]
             particle_msg.weight = self.weights[ii]
-            mean_msg.all_particle.append(particle_msg)
-        mean_msg.cov = np.diag(self.var).flatten("C")
+            part_msg.all_particle.append(particle_msg)
+        part_msg.cov = np.diag(self.var).flatten("C")
         err_msg = PointStamped()
         err_msg.point.x = self.weighted_mean[0] - self.turtle_pose[0]
         err_msg.point.y = self.weighted_mean[1] - self.turtle_pose[1]
         err_msg.point.z = self.weighted_mean[2] - self.turtle_pose[2]
         # Particle pub
-        self.particle_pub.publish(mean_msg)
+        self.particle_pub.publish(part_msg)
         self.err_estimate_pub.publish(err_msg)
         # TODO: change publisher to service
         self.update_pub.publish(self.update_msg)
         # Number of effective particles pub
-        neff_msg = Float32MultiArray()
-        neff_msg.data = np.array([self.Neff])
+        neff_msg = Float32()
+        neff_msg.data = self.Neff
         self.n_eff_pub.publish(neff_msg)
