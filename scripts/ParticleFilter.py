@@ -5,6 +5,8 @@ from mag_pf_pkg.msg import Particle, ParticleMean
 from scipy import stats
 from std_msgs.msg import Bool, Float32, Float32MultiArray
 
+from mml_network import deploy_mml
+
 FWD_VEL = 0.0
 ANG_VEL = 0.0
 
