@@ -5,16 +5,17 @@ import scipy.stats as stats
 from geometry_msgs.msg import PointStamped, PoseStamped
 from mag_pf_pkg.msg import Particle, ParticleMean
 from nav_msgs.msg import Odometry
-from rosflight_msgs.msg import RCRaw
+
 # from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
+from rosflight_msgs.msg import RCRaw
 from std_msgs.msg import Bool, Float32, Float32MultiArray
 
 
 class Guidance:
     def __init__(self):
         self.init_finished = False
-        self.is_sim = rospy.get_param("/is_sim", False)        
+        self.is_sim = rospy.get_param("/is_sim", False)
         # Initialization of variables
         self.turtle_pose = np.array([0, 0, 0])
         self.quad_position = np.array([0, 0])
@@ -77,7 +78,9 @@ class Guidance:
         self.last_future_time = 0
 
         # ROS stuff
-        rospy.loginfo("Initializing guidance node with parameter is_sim: {}".format(self.is_sim))
+        rospy.loginfo(
+            f"Initializing guidance node with parameter is_sim: {self.is_sim}"
+        )
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
         if self.is_sim:
             self.turtle_odom_sub = rospy.Subscriber(
@@ -320,12 +323,10 @@ class Guidance:
             # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
             # likelihood, but it does not matter since it can be factored
             # and then cancelled out during the normalization.
-            like = (
-                -0.5
-                * np.matmul(np.matmul((particles[ii, :] - y_act) \
-                ,self.noise_inv),  \
-                (particles[ii, :] - y_act))
-                )
+            like = -0.5 * np.matmul(
+                np.matmul((particles[ii, :] - y_act), self.noise_inv),
+                (particles[ii, :] - y_act),
+            )
             weight[ii] = weight[ii] * np.exp(like)
 
             # another way to implement the above line
@@ -502,9 +503,7 @@ class Guidance:
                     self.turtle_pose, self.measurement_covariance
                 )
             else:
-                self.turtle_pose = np.array(
-                    [msg.pose.position.x, msg.pose.position.y]
-                )
+                self.turtle_pose = np.array([msg.pose.position.x, msg.pose.position.y])
                 self.pub_desired_state()
 
     def quad_odom_cb(self, msg):
@@ -525,11 +524,11 @@ class Guidance:
             self.information_driven_guidance()
 
             self.pub_desired_state()
-    
+
     def rc_cb(self, msg):
         if msg.values[6] > 500:
             self.position_following = True
-        else: 
+        else:
             self.position_following = False
 
     def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
@@ -547,7 +546,7 @@ class Guidance:
                     ds.pose.yaw = 1.571  # 90 degrees
                     ds.position_valid = True
                     ds.velocity_valid = False
-            else: 
+            else:
                 ds.pose.x = 0
                 ds.pose.y = 0
                 ds.pose.yaw = 1.571
