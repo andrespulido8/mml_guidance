@@ -22,9 +22,10 @@ class MarkovChain:
 
         # ROS stuff
         self.is_sim = rospy.get_param("/is_sim", False)
-        rospy.loginfo(
-            f"Initializing markov_goal_pose node with parameter is_sim: {self.is_sim}"
-        )
+        #rospy.loginfo(
+        #    f"Initializing markov_goal_pose node with parameter is_sim: {self.is_sim}"
+        #)
+        rospy.loginfo("Initializing markov_goal_pose node with parameter is_sim: " + str(self.is_sim))
         self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
         self.turtle_odom_sub = rospy.Subscriber(
             "/robot0/odom", Odometry, self.odom_cb, queue_size=1
