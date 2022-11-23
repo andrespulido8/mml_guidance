@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from data_functions import get_data, get_batch
-from training_functions import Trainer
-from transformer_functions import TransAm
+from mml_network.data_functions import get_data, get_batch
+#from training_functions import Trainer
+from mml_network.transformer_functions import TransAm
 
 class Motion_Model():
     def __init__(self):
@@ -19,10 +19,10 @@ class Motion_Model():
         self.model.eval()
 
         # This block is only included because I put forecast_seq in the trainer class
-        criterion = nn.MSELoss() # Loss function
-        optimizer = torch.optim.AdamW(model.parameters(), lr=0.)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
-        self.trainer = Trainer(model, optimizer, criterion, scheduler, train_data, input_window, batch_size)
+        #criterion = nn.MSELoss() # Loss function
+        #optimizer = torch.optim.AdamW(model.parameters(), lr=0.)
+        #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
+        #self.trainer = Trainer(model, optimizer, criterion, scheduler, train_data, input_window, batch_size)
 
     def predict(self, particles):
         with torch.no_grad():
