@@ -2,14 +2,14 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from data_functions import get_data
+from data_functions import get_data, get_batch
 from training_functions import Trainer
 from transformer_functions import TransAm
 
 class Motion_Model():
     def __init__(self):
-        input_window = 9 # number of input steps
-        output_window = 1 # number of prediction steps
+        self.input_window = 9 # number of input steps
+        self.output_window = 1 # number of prediction steps
         batch_size = 32
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 
@@ -25,31 +25,9 @@ class Motion_Model():
         self.trainer = Trainer(model, optimizer, criterion, scheduler, train_data, input_window, batch_size)
 
     def predict(self, particles):
-
-        #test_result, truth = trainer.forecast_seq(val_data)
-            def forecast_seq(self, sequences):
-        """Sequences data has to been windowed and passed through device"""
-        start_timer = time.time()
-        self.model.eval() 
-        forecast_seq = torch.empty((0,2))    
-        actual = torch.empty((0,2))
-        batch_size = 100
         with torch.no_grad():
-            #for i in range(0, len(sequences) - 1):
-            for i in range(0, len(sequences)-1,batch_size):
-                data, target = get_batch(sequences, i, batch_size, self.input_window)
-                output = self.model(data)            
-                #forecast_seq = torch.cat((forecast_seq,torch.unsqueeze(output[-1, :,-2:], 0).cpu()), 0)
-                forecast_seq = torch.cat((forecast_seq,output[-1, :,-2:].cpu()), 0)
-                a = len(target.shape)
-                if a == 3:
-                    #actual = torch.cat((actual, torch.unsqueeze(target[-1,:,-2:], 0).cpu()), 0)
-                    actual = torch.cat((actual, target[-1,:,-2:].cpu()), 0)
-                else:
-                    actual = torch.cat((actual, torch.unsqueeze(target[-1,-2:], 0).cpu()), 0)
-                
-        timed = time.time()-start_timer
-        print(f"{timed} sec")
+                output = self.model(particles)            
+                forecast_seq = torch.cat((particles[1,:,:],output[-1, :,:].cpu()), 0)
 
-        return forecast_seq, actual
+        return forecast_seq
         
