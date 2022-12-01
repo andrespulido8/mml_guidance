@@ -1,5 +1,6 @@
 import numpy as np
 import rospy
+import rospkg
 from geometry_msgs.msg import PointStamped, PoseStamped
 from mag_pf_pkg.msg import Particle, ParticleMean
 from scipy import stats
@@ -38,6 +39,9 @@ class ParticleFilter:
             [[0.02, 0.0, 0.0], [0.0, 0.02, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
         self.var = np.diag(self.measurement_covariance)  # variance of particles
+
+        model_file = rospkg.RosPack().get_path('mml_guidance')+'/scripts/mml_network/models/current.pth'
+        self.motion_model = deploy_mml.Motion_Model(model_file)
 
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
