@@ -26,7 +26,7 @@ class Motion_Model():
 
     def predict(self, particles):
         with torch.no_grad():
-                output = self.model(particles[:,:2])            
+                output = self.model(torch.from_numpy(particles[:,:2]).float())
                 forecast_seq = torch.cat((particles[1,:,:],output[-1, :,:].cpu()), 0)
 
         return forecast_seq
