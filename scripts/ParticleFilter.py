@@ -85,7 +85,7 @@ class ParticleFilter:
         #    angular_velocity=ang_vel,
         #    linear_velocity=lin_vel,
         #)
-        self.particles = self.motion_model.predict(self.particles)
+        self.particles[:,:2] = self.motion_model.predict(self.particles)
         rospy.logerr("###\t\t\t\t\t\t" + self.particles.shape)
 
         self.update_msg = Bool()
