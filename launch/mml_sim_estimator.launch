@@ -3,6 +3,8 @@
 	<arg name="is_visualization" default="false"/>
 	<arg name="is_simulation" default="true"/>
 
+    <node name='odom_to_pose_stamped' pkg='sim_helper' type='Odometry_to_PoseStamped.py' output='screen' if='$(arg is_simulation)' />
+
 	<!-- Launches the reef estimator -->
 	<arg name="control_mode" value="altitude_hold"/>
 	<arg name="vehicle" default="sim"/>
