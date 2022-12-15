@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+import csv
 import numpy as np
 import rospy
 import scipy.stats as stats
@@ -38,6 +40,10 @@ class Guidance:
         self.N_s = 10
         # Time steps to propagate in the future for EER
         self.k = 1
+        # initiate entropy
+        self.H_t = 0
+        self.IG_range = np.array([0, 0, 0])
+        self.t_EER = 0
         self.measurement_update_time = 0.5
         # uniform distribution of particles (x, y, theta)
         self.particles = np.random.uniform(
@@ -258,9 +264,11 @@ class Guidance:
             print("EER: %f" % EER)
 
             print("\n")
-        print("EER Time: ", rospy.get_time() - self.initial_time - now)
+        self.t_EER = rospy.get_time() - self.initial_time - now
+        #print("EER Time: ", self.t_EER)
 
         action_index = np.argmax(I)
+        self.IG_range = np.array([np.min(I), np.mean(I), np.max(I)])
 
         #print("possible actions: ", z_hat[:, :2])
         #print("information gain: ", I)
@@ -682,11 +690,11 @@ class Guidance:
         fov_msg = Float32MultiArray()
         fov_matrix = np.array(
             [
-                [self.FOV[0], self.FOV[2]],
-                [self.FOV[0], self.FOV[3]],
-                [self.FOV[1], self.FOV[3]],
-                [self.FOV[1], self.FOV[2]],
-                [self.FOV[0], self.FOV[2]],
+                [self.FOV[0], -self.FOV[2]],
+                [self.FOV[0], -self.FOV[3]],
+                [self.FOV[1], -self.FOV[3]],
+                [self.FOV[1], -self.FOV[2]],
+                [self.FOV[0], -self.FOV[2]],
             ]
         )
         fov_msg.data = fov_matrix.flatten("C")
@@ -708,11 +716,35 @@ class Guidance:
         neff_msg.data = np.array([self.Neff])
         self.n_eff_pub.publish(neff_msg)
 
+        with open('/home/andrespulido/catkin_ws/src/mml_guidance/data/errors.csv', 'a') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([err_msg.point.x, err_msg.point.y,
+                             err_msg.point.z, self.H_t,
+                             self.t_EER, self.IG_range[0],
+                             self.IG_range[1], self.IG_range[2],])
+
+    def shutdown(self, event):
+        # Stop the node when shutdown is called
+        rospy.logfatal("Timer expired. Stopping the node...")
+        rospy.sleep(0.1) 
+        rospy.signal_shutdown("Timer signal shutdown")
+        #os.system("rosnode kill other_node")
+
 
 if __name__ == "__main__":
     try:
         rospy.init_node("guidance", anonymous=True)
-        square_chain = Guidance()
+        guidance = Guidance()
+        rospy.Timer(rospy.Duration(40), guidance.shutdown, oneshot=True)
+        rospy.on_shutdown(guidance.shutdown)
+        working_directory = os.getcwd()
+        #print("Working directory: ", working_directory)
+        # empty the errors file without writing on it
+        with open('/home/andrespulido/catkin_ws/src/mml_guidance/data/errors.csv', 'w') as csvfile:
+            writer = csv.writer(csvfile)
+            # write the first row as the header with the variable names
+            writer.writerow(['X error [m]', 'Y error [m]', 'Yaw error [rad]', 'Entropy',
+                             'EER time', 'min Info Gain', 'Avg Info Gain', 'Max Info gain'])
         rospy.spin()
     except rospy.ROSInterruptException:
         pass
