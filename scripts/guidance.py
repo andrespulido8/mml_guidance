@@ -31,7 +31,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         # number of particles
-        self.N = 10 # 500 # 
+        self.N = 50 # 500 # 
         # Number of future measurements per sampled particle to consider in EER
         self.N_m = 1
         # Number of sampled particles
@@ -256,7 +256,7 @@ class Guidance:
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
                     x=prev_particles,
-                    mean=particles[ii, :],
+                    mean=particles[-1, ii, :],
                     cov=self.filter.process_covariance,
                 )
                 # TODO: investigate if I need to multiply this by prev_wgts
@@ -309,7 +309,7 @@ class Guidance:
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
                     x=prev_particles,
-                    mean=particles[ii, :],
+                    mean=particles[-1, ii, :],
                     cov=self.filter.process_covariance,
                 )
                 process_part_like[ii] = np.sum(like_particle * prev_wgts)
