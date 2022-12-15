@@ -85,8 +85,12 @@ class ParticleFilter:
         #    angular_velocity=ang_vel,
         #    linear_velocity=lin_vel,
         #)
-        self.particles[:,:2] = self.motion_model.predict(self.particles)
-        rospy.logerr("###\t\t\t\t\t\t" + self.particles.shape)
+        # Hack until I can add yaw
+        self.prev_particles = np.copy(self.particles[-1,:,:])
+        returned = self.motion_model.predict(self.particles)
+        a, b, c = returned.shape
+        self.particles = np.zeros((a, b, 3))
+        self.particles[:, :,:2] = returned
 
         self.update_msg = Bool()
         updt_time = t - self.time_reset
