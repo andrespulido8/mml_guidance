@@ -91,17 +91,7 @@ class ParticleFilter:
         #    angular_velocity=ang_vel,
         #    linear_velocity=lin_vel,
         #)
-        # Hack until I can add yaw
-        self.prev_particles = np.copy(self.particles[-1,:,:])
-        returned = self.motion_model.predict(self.particles)
-        a, b, c = returned.shape
-        self.particles = np.zeros((a, b, 3))
-        self.particles[:, :,:2] = returned
-
-        self.yaw_mean = self.yaw_mean = np.arctan2(
-            np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
-            np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
-        )
+        self.predict_mml()
 
         self.update_msg = Bool()
         updt_time = t - self.time_reset
@@ -153,6 +143,19 @@ class ParticleFilter:
 
         weights = weights / np.sum(weights) if np.sum(weights) > 0 else weights
         return weights
+
+    def predict_mml(self):
+        # Hack until I can add yaw
+        self.prev_particles = np.copy(self.particles[-1,:,:])
+        returned = self.motion_model.predict(self.particles)
+        a, b, c = returned.shape
+        self.particles = np.zeros((a, b, 3))
+        self.particles[:, :,:2] = returned
+
+        self.yaw_mean = self.yaw_mean = np.arctan2(
+            np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
+            np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
+        )
 
     def predict(
         self,
