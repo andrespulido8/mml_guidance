@@ -148,7 +148,7 @@ class ParticleFilter:
         Output: Updated (posterior) weight of the particles
         """
         weights = weights * stats.multivariate_normal.pdf(
-            x=particles, mean=noisy_turtle_pose, cov=self.measurement_covariance
+            x=particles[-1,:,:], mean=noisy_turtle_pose, cov=self.measurement_covariance
         )
 
         weights = weights / np.sum(weights) if np.sum(weights) > 0 else weights
@@ -226,27 +226,27 @@ class ParticleFilter:
             else self.weights
         )
         indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
-        self.particles = self.particles[indexes]
+        self.particles = self.particles[:,indexes,:]
         self.weights = self.weights[indexes]
         # Roughening. See Bootstrap Filter from Crassidis and Junkins.
         G = 0.2
         E = np.array([0, 0, 0])
         for ii in range(self.turtle_pose.shape[0]):
-            E[ii] = np.max(self.particles[ii, :]) - np.min(self.particles[ii, :])
+            E[ii] = np.max(self.particles[-1, ii, :]) - np.min(self.particles[ii, :])
         cov = (G * E * self.N ** (-1 / 3)) ** 2
         P_sigmas = np.diag(cov)
 
         for ii in range(self.N):
-            self.particles[ii, :] = self.add_noise(self.particles[ii, :], P_sigmas)
+            self.particles[-1, ii, :] = self.add_noise(self.particles[-1, ii, :], P_sigmas)
 
     def estimate(self):
         """returns mean and variance of the weighted particles"""
         if np.sum(self.weights) > 0.0:
             self.weighted_mean = np.append(
-                np.average(self.particles[:, :2], weights=self.weights, axis=0),
+                np.average(self.particles[-1, :, :2], weights=self.weights, axis=0),
                 self.yaw_mean,
             )
-            angle_diff = self.particles[:, 2] - self.weighted_mean[2]
+            angle_diff = self.particles[-1, :, 2] - self.weighted_mean[2]
             angle_diff_sq = ((angle_diff + np.pi) % (2 * np.pi) - np.pi) ** 2
             yaw_var = np.arctan2(
                 np.sum(self.weights * np.sin(angle_diff_sq)),
@@ -254,7 +254,7 @@ class ParticleFilter:
             )
             self.var = np.append(
                 np.average(
-                    (self.particles[:, :2] - self.weighted_mean[:2]) ** 2,
+                    (self.particles[-1,:, :2] - self.weighted_mean[:2]) ** 2,
                     weights=self.weights,
                     axis=0,
                 ),
@@ -296,9 +296,9 @@ class ParticleFilter:
         part_msg.mean.yaw = self.weighted_mean[2]
         for ii in range(self.N):
             particle_msg = Particle()
-            particle_msg.x = self.particles[ii, 0]
-            particle_msg.y = self.particles[ii, 1]
-            particle_msg.yaw = self.particles[ii, 2]
+            particle_msg.x = self.particles[-1, ii, 0]
+            particle_msg.y = self.particles[-1, ii, 1]
+            particle_msg.yaw = self.particles[-1, ii, 2]
             particle_msg.weight = self.weights[ii]
             part_msg.all_particle.append(particle_msg)
         part_msg.cov = np.diag(self.var).flatten("C")
