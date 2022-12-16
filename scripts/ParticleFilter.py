@@ -33,6 +33,12 @@ class ParticleFilter:
         self.measurement_covariance = np.array(
             [[0.1, 0.0, 0.0], [0.0, 0.1, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
+
+        self.yaw_mean = self.yaw_mean = np.arctan2(
+            np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
+            np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
+        )
+
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.process_covariance = np.array(
@@ -91,6 +97,11 @@ class ParticleFilter:
         a, b, c = returned.shape
         self.particles = np.zeros((a, b, 3))
         self.particles[:, :,:2] = returned
+
+        self.yaw_mean = self.yaw_mean = np.arctan2(
+            np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
+            np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
+        )
 
         self.update_msg = Bool()
         updt_time = t - self.time_reset
