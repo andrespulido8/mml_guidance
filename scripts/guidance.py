@@ -137,14 +137,15 @@ class Guidance:
         future_parts = np.copy(self.filter.particles)
         last_future_time = np.copy(self.last_time)
         for k in range(self.k):
-            future_parts, last_future_time = self.filter.predict(
-                future_parts,
-                prev_future_parts,
-                self.filter.weights,
-                last_future_time + 0.1,
-                angular_velocity=self.angular_velocity,
-                linear_velocity=self.linear_velocity,
-            )
+            future_parts = self.filter.motion_model.predict(future_parts)
+            #future_parts, last_future_time = self.filter.predict(
+            #    future_parts,
+            #    prev_future_parts,
+            #    self.filter.weights,
+            #   last_future_time + 0.1,
+            #    angular_velocity=self.angular_velocity,
+            #    linear_velocity=self.linear_velocity,
+            #)
         # Future measurements
         prob = np.nan_to_num(self.filter.weights, copy=True, nan=0)
         prob = prob / np.sum(prob)
