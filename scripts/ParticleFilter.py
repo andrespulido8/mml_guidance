@@ -145,12 +145,7 @@ class ParticleFilter:
         return weights
 
     def predict_mml(self):
-        # Hack until I can add yaw
-        self.prev_particles = np.copy(self.particles[-1,:,:])
-        returned = self.motion_model.predict(self.particles)
-        a, b, c = returned.shape
-        self.particles = np.zeros((a, b, 3))
-        self.particles[:, :,:2] = returned
+        self.particles[:, :,:2] = self.motion_model.predict(self.particles)
 
         self.yaw_mean = self.yaw_mean = np.arctan2(
             np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
