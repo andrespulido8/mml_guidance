@@ -31,7 +31,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         # number of particles
-        self.N = 50 # 500 # 
+        self.N = 250 # 500 # 
         # Number of future measurements per sampled particle to consider in EER
         self.N_m = 1
         # Number of sampled particles
@@ -155,7 +155,7 @@ class Guidance:
         # Future possible measurements
         # TODO: implement N_m sampled measurements
         z_hat = self.filter.add_noise(
-            future_parts[candidates_index], self.filter.measurement_covariance
+            future_parts[-1,candidates_index,:], self.filter.measurement_covariance
         )
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):

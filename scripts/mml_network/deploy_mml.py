@@ -26,8 +26,8 @@ class Motion_Model():
 
     def predict(self, particles):
         with torch.no_grad():
-            output = self.model(torch.from_numpy(particles[:,: ,:2]).float())
-            forecast_seq = np.concatenate((particles[-9:,:,:2],np.reshape(output[-1, :,:].cpu().numpy(), (1,-1,2))), 0)
+            output = self.model(torch.from_numpy(particles[:, :, :]).float())
+            forecast_seq = np.concatenate((particles[-9:,:,:],np.reshape(output[-1, :,:].cpu().numpy(), (1,-1,3))), 0)
 
         return forecast_seq
         
