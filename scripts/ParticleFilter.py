@@ -13,7 +13,7 @@ ANG_VEL = 0.0
 
 
 class ParticleFilter:
-    def __init__(self, num_particles=1000):
+    def __init__(self, num_particles=10):
         self.init_done = False
         deg2rad = lambda deg: np.pi * deg / 180
 
