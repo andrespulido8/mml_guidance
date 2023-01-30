@@ -27,7 +27,7 @@ class TransAm(nn.Module):
         self.embed = nn.Linear(in_dim, feature_size)
         self.pos_encoder = PositionalEncoding(feature_size)
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=feature_size, nhead=16, dropout=dropout)
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)        
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)
         self.decoder = nn.Linear(feature_size, in_dim)
         self.init_weights()
 
@@ -42,10 +42,10 @@ class TransAm(nn.Module):
             mask = self._generate_square_subsequent_mask(len(src)).to(device)
             self.src_mask = mask
 
-        src = self.embed(src)
-        src = self.pos_encoder(src)
-        output = self.transformer_encoder(src,self.src_mask)
-        output = self.decoder(output)
+        src = self.embed.to(src.device)(src)
+        src = self.pos_encoder.to(src.device)(src)
+        output = self.transformer_encoder.to(src.device)(src,self.src_mask)
+        output = self.decoder.to(src.device)(output)
         return output
 
     def _generate_square_subsequent_mask(self, sz):
