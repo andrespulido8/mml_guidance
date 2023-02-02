@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """script that opens a csv file, converts each columns to a numpy array,
-   takes the root mean square of each column and prints the result"""
+   takes the root mean square of each column and prints the result
+   Run the script once to create the file data_<date and time>.csv"""
 import os
 import shutil
 import numpy as np
@@ -24,7 +25,7 @@ def main():
         print("Names: ", names)
         for i in range(len(names)):
             print(names[i], ": ", round(rms[i],2))
-        plot_data(data, names)
+        #plot_data(data, names)
 
     now = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")  
     # copy the file errors.csv to a new file data_<date and time>.csv
@@ -50,6 +51,6 @@ def plot_data(data, names):
     plt.show()
 
 if __name__ == '__main__':
-    #Working_directory = os.getcwd()
-    #Print("working directory: ", working_directory)
+    working_directory = os.getcwd()
+    print("working directory: ", working_directory)
     main()
