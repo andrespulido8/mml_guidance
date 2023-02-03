@@ -1,8 +1,10 @@
+#!/usr/bin/python3
 from fileinput import filename
 
 import numpy as np
 import rospy
 from geometry_msgs.msg import Pose, PoseStamped
+from nav_msgs.msg import Odometry
 
 
 class MarkovChain:
@@ -19,6 +21,7 @@ class MarkovChain:
         # ROS stuff
         rospy.loginfo("Initializing markov_goal_pose node")
         self.pose_sub = rospy.Subscriber("agent_pose", PoseStamped, self.odom_cb)
+        self.pose_sub = rospy.Subscriber("/odom", Odometry, self.odom_cb)
         self.pose_pub = rospy.Publisher("goal_pose", PoseStamped, queue_size=2)
         self.goal_pose_square()
         self.position = [0.,0.]
@@ -107,6 +110,8 @@ class MarkovChain:
         )
 
     def odom_cb(self, msg):
+        self.position = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
+    def posestamped_cb(self, msg):
         self.position = np.array([msg.pose.position.x, msg.pose.position.y])
 
     # self.position = np.array([msg.pose.position.x, msg.pose.position.y])
