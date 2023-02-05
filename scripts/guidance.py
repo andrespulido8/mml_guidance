@@ -57,7 +57,7 @@ class Guidance:
         self.initial_time = rospy.get_time()
         self.time_reset = 0
         self.last_time = 0
-
+        self.idg_counter = 0
         # ROS stuff
         rospy.loginfo(
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
@@ -126,7 +126,9 @@ class Guidance:
         goal_position: the position of the measurement that resulted in the
         maximum EER
         """
+        self.idg_counter+=1
         now = rospy.get_time() - self.initial_time
+        rospy.logwarn("Counter: %d - Elapsed: %f" %(self.idg_counter, now))
         # print('check3')
         ## Guidance
         future_weight = np.zeros((self.N, self.N_s))
