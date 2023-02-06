@@ -641,13 +641,6 @@ class Guidance:
             # self.quad_yaw = self.euler_from_quaternion(msg.pose.orientation)[2]  # TODO: unwrap message before function
             # self.quad_position[1] = -self.quad_position[1] if not self.is_info_guidance else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position)
-            # now = rospy.get_time() - self.initial_time
-            self.particle_filter()
-            # print("particle filter time: ", rospy.get_time() - self.initial_time - now)
-            if self.update_msg.data:
-                self.goal_position = self.information_driven_guidance()
-
-            self.pub_desired_state()
 
     def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
         if self.init_finished:
@@ -792,6 +785,15 @@ if __name__ == "__main__":
                     "EER time [s]",
                 ]
             )
-        rospy.spin()
+            rate = rospy.Rate(10)  # 10 Hz
+            while not rospy.is_shutdown():
+                # now = rospy.get_time() - guidance.initial_time
+                guidance.particle_filter()
+                # print("particle filter time: ", rospy.get_time() - guidance.initial_time - now)
+                if guidance.update_msg.data:
+                    guidance.goal_position = guidance.information_driven_guidance()
+
+                guidance.pub_desired_state()
+                rate.sleep()
     except rospy.ROSInterruptException:
         pass
