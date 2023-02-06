@@ -55,7 +55,7 @@ class ParticleFilter:
         self.measurement_update_time = 2.0  # seconds
 
         self.turtle_pose = np.array([0.0, 0.0, 0.0])
-        self.udpate_msg = Bool()
+        #self.udpate_msg = Bool()
         # ROS
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
         if self.is_viz:

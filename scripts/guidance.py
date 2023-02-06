@@ -399,9 +399,9 @@ class Guidance:
             )
             self.FOV = self.construct_FOV(self.quad_position)
             # now = rospy.get_time() - self.initial_time
-            self.filter.pf_loop(
-                self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
-            )
+            #self.filter.pf_loop(
+            #    self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
+            #)
             # print("particle filter time: ", rospy.get_time() - self.initial_time - now)
             self.current_entropy()
             if self.filter.update_msg.data and self.is_info_guidance:
@@ -473,6 +473,12 @@ if __name__ == "__main__":
     try:
         rospy.init_node("guidance", anonymous=True)
         square_chain = Guidance()
-        rospy.spin()
+        most_recent_pf_update_time = rospy.get_time()
+        while not rospy.is_shutdown():
+            elapsed_since_pf_update = rospy.get_time() - most_recent_pf_update_time
+            if elapsed_since_pf_update > 0.05:
+                most_recent_pf_update_time = rospy.get_time()
+                square_chain.filter.pf_loop(square_chain.noisy_turtle_pose, square_chain.angular_velocity, square_chain.linear_velocity)
+
     except rospy.ROSInterruptException:
         pass
