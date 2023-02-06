@@ -479,6 +479,7 @@ if __name__ == "__main__":
             if elapsed_since_pf_update > 0.05:
                 most_recent_pf_update_time = rospy.get_time()
                 square_chain.filter.pf_loop(square_chain.noisy_turtle_pose, square_chain.angular_velocity, square_chain.linear_velocity)
+                np.savetxt("pred_%d_%.2f_%.2f.csv"%(square_chain.filter.motion_model.counter, square_chain.turtle_pose[0], square_chain.turtle_pose[1]), square_chain.filter.particles[-1,:,:], delimiter=',')
 
     except rospy.ROSInterruptException:
         pass

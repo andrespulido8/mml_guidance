@@ -31,7 +31,7 @@ class Motion_Model():
         with torch.no_grad():
             output = self.model(torch.from_numpy(particles[:, :, :]).float().to(self.device))
             forecast_seq = np.concatenate((particles[-9:,:,:],np.reshape(output[-1, :,:].cpu().numpy(), (1,-1,3))), 0)
-            np.savetxt("pred_%d.csv"%self.counter, output[-1,:,:].cpu().numpy(), delimiter=',')
+            #np.savetxt("pred_%d.csv"%self.counter, output[-1,:,:].cpu().numpy(), delimiter=',')
             self.counter += 1
         return forecast_seq
         
