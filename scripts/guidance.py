@@ -21,11 +21,7 @@ class Guidance:
     def __init__(self):
         self.init_finished = False
         self.is_sim = rospy.get_param("/is_sim", False)
-<<<<<<< HEAD
-        self.is_info_guidance = False  # False is for tracking turtlebot
-=======
         self.guidance_mode = "Lawnmower"  # 'Information', 'Particles' or 'Lawnmower'
->>>>>>> information_gain
         # Initialization of variables
         self.quad_position = np.array([0, 0])
         self.noisy_turtle_pose = np.array([0, 0, 0])
