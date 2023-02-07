@@ -16,7 +16,7 @@ class Guidance:
     def __init__(self):
         self.init_finished = False
         self.is_sim = rospy.get_param("/is_sim", False)
-        self.is_info_guidance = True  # False is for tracking turtlebot
+        self.is_info_guidance = False  # False is for tracking turtlebot
         # Initialization of variables
         self.turtle_pose = np.array([0, 0, 0])
         self.quad_position = np.array([0, 0])
@@ -79,6 +79,9 @@ class Guidance:
         # ROS stuff
         rospy.loginfo(
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
+        )
+        rospy.loginfo(
+            f"...and parameter is_viz: {self.is_viz}"
         )
         if self.is_info_guidance:
             rospy.loginfo("Quadcopter in mode: Information Gain Guidance")
@@ -605,8 +608,10 @@ class Guidance:
     def rc_cb(self, msg):
         if msg.values[6] > 500:
             self.position_following = True
+            print("rc message > 500, code should be sending good values")
         else:
             self.position_following = False
+            print("no rc message > 500, turn it on with the rc controller")
 
     def quad_odom_cb(self, msg):
         if self.init_finished:
@@ -650,7 +655,7 @@ class Guidance:
                 ds.velocity_valid = False
             ds.pose.z = -self.height
             self.pose_pub.publish(ds)
-            if self.is_sim:
+            if self.is_sim or self.position_following:
                 # Entropy pub
                 entropy_msg = Float32()
                 entropy_msg.data = self.H_t
