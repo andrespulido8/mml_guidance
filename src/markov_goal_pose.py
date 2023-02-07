@@ -120,7 +120,7 @@ class MarkovChain:
         """Publishes a goal pose after the goal is reached within tolerance_radius"""
         #rospy.logwarn(self.goal_list[self.prev_goal]['x','y'])
         d = np.linalg.norm(self.position - np.array([self.goal_list[self.prev_goal]['x'], self.goal_list[self.prev_goal]['y']]))
-        rospy.logwarn("G: %d\tD: %.4f"%(self.prev_goal, d))
+        #rospy.logwarn("G: %d\tD: %.4f"%(self.prev_goal, d))
         if d < self.tolerance_radius:
         #if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
             self.prev_goal = np.random.choice(len(self.goal_list), p=self.trans_matrix[self.prev_goal])

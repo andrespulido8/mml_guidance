@@ -69,6 +69,7 @@ class ParticleFilter:
 
         self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
         self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
+        self.update_msg = Bool()
         self.init_done = True
 
     def pf_loop(
@@ -93,7 +94,8 @@ class ParticleFilter:
         #)
         self.predict_mml()
 
-        self.update_msg = Bool()
+        rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1])))
+        #self.update_msg = Bool()
         updt_time = t - self.time_reset
         if updt_time > self.measurement_update_time:
             self.time_reset = t

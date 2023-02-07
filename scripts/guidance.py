@@ -397,17 +397,14 @@ class Guidance:
                 if not self.is_info_guidance
                 else self.quad_position[1]
             )
-            self.FOV = self.construct_FOV(self.quad_position)
             # now = rospy.get_time() - self.initial_time
             #self.filter.pf_loop(
             #    self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             #)
             # print("particle filter time: ", rospy.get_time() - self.initial_time - now)
-            self.current_entropy()
-            if self.filter.update_msg.data and self.is_info_guidance:
-                self.goal_position = self.information_driven_guidance()
+            
 
-            self.pub_desired_state()
+            
 
     def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
         if self.init_finished:
@@ -468,6 +465,14 @@ class Guidance:
         fov_msg.data = des_fov_matrix.flatten("C")
         self.des_fov_pub.publish(fov_msg)
 
+    def guidance_step(self):
+        self.FOV = self.construct_FOV(self.quad_position)
+        self.filter.pf_loop(self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity)
+        #np.savetxt("pred_%d_%.2f_%.2f.csv"%(self.filter.motion_model.counter, self.turtle_pose[0], self.turtle_pose[1]), self.filter.particles[-1,:,:], delimiter=',')
+        self.current_entropy()
+        if self.filter.update_msg.data and self.is_info_guidance:
+            self.goal_position = self.information_driven_guidance()
+            self.pub_desired_state()
 
 if __name__ == "__main__":
     try:
@@ -476,10 +481,9 @@ if __name__ == "__main__":
         most_recent_pf_update_time = rospy.get_time()
         while not rospy.is_shutdown():
             elapsed_since_pf_update = rospy.get_time() - most_recent_pf_update_time
-            if elapsed_since_pf_update > 0.05:
+            if elapsed_since_pf_update > 0.1:
                 most_recent_pf_update_time = rospy.get_time()
-                square_chain.filter.pf_loop(square_chain.noisy_turtle_pose, square_chain.angular_velocity, square_chain.linear_velocity)
-                np.savetxt("pred_%d_%.2f_%.2f.csv"%(square_chain.filter.motion_model.counter, square_chain.turtle_pose[0], square_chain.turtle_pose[1]), square_chain.filter.particles[-1,:,:], delimiter=',')
-
+                elapsed_since_pf_update = 0.
+                square_chain.guidance_step()
     except rospy.ROSInterruptException:
         pass
