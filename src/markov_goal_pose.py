@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-from fileinput import filename
 
 import numpy as np
 import rospy
