@@ -32,6 +32,13 @@
 	<rosparam file="$(find sim_helper)/params/$(arg vehicle)_pid.yaml"/>
 	<node name="reef_control_pid" pkg="reef_control" type="reef_control_node" output="screen"/>
 
+	<!-- Launches the drone guidance (C++)-->
+	<!--<node pkg="mml_guidance" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
+
+  	<param name="is_viz" value="$(arg is_visualization)"/>
+	<param name="is_sim" value="$(arg is_simulation)"/>
+	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen"/>
+
 	<group ns="robot0">
 		<!-- Launches the turtlebot controller -->
 		<!--<node pkg="turtlebot_pid" name="turtlebot_pid_node" type="turtlebot_pid_node" output="screen"> (Pauls PID)-->
@@ -47,12 +54,5 @@
 			<remap from="/goal_pose" to="/robot0/goal_pose"/>
 		</node>
 	</group>
-
-	<!-- Launches the drone guidance (C++)-->
-	<!--<node pkg="mml_guidance" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
-
-  	<param name="is_viz" value="$(arg is_visualization)"/>
-	<param name="is_sim" value="$(arg is_simulation)"/>
-	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen"/>
 
 </launch>
