@@ -35,13 +35,13 @@ class Guidance:
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
         self.AVL_dims = np.array([[-1.2, -2], [2.8, 1.8]])  # road network outline
         # number of particles
-        self.N = 250
+        self.N = 500
         # Number of future measurements per sampled particle to consider in EER
         self.N_m = 1
         # Number of sampled particles
-        self.N_s = 80
+        self.N_s = 50
         # Time steps to propagate in the future for EER
-        self.k = 2
+        self.k = 1
         # initiate entropy
         self.Hp_t = 0  # partial entropy
         self.IG_range = np.array([0, 0, 0])
@@ -85,7 +85,7 @@ class Guidance:
         self.time_reset = 0
         self.last_time = 0
         self.update_msg = Bool()
-        self.update_msg.data = False
+        self.is_update = False
 
         # Occlusions
         occ_width = 0.5
@@ -117,8 +117,14 @@ class Guidance:
                 "/pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
             )
         else:
+            self.quad_odom_sub = rospy.Subscriber(
+                "/quad_pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
+            )
             self.turtle_odom_sub = rospy.Subscriber(
                 "/turtle_pose_stamped", PoseStamped, self.turtle_odom_cb, queue_size=1
+            )
+            self.turtle_odom_sub = rospy.Subscriber(
+                "/odom", Odometry, self.turtle_hardware_odom_cb, queue_size=1
             )
             self.rc_sub = rospy.Subscriber("rc_raw", RCRaw, self.rc_cb, queue_size=1)
 
@@ -157,7 +163,7 @@ class Guidance:
         )
 
         # Update step
-        if self.update_msg.data:
+        if self.is_update:
             self.prev_weights = np.copy(self.weights)
             self.weights = self.update(
                 self.weights, self.particles, self.noisy_turtle_pose
@@ -165,10 +171,10 @@ class Guidance:
 
         # Resampling step
         self.Neff = self.neff(self.weights)
-        if self.Neff < self.N / 2 and self.update_msg.data:
+        if self.Neff < self.N / 2 and self.is_update:
             if self.Neff < self.N / 100 + 5:
                 # particles are basically lost, reinitialize
-                rospy.logwarn("Uniformly resampling particles")
+                #rospy.logwarn("Uniformly resampling particles")
                 self.particles = np.random.uniform(
                     [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
                     [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
@@ -192,7 +198,7 @@ class Guidance:
     def current_entropy(self, sampled_index):
         now = rospy.get_time() - self.initial_time
         # Entropy of current distribution
-        if self.update_msg.data:
+        if self.is_update:
             self.in_FOV = 1
             H = self.entropy_particle(
                 self.prev_particles[sampled_index],
@@ -290,13 +296,14 @@ class Guidance:
 
         # EER = I.mean() # implemented when N_m is implemented
         self.t_EER = rospy.get_time() - self.initial_time - now
+        #print("IG time: ", self.t_EER)
 
         action_index = np.argmax(Ip)
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
-        # print("Chosen action:", z_hat[action_index, :2])
+        #print("Chosen action:", z_hat[action_index, :2])
         self.goal_position = z_hat[action_index][:2]
 
     def predict(self, particles, weights, last_time):
@@ -523,6 +530,7 @@ class Guidance:
             )
 
             if np.abs(entropy) > 30:
+                print("\nEntropy term went bad :(")
                 print("first term: ", np.log(np.nansum(like_meas * prev_wgts)))
                 print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
                 print("third term: ", np.nansum(wgts * np.log(like_meas)))
@@ -591,7 +599,7 @@ class Guidance:
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path
         """
-        if self.update_msg.data:
+        if self.is_update:
             return self.noisy_turtle_pose[:2]
         else:
             if self.lawnmower_idx == 0:
@@ -678,41 +686,61 @@ class Guidance:
                     turtle_pose, self.measurement_covariance
                 )
             else:
-                self.noisy_turtle_pose = np.array(
-                    [msg.pose.position.x, msg.pose.position.y]
+                turtle_orientation = np.array(
+                    [
+                        msg.pose.orientation.x,
+                        msg.pose.orientation.y,
+                        msg.pose.orientation.z,
+                        msg.pose.orientation.w,
+                    ]
                 )
-                self.pub_desired_state()
+                _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
+                self.noisy_turtle_pose = np.array(
+                    [msg.pose.position.x, msg.pose.position.y, theta_z]
+                )
 
-            if guidance.is_in_FOV(
-                guidance.noisy_turtle_pose, guidance.FOV
-            ) and not guidance.in_occlusion(guidance.noisy_turtle_pose):
+            if self.is_in_FOV(
+                self.noisy_turtle_pose, self.FOV
+            ) and not self.in_occlusion(self.noisy_turtle_pose):
                 # if not self.in_occlusion(self.noisy_turtle_pose):
-                self.update_msg.data = True
+                self.is_update = True
             else:
-                self.update_msg.data = False  # no update
+                self.is_update = False  # no update
+
+    def turtle_hardware_odom_cb(self, msg):
+        if self.init_finished:
+            self.linear_velocity = np.array(
+                [msg.twist.twist.linear.x, msg.twist.twist.linear.y]
+            )
+            self.angular_velocity = np.array([msg.twist.twist.angular.z])
 
     def rc_cb(self, msg):
         if msg.values[6] > 500:
             self.position_following = True
-            print("rc message > 500, code should be sending good values")
+            #print("rc message > 500, AUTONOMOUS MODE")
         else:
             self.position_following = False
-            print("no rc message > 500, turn it on with the rc controller")
+            #print("no rc message > 500, MANUAL MODE: turn it on with the rc controller")
 
     def quad_odom_cb(self, msg):
         if self.init_finished:
-            self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])
+            if self.is_sim:
+                self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])
+            else:
+                self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])  # -y to transform NWU to NED 
             # self.quad_yaw = self.euler_from_quaternion(msg.pose.orientation)[2]  # TODO: unwrap message before function
             # self.quad_position[1] = -self.quad_position[1] if not self.guidance_mode else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position)
 
-    def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
+    def pub_desired_state(self, event=None):
         if self.init_finished:
+            is_velocity = False  # [not used] might be useful later
             ds = DesiredState()
             # run the quad if sim or the remote controller
             # sends signal of autonomous control
             if self.position_following or self.is_sim:
                 if is_velocity:
+                    xvel = yvel = 0
                     ds.velocity.x = xvel
                     ds.velocity.y = yvel
                     ds.position_valid = False
@@ -748,17 +776,17 @@ class Guidance:
                 fov_msg = Float32MultiArray()
                 fov_matrix = np.array(
                     [
-                        [self.FOV[0], -self.FOV[2]],
-                        [self.FOV[0], -self.FOV[3]],
-                        [self.FOV[1], -self.FOV[3]],
-                        [self.FOV[1], -self.FOV[2]],
-                        [self.FOV[0], -self.FOV[2]],
+                        [self.FOV[0], self.FOV[2]],
+                        [self.FOV[0], self.FOV[3]],
+                        [self.FOV[1], self.FOV[3]],
+                        [self.FOV[1], self.FOV[2]],
+                        [self.FOV[0], self.FOV[2]],
                     ]
                 )
                 fov_msg.data = fov_matrix.flatten("C")
                 self.fov_pub.publish(fov_msg)
                 # Desired FOV
-                self.des_fov = self.construct_FOV(np.array([ds.pose.x, -ds.pose.y]))
+                self.des_fov = self.construct_FOV(np.array([ds.pose.x, -ds.pose.y]))  # from turtle frame to quad frame
                 des_fov_matrix = np.array(
                     [
                         [self.des_fov[0], self.des_fov[2]],
@@ -771,6 +799,7 @@ class Guidance:
                 fov_msg.data = des_fov_matrix.flatten("C")
                 self.des_fov_pub.publish(fov_msg)
                 # TODO: change publisher to service
+                self.update_msg.data = self.is_update
                 self.update_pub.publish(self.update_msg)
 
     def pub_pf(self):
@@ -799,24 +828,25 @@ class Guidance:
         neff_msg.data = np.array([self.Neff])
         self.n_eff_pub.publish(neff_msg)
 
-        pkgDir = rospkg.RosPack().get_path("mml_guidance")
-        with open(pkgDir + "/data/errors.csv", "a") as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(
-                [
-                    err_msg.point.x,
-                    err_msg.point.y,
-                    err_msg.point.z,
-                    self.FOV_err[0],
-                    self.FOV_err[1],
-                    self.Hp_t,
-                    self.IG_range[0],
-                    self.IG_range[1],
-                    self.IG_range[2],
-                    self.in_FOV,
-                    self.t_EER,
-                ]
-            )
+        if self.is_sim:
+            pkgDir = rospkg.RosPack().get_path("mml_guidance")
+            with open(pkgDir + "/data/errors.csv", "a") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(
+                    [
+                        err_msg.point.x,
+                        err_msg.point.y,
+                        err_msg.point.z,
+                        self.FOV_err[0],
+                        self.FOV_err[1],
+                        self.Hp_t,
+                        self.IG_range[0],
+                        self.IG_range[1],
+                        self.IG_range[2],
+                        self.in_FOV,
+                        self.t_EER,
+                    ]
+                )
 
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
@@ -839,7 +869,7 @@ if __name__ == "__main__":
     rospy.init_node("guidance", anonymous=True)
     guidance = Guidance()
 
-    time_to_shutdown = 60
+    time_to_shutdown = 200
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
     working_directory = os.getcwd()
@@ -847,31 +877,30 @@ if __name__ == "__main__":
     # empty the errors file without writing on it
     pkgDir = rospkg.RosPack().get_path("mml_guidance")
 
-    with open(pkgDir + "/data/errors.csv", "w") as csvfile:
-        writer = csv.writer(csvfile)
-        # write the first row as the header with the variable names
-        writer.writerow(
-            [
-                "X error [m]",
-                "Y error [m]",
-                "Yaw error [rad]",
-                "FOV X error [m]",
-                "FOV Y error [m]",
-                "Partial Entropy",
-                "min Info Gain",
-                "Avg Info Gain",
-                "Max Info gain",
-                "Percent in FOV",
-                "EER time [s]",
-            ]
-        )
+    if guidance.is_sim:
+        with open(pkgDir + "/data/errors.csv", "w") as csvfile:
+            writer = csv.writer(csvfile)
+            # write the first row as the header with the variable names
+            writer.writerow(
+                [
+                    "X error [m]",
+                    "Y error [m]",
+                    "Yaw error [rad]",
+                    "FOV X error [m]",
+                    "FOV Y error [m]",
+                    "Partial Entropy",
+                    "min Info Gain",
+                    "Avg Info Gain",
+                    "Max Info gain",
+                    "Percent in FOV",
+                    "EER time [s]",
+                ]
+            )
 
-    # now = rospy.get_time() - guidance.initial_time
     if guidance.guidance_mode != "Lawnmower":
-        rospy.Timer(rospy.Duration(1.0 / 10.0), guidance.particle_filter)
-    # print("particle filter time: ", rospy.get_time() - guidance.initial_time - now)
+        rospy.Timer(rospy.Duration(1.0 / 40.0), guidance.particle_filter)
     if guidance.guidance_mode == "Information":
         rospy.Timer(rospy.Duration(1.0 / 2.0), guidance.information_driven_guidance)
-        rospy.Timer(rospy.Duration(1.0 / 10.0), guidance.pub_desired_state)
+    rospy.Timer(rospy.Duration(1.0 / 10.0), guidance.pub_desired_state)
 
     rospy.spin()

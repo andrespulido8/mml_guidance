@@ -51,7 +51,7 @@ class LawnmowerPath:
             self.sp1[0], (self.sp3[0] + self.dy / 2), self.dy / 2
         )  # x-component (straight)
         # TODO: automatically calculate the number of points or have it as an input
-        delta = 0.05
+        delta = 0.2
         S = np.arange(
             (self.sp1[1] + (self.dy / 2)), (k), delta
         )  # y-component (straight)
