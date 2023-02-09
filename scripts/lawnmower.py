@@ -143,7 +143,7 @@ class LawnmowerPath:
         plt.show() if self.is_plot else None
         # TODO: set axis name with dimensions
 
-        return [self.X + s0[0], self.Y + s0[1]]
+        return [self.X + s0[0] - 1, self.Y + s0[1] - 1 ]  # TODO: CHANGE quick fix offset for hardware
 
     def heading(self):
         """Computes the heading of the path at each index

@@ -33,7 +33,7 @@ class Guidance:
         ## PARTICLE FILTER  ##
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        self.AVL_dims = np.array([[-1.2, -2], [2.8, 1.8]])  # road network outline
+        self.AVL_dims = np.array([[-1.05, -1.05], [1.25, 1.25]])  # road network outline
         # number of particles
         self.N = 500
         # Number of future measurements per sampled particle to consider in EER
@@ -94,7 +94,7 @@ class Guidance:
         self.occlusions = Occlusions([occ_center], [occ_width])
 
         # Lawnmower
-        lawnmower = LawnmowerPath([0, 0], [3, 2], 1.5)
+        lawnmower = LawnmowerPath([0, 0], [2, 2], 1.5)
         self.path = lawnmower.trajectory()
         self.lawnmower_idx = 0
         self.increment = 1
@@ -746,6 +746,7 @@ class Guidance:
                     ds.position_valid = False
                     ds.velocity_valid = True
                 else:
+                    # flip sign of y to transform from NWU to NED
                     if self.guidance_mode == "Information":
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = -self.goal_position[1]
@@ -901,6 +902,6 @@ if __name__ == "__main__":
         rospy.Timer(rospy.Duration(1.0 / 40.0), guidance.particle_filter)
     if guidance.guidance_mode == "Information":
         rospy.Timer(rospy.Duration(1.0 / 2.0), guidance.information_driven_guidance)
-    rospy.Timer(rospy.Duration(1.0 / 10.0), guidance.pub_desired_state)
+    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_desired_state)
 
     rospy.spin()

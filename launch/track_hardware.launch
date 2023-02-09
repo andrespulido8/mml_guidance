@@ -41,9 +41,9 @@
 
     <rosparam file="$(find reef_adaptive_control)/params/$(arg vehicle_type)_pid.yaml" />
     <node name="reef_control_pid" pkg="reef_adaptive_control" type="pid_control_node" output="screen"/>
-    <node name="reef_control_adaptive" pkg="reef_adaptive_control" type="adaptive_node" output="screen">
+    <!--<node name="reef_control_adaptive" pkg="reef_adaptive_control" type="adaptive_node" output="screen">
         <rosparam file="$(find reef_adaptive_control)/params/adaptive_gains.yaml"/>
-    </node>
+    </node>-->
 
 	<!-- Launches the drone guidance (C++)-->
 	<!--<node pkg="mml_guidance" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
