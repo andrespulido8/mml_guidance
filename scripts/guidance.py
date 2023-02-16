@@ -433,7 +433,7 @@ class Guidance:
         G = 0.2
         E = np.array([0, 0, 0])
         for ii in range(self.noisy_turtle_pose.shape[0]):
-            E[ii] = np.max(self.particles[ii, :]) - np.min(self.particles[ii, :])
+            E[ii] = np.max(self.particles[:, ii]) - np.min(self.particles[:, ii])
         cov = (G * E * self.N ** (-1 / 3)) ** 2
         P_sigmas = np.diag(cov)
 
