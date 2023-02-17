@@ -232,7 +232,7 @@ class ParticleFilter:
         G = 0.2
         E = np.array([0, 0, 0])
         for ii in range(self.turtle_pose.shape[0]):
-            E[ii] = np.max(self.particles[-1, ii, :]) - np.min(self.particles[ii, :])
+            E[ii] = np.max(self.particles[-1, :, ii]) - np.min(self.particles[-1, :, ii])
         cov = (G * E * self.N ** (-1 / 3)) ** 2
         P_sigmas = np.diag(cov)
 
