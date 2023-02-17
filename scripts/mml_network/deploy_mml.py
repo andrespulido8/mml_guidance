@@ -15,7 +15,7 @@ class Motion_Model():
         #self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu") 
 
         #train_data, val_data = get_data(close, 0.1, input_window, output_window, device, scale_data = False) # 60% train, 40% test split
-        self.model = TransAm(in_dim=3, feature_size = 64, num_layers=1)
+        self.model = TransAm(in_dim=3, feature_size = 8, num_layers=1)
         self.model.load_state_dict(torch.load(model_file))
         self.model.eval()
         self.model = self.model.to(self.device)
