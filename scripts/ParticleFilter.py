@@ -114,7 +114,7 @@ class ParticleFilter:
                 self.particles = np.random.uniform(
                     [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
                     [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-                    (self.N, 3),
+                    (1, self.N, 3),
                 )
                 self.prev_particles = np.copy(self.particles)
                 self.weights = np.ones(self.N) / self.N
