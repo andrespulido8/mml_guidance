@@ -197,8 +197,8 @@ class ParticleFilter:
         dt = t - last_time
 
         delta_theta = angular_velocity[0] * dt
-        particles[:, 2] = (
-            prev_particles[:, 2]
+        particles[-1, :, 2] = (
+            prev_particles[-1, :, 2]
             + delta_theta
             + (delta_theta / (2 * np.pi))
             * self.add_noise(
@@ -207,28 +207,28 @@ class ParticleFilter:
         )
 
         for ii in range(self.N):
-            if np.abs(particles[ii, 2]) > np.pi:
+            if np.abs(particles[-1, ii, 2]) > np.pi:
                 # Wraps angle
-                particles[ii, 2] = (
-                    particles[ii, 2] - np.sign(particles[ii, 2]) * 2 * np.pi
+                particles[-1, ii, 2] = (
+                    particles[-1, ii, 2] - np.sign(particles[-1, ii, 2]) * 2 * np.pi
                 )
 
         # Component mean in the complex plane to prevent wrong average
         # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
         self.yaw_mean = np.arctan2(
-            np.sum(wgts * np.sin(particles[:, 2])),
-            np.sum(wgts * np.cos(particles[:, 2])),
+            np.sum(wgts * np.sin(particles[-1, :, 2])),
+            np.sum(wgts * np.cos(particles[-1, :, 2])),
         )
         norm_lin_vel = np.linalg.norm(linear_velocity)
         delta_distance = norm_lin_vel * dt + norm_lin_vel * dt * self.add_noise(
             0, self.process_covariance[0, 0], size=self.N
         )
-        particles[:, :2] = (
-            prev_particles[:, :2]
+        particles[-1, :, :2] = (
+            prev_particles[-1, :, :2]
             + np.array(
                 [
-                    delta_distance * np.cos(particles[:, 2]),
-                    delta_distance * np.sin(particles[:, 2]),
+                    delta_distance * np.cos(particles[-1,:, 2]),
+                    delta_distance * np.sin(particles[-1,:, 2]),
                 ]
             ).T
         )
