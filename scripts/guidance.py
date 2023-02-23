@@ -31,7 +31,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         # number of particles
-        self.N = 25 # 500 # 
+        self.N = 500 # 500 # 
         # Number of future measurements per sampled particle to consider in EER
         self.N_m = 1
         # Number of sampled particles
