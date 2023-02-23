@@ -225,6 +225,7 @@ class ParticleFilter:
             if np.sum(self.weights) > 0
             else self.weights
         )
+        print("Min: %.4f, Max: %.4f, Dot: %.4f"%(self.weights.min(), self.weights.max(), self.weights.dot(self.weights)))
         indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
         self.particles = self.particles[:,indexes,:]
         self.weights = self.weights[indexes]
