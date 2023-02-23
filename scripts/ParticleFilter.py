@@ -117,7 +117,7 @@ class ParticleFilter:
         #)
         self.predict_mml()
 
-        rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1])))
+        rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f || True: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1]), self.turtle_pose[0], self.turtle_pose[1]))
         #self.update_msg = Bool()
         updt_time = t - self.time_reset
         if updt_time > self.measurement_update_time:
