@@ -381,6 +381,7 @@ class Guidance:
             else:
                 self.turtle_pose = np.array([msg.pose.position.x, msg.pose.position.y])
                 self.pub_desired_state()
+            self.filter.turtle_pose = self.turtle_pose
 
     def rc_cb(self, msg):
         if msg.values[6] > 500:
