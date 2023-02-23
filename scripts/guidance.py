@@ -482,7 +482,7 @@ if __name__ == "__main__":
         most_recent_pf_update_time = rospy.get_time()
         while not rospy.is_shutdown():
             elapsed_since_pf_update = rospy.get_time() - most_recent_pf_update_time
-            if elapsed_since_pf_update > 0.1:
+            if elapsed_since_pf_update > 0.05:
                 most_recent_pf_update_time = rospy.get_time()
                 elapsed_since_pf_update = 0.
                 square_chain.guidance_step()
