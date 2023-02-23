@@ -14,11 +14,13 @@ ANG_VEL = 0.0
 
 class ParticleFilter:
     def __init__(self, num_particles=10):
+
         self.init_done = False
         deg2rad = lambda deg: np.pi * deg / 180
 
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        self.AVL_dims = np.array([[-0.75, -1.75], [2.75, 1.75]])  # road network outline
+        #self.AVL_dims = np.array([[-0.75, -1.75], [2.75, 1.75]])  # road network outline
+        self.AVL_dims = np.array([[-1.5, -1.2], [1.5, 1.8]])  # road network outline
 
         self.N = num_particles
         # uniform distribution of particles (x, y, theta)
