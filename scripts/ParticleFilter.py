@@ -22,13 +22,21 @@ class ParticleFilter:
         #self.AVL_dims = np.array([[-0.75, -1.75], [2.75, 1.75]])  # road network outline
         self.AVL_dims = np.array([[-1.5, -1.2], [1.5, 1.8]])  # road network outline
 
+        pkg_path = rospkg.RosPack().get_path('mml_guidance')
+        model_file = pkg_path+'/scripts/mml_network/models/current.pth'
+        training_data_filename = pkg_path+'/scripts/mml_network/squarest_yaw.csv'
+        self.training_data = np.loadtxt(training_data_filename, delimiter=',', skiprows=1)[:1000, 1:] # Hardcoded samples
+        self.n_training_samples = self.training_data.shape[0] - 9
+        self.motion_model = deploy_mml.Motion_Model(model_file)
+
         self.N = num_particles
-        # uniform distribution of particles (x, y, theta)
-        self.particles = np.random.uniform(
-            [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi / 10.0],
-            [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi / 10.0],
-            (1, self.N, 3),
-        )
+        ## uniform distribution of particles (x, y, theta)
+        #self.particles = np.random.uniform(
+        #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi / 10.0],
+        #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi / 10.0],
+        #    (1, self.N, 3),
+        #)
+        self.particles = self.uniform_sample()
         self.prev_particles = np.copy(self.particles)
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
@@ -47,9 +55,6 @@ class ParticleFilter:
             [[0.02, 0.0, 0.0], [0.0, 0.02, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
         self.var = np.diag(self.measurement_covariance)  # variance of particles
-
-        model_file = rospkg.RosPack().get_path('mml_guidance')+'/scripts/mml_network/models/current.pth'
-        self.motion_model = deploy_mml.Motion_Model(model_file)
 
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
@@ -73,6 +78,22 @@ class ParticleFilter:
         self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
         self.update_msg = Bool()
         self.init_done = True
+
+    def uniform_sample(self):
+        SAMPLE_ALONG_PATH = True
+        if SAMPLE_ALONG_PATH:
+            rng = np.random.default_rng() # This is newly recommended method
+            indices = rng.integers(0, self.n_training_samples, self.N)
+            local_particles = np.empty((9,0,3))
+            for i in indices:
+                local_particles = np.concatenate((local_particles, np.expand_dims(self.training_data[i:i+9,:], 1)), axis=1)
+        else:
+            local_particles = np.random.uniform(
+                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
+                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
+                    (1, self.N, 3),
+                )
+        return local_particles
 
     def pf_loop(
         self,
@@ -113,11 +134,12 @@ class ParticleFilter:
             if self.Neff < self.N / 100:
                 # particles are basically lost, reinitialize
                 rospy.logwarn("Uniformly resampling particles")
-                self.particles = np.random.uniform(
-                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-                    (1, self.N, 3),
-                )
+                #self.particles = np.random.uniform(
+                #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
+                #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
+                #    (1, self.N, 3),
+                #)
+                self.particles = self.uniform_sample()
                 self.prev_particles = np.copy(self.particles)
                 self.weights = np.ones(self.N) / self.N
             else:
