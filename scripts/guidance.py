@@ -403,9 +403,6 @@ class Guidance:
             #    self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             #)
             # print("particle filter time: ", rospy.get_time() - self.initial_time - now)
-            
-
-            
 
     def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0):
         if self.init_finished:
