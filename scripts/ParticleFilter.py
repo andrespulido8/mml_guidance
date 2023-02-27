@@ -24,8 +24,8 @@ class ParticleFilter:
 
         pkg_path = rospkg.RosPack().get_path('mml_guidance')
         model_file = pkg_path+'/scripts/mml_network/models/current.pth'
-        training_data_filename = pkg_path+'/scripts/mml_network/squarest_yaw.csv'
-        self.training_data = np.loadtxt(training_data_filename, delimiter=',', skiprows=1)[:1000, 1:] # Hardcoded samples
+        training_data_filename = pkg_path+'/scripts/mml_network/no_quad.csv' # squarest_yaw.csv'
+        self.training_data = np.loadtxt(training_data_filename, delimiter=',', skiprows=1)[:2000, 1:] # Hardcoded samples
         self.n_training_samples = self.training_data.shape[0] - 9
         self.motion_model = deploy_mml.Motion_Model(model_file)
 
@@ -87,6 +87,7 @@ class ParticleFilter:
             local_particles = np.empty((9,0,3))
             for i in indices:
                 local_particles = np.concatenate((local_particles, np.expand_dims(self.training_data[i:i+9,:], 1)), axis=1)
+                
         else:
             local_particles = np.random.uniform(
                     [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
