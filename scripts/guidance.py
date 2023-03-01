@@ -466,7 +466,8 @@ class Guidance:
     def guidance_step(self):
         self.FOV = self.construct_FOV(self.quad_position)
         self.filter.pf_loop(self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity)
-        np.savetxt("pred_%d_%.2f_%.2f.csv"%(self.filter.motion_model.counter, self.turtle_pose[0], self.turtle_pose[1]), self.filter.particles[-1,:,:], delimiter=',')
+        #np.savetxt("pred_%d_%.2f_%.2f.csv"%(self.filter.motion_model.counter, self.turtle_pose[0], self.turtle_pose[1]), self.filter.particles[-1,:,:], delimiter=',')
+        rospy.logwarn("pred_%d_%.2f_%.2f.csv"%(self.filter.motion_model.counter, self.turtle_pose[0], self.turtle_pose[1]))
         self.current_entropy()
         if self.filter.update_msg.data and self.is_info_guidance:
             self.goal_position = self.information_driven_guidance()
