@@ -43,9 +43,6 @@ class Guidance:
         self.weighted_mean = np.array([0, 0, 0])
         self.actions = np.array([[0.1, 0], [0, 0.1], [-0.1, 0], [0, -0.1]])
         self.position_following = False
-        # Use multivariate normal if you know the initial condition
-        # self.filter.particles = np.random.multivariate_normal(
-        #    np.array([1.3, -1.26, 0]), 2*self.measurement_covariance, self.N)
 
         # Measurement Model
         self.height = 1.5

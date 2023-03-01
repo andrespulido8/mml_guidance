@@ -30,12 +30,6 @@ class ParticleFilter:
         self.motion_model = deploy_mml.Motion_Model(model_file)
 
         self.N = num_particles
-        ## uniform distribution of particles (x, y, theta)
-        #self.particles = np.random.uniform(
-        #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi / 10.0],
-        #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi / 10.0],
-        #    (1, self.N, 3),
-        #)
         self.particles = self.uniform_sample()
         self.prev_particles = np.copy(self.particles)
         self.weights = np.ones(self.N) / self.N
