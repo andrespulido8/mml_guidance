@@ -108,15 +108,15 @@ class ParticleFilter:
         """
         t = rospy.get_time() - self.initial_time
 
-        self.particles, self.last_time = self.predict(
-            self.particles,
-            self.prev_particles,
-            self.weights,
-            self.last_time,
-            angular_velocity=ang_vel,
-            linear_velocity=lin_vel,
-        )
-        #self.predict_mml()
+        #self.particles, self.last_time = self.predict(
+        #    self.particles,
+        #    self.prev_particles,
+        #    self.weights,
+        #    self.last_time,
+        #    angular_velocity=ang_vel,
+        #    linear_velocity=lin_vel,
+        #)
+        self.predict_mml()
 
         rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f || True: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1]), self.turtle_pose[0], self.turtle_pose[1]))
         #self.update_msg = Bool()
