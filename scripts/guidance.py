@@ -31,13 +31,17 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         # number of particles
-        self.N = 500 # 500 # 
+        self.N = 500
         # Number of future measurements per sampled particle to consider in EER
         self.N_m = 1
         # Number of sampled particles
         self.N_s = 10
         # Time steps to propagate in the future for EER
         self.k = 1
+        # initiate entropy
+        self.Hp_t = 0  # partial entropy
+        self.IG_range = np.array([0, 0, 0])
+        self.t_EER = 0
         self.filter = ParticleFilter(self.N)
         self.H_gauss = 0  # just used for comparison
         self.weighted_mean = np.array([0, 0, 0])
@@ -73,8 +77,14 @@ class Guidance:
                 "/pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
             )
         else:
+            self.quad_odom_sub = rospy.Subscriber(
+                "/quad_pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
+            )
             self.turtle_odom_sub = rospy.Subscriber(
                 "/turtle_pose_stamped", PoseStamped, self.turtle_odom_cb, queue_size=1
+            )
+            self.turtle_odom_sub = rospy.Subscriber(
+                "/odom", Odometry, self.turtle_hardware_odom_cb, queue_size=1
             )
             self.rc_sub = rospy.Subscriber("rc_raw", RCRaw, self.rc_cb, queue_size=1)
 
@@ -89,33 +99,33 @@ class Guidance:
         rospy.sleep(1)
         self.init_finished = True
 
-    def current_entropy(self):
-        # print("check2")
+    def current_entropy(self, sampled_index=None):
+        if sampled_index is None:
+            sampled_index=np.arange(self.N)
         now = rospy.get_time() - self.initial_time
         # Entropy of current distribution
         if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
-            self.H_t = self.entropy_particle(
-                self.filter.prev_particles,
-                np.copy(self.filter.prev_weights),
-                self.filter.particles,
-                np.copy(self.filter.weights),
+            H = self.entropy_particle(
+                self.filter.prev_particles[sampled_index],
+                np.copy(self.filter.prev_weights[sampled_index]),
+                self.filter.particles[sampled_index],
+                np.copy(self.filter.weights[sampled_index]),
                 self.noisy_turtle_pose,
             )
         else:
-            self.H_t = self.entropy_particle(
-                self.filter.prev_particles,
+            H = self.entropy_particle(
+                self.filter.prev_particles[sampled_index],
                 np.copy(
-                    self.filter.weights
+                    self.filter.weights[sampled_index]
                 ),  # current weights are the (t-1) weights because no update
-                self.filter.particles,
+                self.filter.particles[sampled_index],
             )
 
         entropy_time = rospy.get_time() - self.initial_time
         # print("Entropy time: ", entropy_time - now)
+        return H
 
-    def information_driven_guidance(
-        self,
-    ):
+    def information_driven_guidance(self):
         """Compute the current entropy and future entropy using particles
         to then compute the expected entropy reduction (EER) over predicted
         measurements. The next action is the one that minimizes the EER.
@@ -126,7 +136,6 @@ class Guidance:
         self.idg_counter+=1
         now = rospy.get_time() - self.initial_time
         rospy.logwarn("Counter: %d - Elapsed: %f" %(self.idg_counter, now))
-        # print('check3')
         ## Guidance
         future_weight = np.zeros((self.N, self.N_s))
         H1 = np.zeros(self.N_s)
@@ -148,14 +157,17 @@ class Guidance:
         # Future measurements
         prob = np.nan_to_num(self.filter.weights, copy=True, nan=0)
         prob = prob / np.sum(prob)
-        candidates_index = np.random.choice(
-            a=self.N, size=self.N_s, p=prob
-        )  # right now the new choice is uniform
+        # try choosing next particles, if there is an error, return list from 0 to N_s
+        try:
+            candidates_index = np.random.choice(a=self.N, size=self.N_s, p=prob)
+        except:
+            print("Bad particle weights :(\n")
+            self.resample()
+            candidates_index = np.arange(self.N_s)
         # Future possible measurements
         # TODO: implement N_m sampled measurements
-        z_hat = self.filter.add_noise(
-            future_parts[-1,candidates_index,:], self.filter.measurement_covariance
-        )
+        z_hat = self.filter.add_noise(future_parts[-1,candidates_index,:], self.filter.measurement_covariance)
+        self.Hp_t = self.current_entropy(candidates_index)
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
@@ -163,39 +175,45 @@ class Guidance:
             # N_m implementation will change this by
             # checking for measrement outside of fov
             if self.is_in_FOV(z_hat[jj], k_fov):
-                # TODO: read Janes math to see exactly how EER is computed
+                # TODO: read Jane's math to see exactly how EER is computed
                 # the expectation can be either over all possible measurements
                 # or over only the measurements from each sampled particle (1 in this case)
                 future_weight[:, jj] = self.filter.update(
                     self.filter.weights, future_parts, z_hat[jj]
                 )
-            # H (x_{t+k} | \hat{z}_{t+k})
-            # TODO: figure out how to prevent weights from changing inseide this function
-            H1[jj] = self.entropy_particle(
-                self.filter.particles,
-                np.copy(self.filter.weights),
-                future_parts,
-                future_weight[:, jj],
-                z_hat[jj],
-            )
+                # Check to see if weight dimension vs particle dimension is an issue
+
+                # TODO: figure out how to prevent weights from changing inseide this function
+                H1[jj] = self.entropy_particle(
+                    prev_future_parts[candidates_index],
+                    np.copy(self.filter.weights[candidates_index]),
+                    future_parts[candidates_index],
+                    future_weight[:, jj][candidates_index],
+                    z_hat[jj],
+                )
+            else:
+                H1[jj] = self.entropy_particle(
+                    prev_future_parts[candidates_index],
+                    np.copy(self.filter.weights[candidates_index]),
+                    future_parts[candidates_index],
+                )
+
             # Information Gain
             I[jj] = self.H_t - H1[jj]
 
         # EER = I.mean() # implemented when N_m is implemented
-        if False:
-            print("H: ", self.H_t)
-            print("H1: ", H1)
-            print("I: ", I)
-            print("EER: %f" % EER)
+        self.t_EER = rospy.get_time() - self.initial_time - now
 
-            print("\n")
-        print("EER Time: ", rospy.get_time() - self.initial_time - now)
+        print("\n")
+        print("EER Time: ", self.t_EER)
 
         action_index = np.argmax(I)
+        self.IG_range = np.array([np.min(I), np.mean(I), np.max(I)])
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
         # print("Chosen action:", z_hat[action_index, :2])
+        #self.goal_position = z_hat[action_index][:2]
         return z_hat[action_index][:2]
 
     def is_in_FOV(self, sparticle, fov) -> bool:
@@ -465,7 +483,7 @@ class Guidance:
         self.filter.pf_loop(self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity)
         #np.savetxt("pred_%d_%.2f_%.2f.csv"%(self.filter.motion_model.counter, self.turtle_pose[0], self.turtle_pose[1]), self.filter.particles[-1,:,:], delimiter=',')
         rospy.logwarn("pred_%d_%.2f_%.2f.csv"%(self.filter.motion_model.counter, self.turtle_pose[0], self.turtle_pose[1]))
-        self.current_entropy()
+        self.H_t = self.current_entropy()
         if self.filter.update_msg.data and self.is_info_guidance:
             self.goal_position = self.information_driven_guidance()
             self.pub_desired_state()
