@@ -133,12 +133,17 @@ class Guidance:
             self.particle_pub = rospy.Publisher(
                 "xyTh_estimate", ParticleMean, queue_size=1
             )
-            self.err_estimate_pub = rospy.Publisher(
-                "err_estimate", PointStamped, queue_size=1
+            self.err_fov_pub = rospy.Publisher(
+                "err_fov", PointStamped, queue_size=1
+            )
+            self.err_estimation_pub = rospy.Publisher(
+                "err_estimation", PointStamped, queue_size=1
             )
             self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
+            self.info_gain_pub = rospy.Publisher("info_gain", Float32, queue_size=1)
+            self.eer_time_pub = rospy.Publisher("eer_time", Float32, queue_size=1)
             self.n_eff_pub = rospy.Publisher(
-                "n_eff_particles", Float32MultiArray, queue_size=1
+                "n_eff_particles", Float32, queue_size=1
             )
             self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
             self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
@@ -193,7 +198,6 @@ class Guidance:
 
         if self.is_viz:
             self.estimate()
-            self.pub_pf()
 
     def current_entropy(self, sampled_index):
         now = rospy.get_time() - self.initial_time
@@ -769,10 +773,6 @@ class Guidance:
             ds.pose.z = -self.height
             self.pose_pub.publish(ds)
             if self.is_viz:
-                # Entropy pub
-                entropy_msg = Float32()
-                entropy_msg.data = self.Hp_t
-                self.entropy_pub.publish(entropy_msg)
                 # FOV pub
                 fov_msg = Float32MultiArray()
                 fov_matrix = np.array(
@@ -803,7 +803,8 @@ class Guidance:
                 self.update_msg.data = self.is_update
                 self.update_pub.publish(self.update_msg)
 
-    def pub_pf(self):
+    def pub_pf(self, event=None):
+        # Particle pub
         mean_msg = ParticleMean()
         mean_msg.mean.x = self.weighted_mean[0]
         mean_msg.mean.y = self.weighted_mean[1]
@@ -816,18 +817,34 @@ class Guidance:
             particle_msg.weight = self.weights[ii]
             mean_msg.all_particle.append(particle_msg)
         mean_msg.cov = np.diag(self.var).flatten("C")
+        self.particle_pub.publish(mean_msg)
+        # Error pub
         err_msg = PointStamped()
         err_msg.point.x = self.weighted_mean[0] - self.noisy_turtle_pose[0]
         err_msg.point.y = self.weighted_mean[1] - self.noisy_turtle_pose[1]
         err_msg.point.z = self.weighted_mean[2] - self.noisy_turtle_pose[2]
+        self.err_estimation_pub.publish(err_msg)
         self.FOV_err = self.quad_position - self.noisy_turtle_pose[:2]
-        # Particle pub
-        self.particle_pub.publish(mean_msg)
-        self.err_estimate_pub.publish(err_msg)
+        err_fov_msg = PointStamped()
+        err_fov_msg.point.x = self.FOV_err[0]
+        err_fov_msg.point.y = self.FOV_err[1]
+        self.err_fov_pub.publish(err_fov_msg)
         # Number of effective particles pub
-        neff_msg = Float32MultiArray()
-        neff_msg.data = np.array([self.Neff])
+        neff_msg = Float32()
+        neff_msg.data = self.Neff
         self.n_eff_pub.publish(neff_msg)
+        # Info gain pub
+        info_gain_msg = Float32()
+        info_gain_msg.data = self.IG_range[0]
+        self.entropy_pub.publish(info_gain_msg)
+        # EER time pub
+        eer_time_msg = Float32()
+        eer_time_msg.data = self.t_EER
+        self.eer_time_pub.publish(eer_time_msg)
+        # Entropy pub
+        entropy_msg = Float32()
+        entropy_msg.data = self.Hp_t
+        self.entropy_pub.publish(entropy_msg)
 
         if self.is_sim:
             pkgDir = rospkg.RosPack().get_path("mml_guidance")
@@ -859,7 +876,7 @@ class Guidance:
 
 class Occlusions:
     def __init__(self, positions, widths):
-        """All occlusions are difend as squares with
+        """All occlusions are defined as squares with
         some position (x and y) and some width. The attributes are
         the arrays of positions and widths of the occlusions."""
         self.positions = positions
@@ -902,6 +919,10 @@ if __name__ == "__main__":
         rospy.Timer(rospy.Duration(1.0 / 40.0), guidance.particle_filter)
     if guidance.guidance_mode == "Information":
         rospy.Timer(rospy.Duration(1.0 / 2.0), guidance.information_driven_guidance)
+    
+    # Publish topics
+    if guidance.guidance_mode != "Lawnmower" and guidance.is_viz:
+        rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_pf)
     rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_desired_state)
 
     rospy.spin()

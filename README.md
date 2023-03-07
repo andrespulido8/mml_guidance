@@ -20,8 +20,9 @@ Motion Model Learning (MML) guidance algorithms for turtlebot and quad-copter
 run `roslaunch mml_guidance mml_sim_estimator.launch` from the launch directory.
 
 ## Hardware Usage
-To run only the turtlebot, do `roslaunch mml_guidance turtlebot_hardware.launch`.
-To run only the quadcopter, do `roslaunch mml_guidance track_hardware.launch`.
+To run only the turtlebot, do `roslaunch mml_guidance turtlebot_hardware.launch`.  
+To run only the quadcopter, do `roslaunch mml_guidance track_hardware.launch`.  
+To bag data during hardware experiments run `roslaunch mml_guidance bag_hardware.launch prefix_name:="<insert prefix>"`
 
 ## Visualization
 To visualize the particle filter and the motion model, run `roslaunch mml_guidance visualization.launch` instead of
