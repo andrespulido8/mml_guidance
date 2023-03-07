@@ -34,7 +34,12 @@ for filename in os.listdir(folder_path):
             # drop the columns that are followed by the "all_particle" column
             df.drop(columns_to_drop, axis=1, inplace=True)
 
+        # rename the columns to include the topic name
         df.rename(columns={col: f"{last_words}_{col}" if i >= 0 else col for i, col in enumerate(df.columns)}, inplace=True)
+        # Replace underscores with spaces in the column names
+        df.columns = df.columns.str.replace('_', ' ')
+        # Remove the word "slash" from the column names
+        df.columns = df.columns.str.replace('slash', '')
         # add the dataframe to the dictionary for the appropriate group
         if first_word in dfs_by_group:
             dfs_by_group[first_word].append(df)
