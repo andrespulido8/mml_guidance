@@ -54,7 +54,7 @@ class Guidance:
         #    (self.N, 3),
         # )
         self.measurement_covariance = np.array(
-            [[0.05, 0, 0], [0, 0.05, 0], [0, 0, deg2rad(5)]]
+            [[0.01, 0, 0], [0, 0.01, 0], [0, 0, deg2rad(5)]]
         )
         # Use multivariate normal if you know the initial condition
         self.particles = np.random.multivariate_normal(
@@ -199,26 +199,45 @@ class Guidance:
         if self.is_viz:
             self.estimate()
 
-    def current_entropy(self, sampled_index):
+        # Current entropy 
+        prob = np.nan_to_num(self.weights, copy=True, nan=0)
+        prob = prob / np.sum(prob)
+        # try choosing next particles, if there is an error, return list from 0 to N_s
+        try:
+            self.sampled_index = np.random.choice(a=self.N, size=self.N_s, p=prob)
+        except:
+            print("Bad particle weights :(\n")
+            # particles are basically lost, reinitialize
+            # self.particles = np.random.uniform(
+            #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
+            #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
+            #    (self.N, 3),
+            # )
+            # self.weights = np.ones(self.N) / self.N
+            self.resample()
+            self.sampled_index = np.arange(self.N_s)
+        self.Hp_t = self.current_entropy()
+
+    def current_entropy(self):
         now = rospy.get_time() - self.initial_time
         # Entropy of current distribution
         if self.is_update:
             self.in_FOV = 1
             H = self.entropy_particle(
-                self.prev_particles[sampled_index],
-                np.copy(self.prev_weights[sampled_index]),
-                self.particles[sampled_index],
-                np.copy(self.weights[sampled_index]),
+                self.prev_particles[self.sampled_index],
+                np.copy(self.prev_weights[self.sampled_index]),
+                self.particles[self.sampled_index],
+                np.copy(self.weights[self.sampled_index]),
                 self.noisy_turtle_pose,
             )
         else:
             self.in_FOV = 0
             H = self.entropy_particle(
-                self.prev_particles[sampled_index],
+                self.prev_particles[self.sampled_index],
                 np.copy(
-                    self.weights[sampled_index]
+                    self.weights[self.sampled_index]
                 ),  # current weights are the (t-1) weights because no update
-                self.particles[sampled_index],
+                self.particles[self.sampled_index],
             )
 
         entropy_time = rospy.get_time() - self.initial_time
@@ -246,27 +265,9 @@ class Guidance:
             future_parts, prev_future_parts, last_future_time = self.predict(
                 future_parts, self.weights, last_future_time + 0.1
             )
-        # Future measurements
-        prob = np.nan_to_num(self.weights, copy=True, nan=0)
-        prob = prob / np.sum(prob)
-        # try choosing next particles, if there is an error, return list from 0 to N_s
-        try:
-            sampled_index = np.random.choice(a=self.N, size=self.N_s, p=prob)
-        except:
-            print("Bad particle weights :(\n")
-            # particles are basically lost, reinitialize
-            # self.particles = np.random.uniform(
-            #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-            #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-            #    (self.N, 3),
-            # )
-            # self.weights = np.ones(self.N) / self.N
-            self.resample()
-            sampled_index = np.arange(self.N_s)
         # Future possible measurements
         # TODO: implement N_m sampled measurements
-        z_hat = self.add_noise(future_parts[sampled_index], self.measurement_covariance)
-        self.Hp_t = self.current_entropy(sampled_index)
+        z_hat = self.add_noise(future_parts[self.sampled_index], self.measurement_covariance)
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
@@ -280,19 +281,19 @@ class Guidance:
                 )
                 # H (x_{t+k} | \hat{z}_{t+k})
                 Hp_k[jj] = self.entropy_particle(
-                    prev_future_parts[sampled_index],
-                    np.copy(self.weights[sampled_index]),
-                    future_parts[sampled_index],
-                    future_weight[:, jj][sampled_index],
+                    prev_future_parts[self.sampled_index],
+                    np.copy(self.weights[self.sampled_index]),
+                    future_parts[self.sampled_index],
+                    future_weight[:, jj][self.sampled_index],
                     z_hat[jj],
                 )
             else:
                 Hp_k[jj] = self.entropy_particle(
-                    prev_future_parts[sampled_index],
+                    prev_future_parts[self.sampled_index],
                     np.copy(
-                        self.weights[sampled_index]
+                        self.weights[self.sampled_index]
                     ),  # current weights are the (k-1) weights because no update
-                    future_parts[sampled_index],
+                    future_parts[self.sampled_index],
                 )
 
             # Information Gain
@@ -729,7 +730,7 @@ class Guidance:
     def quad_odom_cb(self, msg):
         if self.init_finished:
             if self.is_sim:
-                self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])
+                self.quad_position = np.array([msg.pose.position.x, -msg.pose.position.y])
             else:
                 self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])  # -y to transform NWU to NED 
             # self.quad_yaw = self.euler_from_quaternion(msg.pose.orientation)[2]  # TODO: unwrap message before function
@@ -772,6 +773,12 @@ class Guidance:
                 ds.velocity_valid = False
             ds.pose.z = -self.height
             self.pose_pub.publish(ds)
+            # FOV err pub
+            self.FOV_err = self.quad_position - self.noisy_turtle_pose[:2]
+            err_fov_msg = PointStamped()
+            err_fov_msg.point.x = self.FOV_err[0]
+            err_fov_msg.point.y = self.FOV_err[1]
+            self.err_fov_pub.publish(err_fov_msg)
             if self.is_viz:
                 # FOV pub
                 fov_msg = Float32MultiArray()
@@ -824,11 +831,6 @@ class Guidance:
         err_msg.point.y = self.weighted_mean[1] - self.noisy_turtle_pose[1]
         err_msg.point.z = self.weighted_mean[2] - self.noisy_turtle_pose[2]
         self.err_estimation_pub.publish(err_msg)
-        self.FOV_err = self.quad_position - self.noisy_turtle_pose[:2]
-        err_fov_msg = PointStamped()
-        err_fov_msg.point.x = self.FOV_err[0]
-        err_fov_msg.point.y = self.FOV_err[1]
-        self.err_fov_pub.publish(err_fov_msg)
         # Number of effective particles pub
         neff_msg = Float32()
         neff_msg.data = self.Neff
@@ -915,13 +917,12 @@ if __name__ == "__main__":
                 ]
             )
 
-    if guidance.guidance_mode != "Lawnmower":
-        rospy.Timer(rospy.Duration(1.0 / 40.0), guidance.particle_filter)
+    rospy.Timer(rospy.Duration(1.0 / 40.0), guidance.particle_filter)
     if guidance.guidance_mode == "Information":
         rospy.Timer(rospy.Duration(1.0 / 2.0), guidance.information_driven_guidance)
     
     # Publish topics
-    if guidance.guidance_mode != "Lawnmower" and guidance.is_viz:
+    if guidance.is_viz:
         rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_pf)
     rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_desired_state)
 
