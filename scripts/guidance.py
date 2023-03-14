@@ -24,6 +24,7 @@ class Guidance:
         self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
         # Initialization of variables
         self.quad_position = np.array([0, 0])
+        self.actual_turtle_pose = np.array([0, 0, 0])
         self.noisy_turtle_pose = np.array([0, 0, 0])
         self.goal_position = np.array([0, 0])
         self.linear_velocity = np.array([0, 0])
@@ -684,11 +685,11 @@ class Guidance:
                 self.angular_velocity = np.array([msg.twist.twist.angular.z])
 
                 _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
-                turtle_pose = np.array(
+                self.actual_turtle_pose = np.array(
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
                 self.noisy_turtle_pose = self.add_noise(
-                    turtle_pose, self.measurement_covariance
+                    self.actual_turtle_pose, self.measurement_covariance
                 )
             else:
                 turtle_orientation = np.array(
@@ -703,6 +704,8 @@ class Guidance:
                 self.noisy_turtle_pose = np.array(
                     [msg.pose.position.x, msg.pose.position.y, theta_z]
                 )
+                # in hardware we assume the pose is already noisy
+                self.actual_turtle_pose = np.copy(self.noisy_turtle_pose)
 
             if self.is_in_FOV(
                 self.noisy_turtle_pose, self.FOV
@@ -774,7 +777,7 @@ class Guidance:
             ds.pose.z = -self.height
             self.pose_pub.publish(ds)
             # FOV err pub
-            self.FOV_err = self.quad_position - self.noisy_turtle_pose[:2]
+            self.FOV_err = self.quad_position - self.actual_turtle_pose[:2]
             err_fov_msg = PointStamped()
             err_fov_msg.point.x = self.FOV_err[0]
             err_fov_msg.point.y = self.FOV_err[1]
@@ -827,9 +830,9 @@ class Guidance:
         self.particle_pub.publish(mean_msg)
         # Error pub
         err_msg = PointStamped()
-        err_msg.point.x = self.weighted_mean[0] - self.noisy_turtle_pose[0]
-        err_msg.point.y = self.weighted_mean[1] - self.noisy_turtle_pose[1]
-        err_msg.point.z = self.weighted_mean[2] - self.noisy_turtle_pose[2]
+        err_msg.point.x = self.weighted_mean[0] - self.actual_turtle_pose[0]
+        err_msg.point.y = self.weighted_mean[1] - self.actual_turtle_pose[1]
+        err_msg.point.z = self.weighted_mean[2] - self.actual_turtle_pose[2]
         self.err_estimation_pub.publish(err_msg)
         # Number of effective particles pub
         neff_msg = Float32()
