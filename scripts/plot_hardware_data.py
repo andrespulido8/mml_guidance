@@ -9,8 +9,10 @@ import matplotlib.pyplot as plt
 guidance_mode = 'Information'
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/January23/joined/"
+folder_path = package_dir + "/hardware_data/joined/"
 csv_file = folder_path + guidance_mode + '_joined.csv'
+
+is_plot = False
 
 # Set the list of column names to include in the plots
 include_data = {
@@ -55,27 +57,29 @@ def main():
             x_label = col_name
         elif any(col_name == word for word in include_plot):
             # Check if the column name contains any word in the include_plot set
-
-            # Create a new plot with the x and y data
-            plt.figure(figsize=fig_size)
+            
             # Set the y axis label to the full column name
             y_label = col_name
 
-            # Plot the data
-            t0 = df[x_label][0]
-            plt.plot(crop_col(df[x_label]) - t0, crop_col(df[y_label]), linewidth=2)
-
-            # Plot the vertical line
-            #plt.axvline(x=df[x_label][indx], color='g', linestyle='-')
-
-            # Add the legend and axis labels
-            plt.xlabel("Time [s]", fontdict=font)
-            plt.ylabel(y_label, fontdict=font)
-            
             outdir = folder_path + "/figures/"
             if not os.path.exists(outdir):
                 os.mkdir(outdir)
-            plt.savefig(outdir + y_label.replace(" ", "_") + '.png', dpi=dpi)
+
+            if is_plot:
+                # Create a new plot with the x and y data
+                plt.figure(figsize=fig_size)
+
+                # Plot the data
+                t0 = df[x_label][0]
+                plt.plot(crop_col(df[x_label]) - t0, crop_col(df[y_label]), linewidth=2)
+
+                # Plot the vertical line
+                #plt.axvline(x=df[x_label][indx], color='g', linestyle='-')
+
+                # Add the legend and axis labels
+                plt.xlabel("Time [s]", fontdict=font)
+                plt.ylabel(y_label, fontdict=font)
+                plt.savefig(outdir + y_label.replace(" ", "_") + '.png', dpi=dpi)
         
         if any(col_name == word for word in include_data):
             with open(outdir + 'rms.csv', 'a') as csvfile:
@@ -98,8 +102,10 @@ def main():
           str(perc) + "%")
 
     # Err estimation
-    if guidance_mode != 'Lawnmower' and False:
+    if guidance_mode != 'Lawnmower':
+        # Err estimation
         plt.figure(figsize=fig_size)
+        t0 = df['err estimation rosbagTimestamp'][0]
         plt.plot(crop_col(df['err estimation rosbagTimestamp']) - t0, crop_col(df['err estimation x']), linewidth=2, label='x error')
         plt.plot(crop_col(df['err estimation rosbagTimestamp']) - t0, crop_col(df['err estimation y']), linewidth=2, label='y error')
         plt.xlabel("Time [s]", fontdict=font)
@@ -108,17 +114,19 @@ def main():
         plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
         # Err fov
         plt.figure(figsize=fig_size)
+        t0 = df['err fov rosbagTimestamp'][0]
         plt.plot(crop_col(df['err fov rosbagTimestamp']) - t0, crop_col(df['err fov x']), linewidth=2, label='x error')
         plt.plot(crop_col(df['err fov rosbagTimestamp']) - t0, crop_col(df['err fov y']), linewidth=2, label='y error')
         plt.xlabel("Time [s]", fontdict=font)
         plt.ylabel("FOV Error [m]", fontdict=font)
         plt.legend()
-        plt.savefig(outdir + 'fov' + '.png', dpi=dpi)
+        plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
     else:
         # Err fov for files where the err estimation data is not available
         plt.figure(figsize=fig_size)
         errx = crop_col(df['takahe  nwu  pose stamped x'] - df['rail  nwu  pose stamped x'])
         erry = crop_col(df['takahe  nwu  pose stamped y'] - df['rail  nwu  pose stamped y'])
+        t0 = df['takahe  nwu  pose stamped rosbagTimestamp'][0]
         plt.plot(crop_col(df['takahe  nwu  pose stamped rosbagTimestamp']) - t0, errx, linewidth=2, label='x error')
         plt.plot(crop_col(df['takahe  nwu  pose stamped rosbagTimestamp']) - t0, erry, linewidth=2, label='y error')
         rms_x = round(np.sqrt(np.mean(errx**2)), 3)
@@ -129,6 +137,15 @@ def main():
         plt.ylabel("FOV Error [m]", fontdict=font)
         plt.legend()
         plt.savefig(outdir + 'fov' + '.png', dpi=dpi)
+    # Road network
+    plt.figure(figsize=fig_size)
+    plt.plot(crop_col(df['rail  nwu  pose stamped x']), crop_col(df['rail  nwu  pose stamped y']), linewidth=2, label='turtlebot path')
+    plt.plot(crop_col(df['takahe  nwu  pose stamped x']), crop_col(df['takahe  nwu  pose stamped y']), linewidth=2, label='drone path')
+    plt.plot(crop_col(df['desired state x']), crop_col(df['desired state y']), linewidth=2, label='desired position')
+    plt.xlabel("X position [m]", fontdict=font)
+    plt.ylabel("Y position [m]", fontdict=font)
+    plt.legend()
+    plt.savefig(outdir + 'road' + '.png', dpi=dpi)
 
     # Entropy
     #plt.figure(figsize=fig_size)
