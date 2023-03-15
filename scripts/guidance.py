@@ -106,19 +106,21 @@ class Guidance:
         # Entropy of current distribution
         if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
             H = self.entropy_particle(
-                self.filter.prev_particles[sampled_index],
+                self.filter.prev_particles[:, sampled_index, :],
                 np.copy(self.filter.prev_weights[sampled_index]),
-                self.filter.particles[sampled_index],
+                self.filter.particles[:, sampled_index, :],
                 np.copy(self.filter.weights[sampled_index]),
                 self.noisy_turtle_pose,
             )
         else:
+            #rospy.logwarn("Current_entropy else statement:")
+            #rospy.logwarn(self.filter.prev_particles.shape)
             H = self.entropy_particle(
-                self.filter.prev_particles[sampled_index],
+                self.filter.prev_particles[:, sampled_index,:],
                 np.copy(
                     self.filter.weights[sampled_index]
                 ),  # current weights are the (t-1) weights because no update
-                self.filter.particles[sampled_index],
+                self.filter.particles[:, sampled_index, :],
             )
 
         entropy_time = rospy.get_time() - self.initial_time
@@ -184,18 +186,19 @@ class Guidance:
                 # Check to see if weight dimension vs particle dimension is an issue
 
                 # TODO: figure out how to prevent weights from changing inseide this function
+                #rospy.logerr(future_weight.shape)
                 H1[jj] = self.entropy_particle(
-                    prev_future_parts[candidates_index],
+                    prev_future_parts[:,candidates_index, :],
                     np.copy(self.filter.weights[candidates_index]),
-                    future_parts[candidates_index],
-                    future_weight[:, jj][candidates_index],
+                    future_parts[:, candidates_index, :],
+                    future_weight[candidates_index, jj],
                     z_hat[jj],
                 )
             else:
                 H1[jj] = self.entropy_particle(
-                    prev_future_parts[candidates_index],
+                    prev_future_parts[:, candidates_index, :],
                     np.copy(self.filter.weights[candidates_index]),
-                    future_parts[candidates_index],
+                    future_parts[:, candidates_index, :],
                 )
 
             # Information Gain
@@ -268,8 +271,10 @@ class Guidance:
             )
 
             # likelihood of particle p(xt|xt-1)
-            process_part_like = np.zeros(self.N)
-            for ii in range(self.N):
+            _, part_len, _ = particles.shape
+            process_part_like = np.zeros(part_len)
+            
+            for ii in range(part_len):
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
@@ -321,8 +326,9 @@ class Guidance:
                     )
         else:
             # likelihood of particle p(xt|xt-1)
-            process_part_like = np.zeros(self.N)
-            for ii in range(self.N):
+            _, part_len2, _ = particles.shape
+            process_part_like = np.zeros(part_len2)
+            for ii in range(part_len2):
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
