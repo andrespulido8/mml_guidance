@@ -81,9 +81,9 @@ class ParticleFilter:
         if SAMPLE_ALONG_PATH:
             rng = np.random.default_rng() # This is newly recommended method
             indices = rng.integers(0, self.n_training_samples, self.N)
-            local_particles = np.empty((9,0,3))
+            local_particles = np.empty((10,0,3))
             for i in indices:
-                local_particles = np.concatenate((local_particles, np.expand_dims(self.training_data[i:i+9,:], 1)), axis=1)
+                local_particles = np.concatenate((local_particles, np.expand_dims(self.training_data[i:i+10,:], 1)), axis=1)
                 
         else:
             local_particles = np.random.uniform(
