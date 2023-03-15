@@ -41,17 +41,18 @@
 
     <rosparam file="$(find reef_adaptive_control)/params/$(arg vehicle_type)_pid.yaml" />
     <node name="reef_control_pid" pkg="reef_adaptive_control" type="pid_control_node" output="screen"/>
-    <node name="reef_control_adaptive" pkg="reef_adaptive_control" type="adaptive_node" output="screen">
+    <!--<node name="reef_control_adaptive" pkg="reef_adaptive_control" type="adaptive_node" output="screen">
         <rosparam file="$(find reef_adaptive_control)/params/adaptive_gains.yaml"/>
-    </node>
+    </node>-->
 
 	<!-- Launches the drone guidance (C++)-->
 	<!--<node pkg="mml_guidance" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
 
-  	<param name="is_viz" value="false"/>
+  	<param name="is_viz" value="true"/>
   	<param name="is_sim" value="false"/>
 	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen">
 	  <remap from='/turtle_pose_stamped' to='/rail/nwu/pose_stamped'/>
+	  <remap from='/quad_pose_stamped' to='/takahe/nwu/pose_stamped'/>
 	</node>
 
     <node if="$(arg record_bag)" name="record" pkg="rosbag" type="record" args="-O $(arg bag_name) pose_stamped attitude attitude/euler rc_raw imu/data sonar status pose_stamped xyz_debug_estimate xyz_estimate velocity/body_level_frame controller_state added_torque total_torque"/>

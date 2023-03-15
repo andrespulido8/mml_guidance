@@ -1,0 +1,14 @@
+<!-- launch file for MML demo -->
+<launch>
+    <arg name="record_bag" default="true"/>
+	<arg name="prefix_name" default="hardware"/>
+
+    <arg name="bag_name" default="$(find mml_guidance)/hardware_data/$(arg prefix_name)"/>
+
+	<group if="$(arg record_bag)">
+		<!-- record the bag file. Change -O to -o for only prefix instead of full name-->
+    	<node name="record" pkg="rosbag" type="record" args="-o $(arg bag_name) /xyTh_estimate
+		/odom /n_eff_particles /takahe/nwu/pose_stamped /rail/nwu/pose_stamped /entropy 
+		/err_fov /err_estimation /eer_time /desired_state /is_update /info_gain"/>
+	</group>
+</launch>
