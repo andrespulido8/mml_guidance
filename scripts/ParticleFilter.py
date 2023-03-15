@@ -25,7 +25,7 @@ class ParticleFilter:
         pkg_path = rospkg.RosPack().get_path('mml_guidance')
         model_file = pkg_path+'/scripts/mml_network/models/current.pth'
         training_data_filename = pkg_path+'/scripts/mml_network/no_quad.csv' # squarest_yaw.csv'
-        self.training_data = np.loadtxt(training_data_filename, delimiter=',', skiprows=1)[:2000, 1:] # Hardcoded samples
+        self.training_data = np.loadtxt(training_data_filename, delimiter=',', skiprows=1)[500:4000, 1:] # Hardcoded samples
         self.n_training_samples = self.training_data.shape[0] - 9
         self.motion_model = deploy_mml.Motion_Model(model_file)
 
@@ -77,7 +77,7 @@ class ParticleFilter:
         self.init_done = True
 
     def uniform_sample(self):
-        SAMPLE_ALONG_PATH = True
+        SAMPLE_ALONG_PATH = False
         if SAMPLE_ALONG_PATH:
             rng = np.random.default_rng() # This is newly recommended method
             indices = rng.integers(0, self.n_training_samples, self.N)
