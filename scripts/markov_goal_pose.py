@@ -1,13 +1,12 @@
 #!/usr/bin/env python
-
 import numpy as np
 import rospy
 from geometry_msgs.msg import Pose, PoseStamped
 from nav_msgs.msg import Odometry
 
-
 class MarkovChain:
     def __init__(self):
+        self.is_sim = rospy.get_param("/is_sim", False)
         self.n_states = 5
 
         self.tolerance_radius = 0.2
@@ -18,14 +17,19 @@ class MarkovChain:
         self.prev_mult = 0
 
         # ROS stuff
-        rospy.loginfo("Initializing markov_goal_pose node")
-        self.pose_sub = rospy.Subscriber("agent_pose", PoseStamped, self.odom_cb)
-        self.pose_sub = rospy.Subscriber("/odom", Odometry, self.odom_cb)
-        self.pose_pub = rospy.Publisher("goal_pose", PoseStamped, queue_size=2)
+        rospy.loginfo(
+            f"Initializing markov_goal_pose node with parameter is_sim: {self.is_sim}"
+        )
         self.goal_pose_square()
         self.position = [0.,0.]
-        self.ps = PoseStamped()
-        self.p  = self.ps.pose
+        if self.is_sim:
+            self.pose_sub = rospy.Subscriber("odom", Odometry, self.odom_cb)
+            self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
+            self.p_msg = Pose()
+        else:
+            self.pose_sub = rospy.Subscriber("agent_pose", PoseStamped, self.odom_cb)
+            self.pose_pub = rospy.Publisher("goal_pose", PoseStamped, queue_size=2)
+            self.p_msg  = PoseStamped()
         self.create_pose_msg(self.goal_list[0])
 	
     def goal_pose_square(self):
@@ -109,36 +113,46 @@ class MarkovChain:
         )
 
     def odom_cb(self, msg):
-        self.position = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
-    def posestamped_cb(self, msg):
-        self.position = np.array([msg.pose.position.x, msg.pose.position.y])
+        if self.is_sim:
+            self.position = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
+        else:
+            self.position = np.array([msg.pose.position.x, msg.pose.position.y])
 
-    # self.position = np.array([msg.pose.position.x, msg.pose.position.y])
-
-    def pub_goal_pose(self):
-        """Publishes a goal pose after the goal is reached within tolerance_radius"""
-        #rospy.logwarn(self.goal_list[self.prev_goal]['x','y'])
+    def compute_goal_pose(self):
+        """Computes a new goal pose after the goal is reached within tolerance_radius"""
+	    #rospy.logwarn(self.goal_list[self.prev_goal]['x','y'])
         d = np.linalg.norm(self.position - np.array([self.goal_list[self.prev_goal]['x'], self.goal_list[self.prev_goal]['y']]))
-        #rospy.logwarn("G: %d\tD: %.4f"%(self.prev_goal, d))
         if d < self.tolerance_radius:
-        #if np.linalg.norm(self.position - self.goal_list[self.prev_goal]['x':'y']) < self.tolerance_radius:
             self.prev_goal = np.random.choice(len(self.goal_list), p=self.trans_matrix[self.prev_goal])
 
             goal_pose = self.goal_list[self.prev_goal]
-            self.create_pose_msg(goal_pose)
             rospy.logwarn("New goal pose: x={}, y={} with index {}".format(
                     goal_pose["x"], goal_pose["y"], self.prev_goal
                 )
             )
+        else:
+            goal_pose = self.goal_list[self.prev_goal]
+        self.create_pose_msg(goal_pose)
 
     def create_pose_msg(self, goal_pose):
-        self.p.position.x = goal_pose["x"]
-        self.p.position.y = goal_pose["y"]
-        self.p.position.z = goal_pose["z"]
-        self.p.orientation.x = goal_pose["qx"]
-        self.p.orientation.y = goal_pose["qy"]
-        self.p.orientation.z = goal_pose["qz"]
-        self.p.orientation.w = goal_pose["qw"]
+        """Creates a message and publishes it"""
+        if self.is_sim:
+            self.p_msg.position.x = goal_pose["x"]
+            self.p_msg.position.y = goal_pose["y"]
+            self.p_msg.position.z = goal_pose["z"]
+            self.p_msg.orientation.x = goal_pose["qx"]
+            self.p_msg.orientation.y = goal_pose["qy"]
+            self.p_msg.orientation.z = goal_pose["qz"]
+            self.p_msg.orientation.w = goal_pose["qw"]
+        else:
+            self.p_msg.pose.position.x = goal_pose["x"]
+            self.p_msg.pose.position.y = goal_pose["y"]
+            self.p_msg.pose.position.z = goal_pose["z"]
+            self.p_msg.pose.orientation.x = goal_pose["qx"]
+            self.p_msg.pose.orientation.y = goal_pose["qy"]
+            self.p_msg.pose.orientation.z = goal_pose["qz"]
+            self.p_msg.pose.orientation.w = goal_pose["qw"]
+        self.pose_pub.publish(self.p_msg)
 
 
 if __name__ == "__main__":
@@ -146,8 +160,6 @@ if __name__ == "__main__":
     rate = rospy.Rate(10)  # Hz
     square_chain = MarkovChain()
     while not rospy.is_shutdown():
-            square_chain.pub_goal_pose()
-            square_chain.pose_pub.publish(square_chain.ps)
+            square_chain.compute_goal_pose()
             rate.sleep()
-            
 
