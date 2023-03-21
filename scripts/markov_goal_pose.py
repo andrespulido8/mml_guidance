@@ -9,7 +9,7 @@ class MarkovChain:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.n_states = 5
 
-        self.tolerance_radius = 0.2
+        self.tolerance_radius = 0.3
 
         # self.visited_states = np.zeros(self.n_states)
         self.init_time = np.array(rospy.get_time())

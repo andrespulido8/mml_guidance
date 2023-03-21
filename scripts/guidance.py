@@ -25,7 +25,7 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
 
         # Initialization of variables
         self.quad_position = np.array([0, 0])
@@ -45,7 +45,6 @@ class Guidance:
         self.Hp_t = 0  # partial entropy
         self.IG_range = np.array([0, 0, 0])
         self.t_EER = 0
-        self.weighted_mean = np.array([0, 0, 0])
         self.position_following = False
         # Measurement Model
         self.height = 1.5
@@ -58,7 +57,7 @@ class Guidance:
         self.idg_counter = 0
         ## PARTICLE FILTER  ##
         # number of particles
-        self.N = 500
+        self.N = 1000
         self.filter = ParticleFilter(self.N)
 
         # Occlusions
@@ -182,7 +181,7 @@ class Guidance:
         """
         self.idg_counter+=1
         now = rospy.get_time() - self.initial_time
-        rospy.logwarn("Counter: %d - Elapsed: %f" %(self.idg_counter, now))
+        #rospy.logwarn("Counter: %d - Elapsed: %f" %(self.idg_counter, now))
         ## Guidance
         future_weight = np.zeros((self.N, self.N_s))
         Hp_k = np.zeros(self.N_s)  # partial entropy
@@ -192,14 +191,14 @@ class Guidance:
         future_parts = np.copy(self.filter.particles)
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
-            future_parts = self.filter.motion_model.predict(future_parts)
-            #future_parts, last_future_time = self.filter.predict(
-            #    future_parts,
-            #    self.filter.weights,
-            #   last_future_time + 0.1,
-            #    angular_velocity=self.angular_velocity,
-            #    linear_velocity=self.linear_velocity,
-            #)
+            #future_parts = self.filter.motion_model.predict(future_parts)
+            future_parts, last_future_time = self.filter.predict(
+                future_parts,
+                self.filter.weights,
+               last_future_time + 0.1,
+                angular_velocity=self.angular_velocity,
+                linear_velocity=self.linear_velocity,
+            )
         # Future possible measurements
         # TODO: implement N_m sampled measurements
         z_hat = self.filter.add_noise(future_parts[-1,self.sampled_index,:], self.filter.measurement_covariance)
@@ -542,8 +541,8 @@ class Guidance:
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = -self.goal_position[1]
                     elif self.guidance_mode == "Particles":
-                        ds.pose.x = self.weighted_mean[0]
-                        ds.pose.y = -self.weighted_mean[1]
+                        ds.pose.x = self.noisy_turtle_pose[0]
+                        ds.pose.y = -self.noisy_turtle_pose[1]
                     elif self.guidance_mode == "Lawnmower":
                         mower_position = self.lawnmower()
                         ds.pose.x = mower_position[0]
@@ -600,9 +599,9 @@ class Guidance:
     def pub_pf(self, event=None):
         # Particle pub
         mean_msg = ParticleMean()
-        mean_msg.mean.x = self.weighted_mean[0]
-        mean_msg.mean.y = self.weighted_mean[1]
-        mean_msg.mean.yaw = self.weighted_mean[2]
+        mean_msg.mean.x = self.filter.weighted_mean[0]
+        mean_msg.mean.y = self.filter.weighted_mean[1]
+        mean_msg.mean.yaw = self.filter.weighted_mean[2]
         for ii in range(self.N):
             particle_msg = Particle()
             particle_msg.x = self.filter.particles[-1, ii, 0]
@@ -610,13 +609,13 @@ class Guidance:
             particle_msg.yaw = self.filter.particles[-1, ii, 2]
             particle_msg.weight = self.filter.weights[ii]
             mean_msg.all_particle.append(particle_msg)
-        mean_msg.cov = np.diag(self.var).flatten("C")
+        mean_msg.cov = np.diag(self.filter.var).flatten("C")
         self.particle_pub.publish(mean_msg)
         # Error pub
         err_msg = PointStamped()
-        err_msg.point.x = self.weighted_mean[0] - self.actual_turtle_pose[0]
-        err_msg.point.y = self.weighted_mean[1] - self.actual_turtle_pose[1]
-        err_msg.point.z = self.weighted_mean[2] - self.actual_turtle_pose[2]
+        err_msg.point.x = self.filter.weighted_mean[0] - self.actual_turtle_pose[0]
+        err_msg.point.y = self.filter.weighted_mean[1] - self.actual_turtle_pose[1]
+        err_msg.point.z = self.filter.weighted_mean[2] - self.actual_turtle_pose[2]
         self.err_estimation_pub.publish(err_msg)
         # Number of effective particles pub
         neff_msg = Float32()
@@ -654,6 +653,9 @@ class Guidance:
                         self.t_EER,
                     ]
                 )
+
+    def guidance_pf(self, event=None):
+        self.filter.pf_loop(self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity)
 
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
@@ -703,14 +705,14 @@ if __name__ == "__main__":
                 ]
             )
 
-    rospy.Timer(rospy.Duration(1.0 / 20.0), partial(guidance.filter.pf_loop, guidance.noisy_turtle_pose, guidance.angular_velocity, guidance.linear_velocity))
+    rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.guidance_pf) 
     rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information":
-        rospy.Timer(rospy.Duration(1.0 / 2.0), guidance.information_driven_guidance)
+        rospy.Timer(rospy.Duration(1.0 / 2), guidance.information_driven_guidance)
     
     # Publish topics
     if guidance.is_viz:
-        rospy.Timer(rospy.Duration(1.0 / 10.0), guidance.pub_pf)
-    rospy.Timer(rospy.Duration(1.0 / 10.0), guidance.pub_desired_state)
+        rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.pub_pf)
+    rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.pub_desired_state)
 
     rospy.spin()

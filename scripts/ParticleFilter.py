@@ -15,7 +15,6 @@ ANG_VEL = 0.0
 class ParticleFilter:
     def __init__(self, num_particles=10):
 
-        self.init_done = False
         deg2rad = lambda deg: np.pi * deg / 180
 
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
@@ -31,24 +30,25 @@ class ParticleFilter:
 
         self.N = num_particles
         self.particles = self.uniform_sample()
-        # Use multivariate normal if you know the initial condition
-        #self.particles = np.random.multivariate_normal(
-        #    np.array([1.3, -1.26, 0]), 2 * self.measurement_covariance, self.N
-        #)
-
         self.prev_particles = np.copy(self.particles)
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
+        self.weighted_mean = np.array([0, 0, 0])
         self.measurement_covariance = np.array(
             [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
+        # Use multivariate normal if you know the initial condition
+        self.particles = np.array([np.random.multivariate_normal(
+            np.array([1.3, -1.26, 0]), 2 * self.measurement_covariance, self.N
+        )])
+
         self.is_update = False
 
         self.yaw_mean = self.yaw_mean = np.arctan2(
             np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
             np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
         )
-
+        self.neff = self.nEff(self.weights)
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.process_covariance = np.array(
@@ -62,25 +62,8 @@ class ParticleFilter:
         self.measurement_update_time = 2.0  # seconds
 
         self.turtle_pose = np.array([0.0, 0.0, 0.0])
-        #self.udpate_msg = Bool()
-        # ROS
-        self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
-        if self.is_viz:
-            # Particle filter ROS stuff
-            self.particle_pub = rospy.Publisher(
-                "xyTh_estimate", ParticleMean, queue_size=1
-            )
-            self.err_estimate_pub = rospy.Publisher(
-                "err_estimate", PointStamped, queue_size=1
-            )
-
-        self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
-        self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
-        self.update_msg = Bool()
 
         self.pred_counter = 0
-
-        self.init_done = True
 
     def uniform_sample(self):
         SAMPLE_ALONG_PATH = False
@@ -123,13 +106,13 @@ class ParticleFilter:
         #self.predict_mml()
         self.pred_counter += 1
 
-        rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f || True: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1]), self.turtle_pose[0], self.turtle_pose[1]))
+        #rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f || True: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1]), self.turtle_pose[0], self.turtle_pose[1]))
 
         # Update step
         if self.is_update:
             self.prev_weights = np.copy(self.weights)
             self.weights = self.update(
-                self.weights, self.particles, self.noisy_turtle_pose
+                self.weights, self.particles, noisy_measurement 
             )
 
         # Resampling step
@@ -155,8 +138,7 @@ class ParticleFilter:
                 # )
                 self.resample()
 
-        if self.is_viz:
-            self.estimate()
+        self.estimate()
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief in the system state.
@@ -268,9 +250,9 @@ class ParticleFilter:
             if np.sum(self.weights) > 0
             else self.weights
         )
-        print("Min: %.4f, Max: %.4f, Dot: %.4f"%(self.weights.min(), self.weights.max(), self.weights.dot(self.weights)))
+        #print("Min: %.4f, Max: %.4f, Dot: %.4f"%(self.weights.min(), self.weights.max(), self.weights.dot(self.weights)))
         indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
-        self.particles = self.particles[:,indexes,:]
+        self.particles = self.particles[-1,indexes,:]
         self.weights = self.weights[indexes]
         # Roughening. See Bootstrap Filter from Crassidis and Junkins.
         G = 0.2
@@ -328,7 +310,7 @@ class ParticleFilter:
         return mean + noise
 
     @staticmethod
-    def nEff(self, wgts):
+    def nEff(wgts):
         """Compute the number of effective particles
         Source: https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/12-Particle-Filters.ipynb
         """
