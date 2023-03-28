@@ -25,7 +25,7 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
 
         # Initialization of variables
         self.quad_position = np.array([0, 0])
@@ -186,16 +186,21 @@ class Guidance:
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
             #future_parts = self.filter.motion_model.predict(future_parts)
-            future_parts, last_future_time = self.filter.predict(
+            future_parts, prev_future_parts, last_future_time = self.filter.predict(
                 future_parts,
                 self.filter.weights,
                last_future_time + 0.1,
-                angular_velocity=self.angular_velocity,
+                angular_velocity=np.zeros(1),
                 linear_velocity=self.linear_velocity,
             )
         # Future possible measurements
         # TODO: implement N_m sampled measurements
-        z_hat = self.filter.add_noise(future_parts[self.sampled_index,:], self.filter.measurement_covariance)
+        print('future_parts.shape', future_parts.shape)
+        z_hat = self.filter.add_noise(future_parts[-1, self.sampled_index,:], self.filter.measurement_covariance)
+        print('z_hat.shape', z_hat.shape)
+        print('future_parts[:, self.sampled_index,:].shape', future_parts[:, self.sampled_index,:].shape)
+        likelihood = self.filter.likelihood(z_hat, future_parts[-1, self.sampled_index,:])
+        print('likelihood.shape\n', likelihood.shape)
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
@@ -233,7 +238,8 @@ class Guidance:
         self.t_EER = rospy.get_time() - self.initial_time - now
         #print("IG time: ", self.t_EER)
 
-        action_index = np.argmax(Ip)
+        EER = likelihood * Ip 
+        action_index = np.argmax(EER)
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         # print("possible actions: ", z_hat[:, :2])
@@ -535,8 +541,8 @@ class Guidance:
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = -self.goal_position[1]
                     elif self.guidance_mode == "Particles":
-                        ds.pose.x = self.noisy_turtle_pose[0]
-                        ds.pose.y = -self.noisy_turtle_pose[1]
+                        ds.pose.x = self.filter.weighted_mean[0]
+                        ds.pose.y = -self.filter.weighted_mean[1]
                     elif self.guidance_mode == "Lawnmower":
                         mower_position = self.lawnmower()
                         ds.pose.x = mower_position[0]

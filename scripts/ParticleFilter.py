@@ -38,11 +38,11 @@ class ParticleFilter:
         # Unfirmly sample particles
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
-        self.particles = np.array([
-            np.random.multivariate_normal(
-            np.array([1.3, -1.26, 0]), self.measurement_covariance, self.N
-            )
-        ])
+        #self.particles = np.array([
+        #    np.random.multivariate_normal(
+        #    np.array([1.3, -1.26, 0]), self.measurement_covariance, self.N
+        #    )
+        #])
         self.prev_particles = np.copy(self.particles)
 
         self.is_update = False
@@ -151,35 +151,37 @@ class ParticleFilter:
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) weight of the particles
         """
-        weights = self.get_weight(particles, noisy_turtle_pose, weights)
+        weights = weights * self.likelihood(particles[-1, :, :], np.tile(noisy_turtle_pose, (self.N, 1)))
         weights = weights / np.sum(weights) if np.sum(weights) > 0 else weights
         return weights
 
         
-    def get_weight(self, particles, y_act, weight):
+    def likelihood(self, particles, y_act):
         """Particles that are closer to the noisy measurements are weighted higher than
         particles which don't match the measurements very well.
+        There are two methods to compute this. 
         """
-        # Update the weights of each particle. There are two methods to compute this:
 
-        # Method 1: For loop
-        for ii in range(self.N):
+        # Method 1: Manual for loop with normal multivariate equation
+        shape =particles.shape[0]
+        like = np.zeros(shape)
+        for ii in range(shape):
            # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
            # likelihood, but it does not matter since it can be factored
-           # and then cancelled out during the normalization.
-           like = (
+           # and then cancelled out during the normalization or expectation.
+           like[ii] = np.exp(
                -0.5
-               * (particles[-1, ii, :] - y_act).T
+               * (particles[ii] - y_act[ii]).T
                @ self.noise_inv
-               @ (particles[-1, ii, :] - y_act)
+               @ (particles[ii] - y_act[ii])
            )
-           weight[ii] = weight[ii] * np.exp(like)
 
         # Method 2: Vectorized using scipy.stats
-        #weight = weight * stats.multivariate_normal.pdf(
-        #    x=particles, mean=y_act, cov=self.measurement_covariance
+        # TODO fix to account for different measurements
+        #like = stats.multivariate_normal.pdf(
+        #    x=particles, mean=y_act[0], cov=self.measurement_covariance
         #)
-        return weight
+        return like 
 
     def predict_mml(self):
         self.particles = self.motion_model.predict(self.particles)
