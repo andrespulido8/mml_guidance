@@ -2,7 +2,6 @@
 import csv
 import os
 
-from functools import partial
 import numpy as np
 import rospkg
 import rospy
@@ -25,7 +24,7 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
 
         # Initialization of variables
         self.quad_position = np.array([0, 0])
@@ -76,9 +75,7 @@ class Guidance:
         rospy.loginfo(
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
         )
-        rospy.loginfo(
-            f"...and parameter is_viz: {self.is_viz}"
-        )
+        rospy.loginfo(f"...and parameter is_viz: {self.is_viz}")
         rospy.loginfo(f"Quadcopter in mode: {self.guidance_mode}")
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
 
@@ -106,18 +103,14 @@ class Guidance:
             self.particle_pub = rospy.Publisher(
                 "xyTh_estimate", ParticleMean, queue_size=1
             )
-            self.err_fov_pub = rospy.Publisher(
-                "err_fov", PointStamped, queue_size=1
-            )
+            self.err_fov_pub = rospy.Publisher("err_fov", PointStamped, queue_size=1)
             self.err_estimation_pub = rospy.Publisher(
                 "err_estimation", PointStamped, queue_size=1
             )
             self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
             self.info_gain_pub = rospy.Publisher("info_gain", Float32, queue_size=1)
             self.eer_time_pub = rospy.Publisher("eer_time", Float32, queue_size=1)
-            self.n_eff_pub = rospy.Publisher(
-                "n_eff_particles", Float32, queue_size=1
-            )
+            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
             self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
             self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
             self.des_fov_pub = rospy.Publisher(
@@ -152,10 +145,10 @@ class Guidance:
             )
         else:
             self.in_FOV = 0
-            #rospy.logwarn("Current_entropy else statement:")
-            #rospy.logwarn(self.filter.prev_particles.shape)
+            # rospy.logwarn("Current_entropy else statement:")
+            # rospy.logwarn(self.filter.prev_particles.shape)
             self.Hp_t = self.entropy_particle(
-                self.filter.prev_particles[-1, self.sampled_index,:],
+                self.filter.prev_particles[-1, self.sampled_index, :],
                 np.copy(
                     self.filter.weights[self.sampled_index]
                 ),  # current weights are the (t-1) weights because no update
@@ -173,9 +166,9 @@ class Guidance:
         goal_position: the position of the measurement that resulted in the
         maximum EER
         """
-        self.idg_counter+=1
+        self.idg_counter += 1
         now = rospy.get_time() - self.initial_time
-        #rospy.logwarn("Counter: %d - Elapsed: %f" %(self.idg_counter, now))
+        # rospy.logwarn("Counter: %d - Elapsed: %f" %(self.idg_counter, now))
         ## Guidance
         future_weight = np.zeros((self.N, self.N_s))
         Hp_k = np.zeros(self.N_s)  # partial entropy
@@ -185,22 +178,20 @@ class Guidance:
         future_parts = np.copy(self.filter.particles)
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
-            #future_parts = self.filter.motion_model.predict(future_parts)
+            # future_parts = self.filter.motion_model.predict(future_parts)
             future_parts, prev_future_parts, last_future_time = self.filter.predict(
                 future_parts,
                 self.filter.weights,
-               last_future_time + 0.1,
-                angular_velocity=np.zeros(1),
-                linear_velocity=self.linear_velocity,
+                last_future_time + 0.1,
             )
         # Future possible measurements
         # TODO: implement N_m sampled measurements
-        print('future_parts.shape', future_parts.shape)
-        z_hat = self.filter.add_noise(future_parts[-1, self.sampled_index,:], self.filter.measurement_covariance)
-        print('z_hat.shape', z_hat.shape)
-        print('future_parts[:, self.sampled_index,:].shape', future_parts[:, self.sampled_index,:].shape)
-        likelihood = self.filter.likelihood(z_hat, future_parts[-1, self.sampled_index,:])
-        print('likelihood.shape\n', likelihood.shape)
+        z_hat = self.filter.add_noise(
+            future_parts[-1, self.sampled_index, :], self.filter.measurement_covariance
+        )
+        likelihood = self.filter.likelihood(
+            z_hat, future_parts[-1, self.sampled_index, :]
+        )
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
@@ -216,7 +207,7 @@ class Guidance:
 
                 # H (x_{t+k} | \hat{z}_{t+k})
                 # TODO: figure out how to prevent weights from changing inside this function
-                #rospy.logerr(future_weight.shape)
+                # rospy.logerr(future_weight.shape)
                 Hp_k[jj] = self.entropy_particle(
                     prev_future_parts[-1, self.sampled_index, :],
                     np.copy(self.filter.weights[self.sampled_index]),
@@ -236,15 +227,15 @@ class Guidance:
 
         # EER = I.mean() # implemented when N_m is implemented
         self.t_EER = rospy.get_time() - self.initial_time - now
-        #print("IG time: ", self.t_EER)
+        # print("IG time: ", self.t_EER)
 
-        EER = likelihood * Ip 
+        EER = likelihood * Ip
         action_index = np.argmax(EER)
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
-        #print("Chosen action:", z_hat[action_index, :2])
+        # print("Chosen action:", z_hat[action_index, :2])
         self.goal_position = z_hat[action_index][:2]
 
     def entropy_particle(
@@ -266,19 +257,21 @@ class Guidance:
             # (how likely is each of the particles in the gaussian of the measurement)
             # TODO: change the N to be the general case (Default)
             like_meas = stats.multivariate_normal.pdf(
-                x=particles, mean=y_meas, cov=self.filter.measurement_covariance
+                x=particles[:, :2],
+                mean=y_meas[:2],
+                cov=self.filter.measurement_covariance,
             )
 
             # likelihood of particle p(xt|xt-1)
             part_len, _ = particles.shape
             process_part_like = np.zeros(part_len)
-            
+
             for ii in range(part_len):
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
-                    x=prev_particles[:, :],
-                    mean=particles[ii, :],
+                    x=prev_particles[:, :2],
+                    mean=particles[ii, :2],
                     cov=self.filter.process_covariance,
                 )
                 # TODO: investigate if I need to multiply this by prev_wgts
@@ -332,8 +325,8 @@ class Guidance:
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
-                    x=prev_particles[:, :],
-                    mean=particles[ii, :],
+                    x=prev_particles[:, :2],
+                    mean=particles[ii, :2],
                     cov=self.filter.process_covariance,
                 )
                 process_part_like[ii] = np.sum(like_particle * prev_wgts)
@@ -464,24 +457,26 @@ class Guidance:
                 self.actual_turtle_pose = np.array(
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
-                self.noisy_turtle_pose = self.filter.add_noise(
-                    self.actual_turtle_pose, self.filter.measurement_covariance
+                self.noisy_turtle_pose[:2] = self.filter.add_noise(
+                    self.actual_turtle_pose[:2], self.filter.measurement_covariance
                 )
             else:
-                self.actual_turtle_pose = np.array([msg.pose.position.x, msg.pose.position.y])
+                self.actual_turtle_pose = np.array(
+                    [msg.pose.position.x, msg.pose.position.y]
+                )
                 # In the current network we do not use the orientation of the turtlebot
-                #turtle_orientation = np.array(
+                # turtle_orientation = np.array(
                 #    [
                 #        msg.pose.orientation.x,
                 #        msg.pose.orientation.y,
                 #        msg.pose.orientation.z,
                 #        msg.pose.orientation.w,
                 #    ]
-                #)
-                #_, _, theta_z = self.euler_from_quaternion(turtle_orientation)
-                #self.noisy_turtle_pose = np.array(
+                # )
+                # _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
+                # self.noisy_turtle_pose = np.array(
                 #    [msg.pose.position.x, msg.pose.position.y, theta_z]
-                #)
+                # )
                 # in hardware we assume the pose is already noisy
                 self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
                 self.pub_desired_state()
@@ -497,7 +492,7 @@ class Guidance:
                 self.filter.is_update = False  # no update
 
     def turtle_hardware_odom_cb(self, msg):
-        """ Here we get the linear and angular velocities 
+        """Here we get the linear and angular velocities
         from the wheel encoders"""
         if self.init_finished:
             self.linear_velocity = np.array(
@@ -508,17 +503,21 @@ class Guidance:
     def rc_cb(self, msg):
         if msg.values[6] > 500:
             self.position_following = True
-            #print("rc message > 500, AUTONOMOUS MODE")
+            # print("rc message > 500, AUTONOMOUS MODE")
         else:
             self.position_following = False
-            #print("no rc message > 500, MANUAL MODE: turn it on with the rc controller")
+            # print("no rc message > 500, MANUAL MODE: turn it on with the rc controller")
 
     def quad_odom_cb(self, msg):
         if self.init_finished:
             if self.is_sim:
-                self.quad_position = np.array([msg.pose.position.x, -msg.pose.position.y])
+                self.quad_position = np.array(
+                    [msg.pose.position.x, -msg.pose.position.y]
+                )
             else:
-                self.quad_position = np.array([msg.pose.position.x, msg.pose.position.y])  # -y to transform NWU to NED 
+                self.quad_position = np.array(
+                    [msg.pose.position.x, msg.pose.position.y]
+                )  # -y to transform NWU to NED
             # self.quad_position[1] = -self.quad_position[1] if not self.guidance_mode else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position)
 
@@ -541,8 +540,8 @@ class Guidance:
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = -self.goal_position[1]
                     elif self.guidance_mode == "Particles":
-                        ds.pose.x = self.filter.weighted_mean[0]
-                        ds.pose.y = -self.filter.weighted_mean[1]
+                        ds.pose.x = self.noisy_turtle_pose[0]
+                        ds.pose.y = -self.noisy_turtle_pose[1]
                     elif self.guidance_mode == "Lawnmower":
                         mower_position = self.lawnmower()
                         ds.pose.x = mower_position[0]
@@ -579,7 +578,9 @@ class Guidance:
                 fov_msg.data = fov_matrix.flatten("C")
                 self.fov_pub.publish(fov_msg)
                 # Desired FOV
-                self.des_fov = self.construct_FOV(np.array([ds.pose.x, -ds.pose.y]))  # from turtle frame to quad frame
+                self.des_fov = self.construct_FOV(
+                    np.array([ds.pose.x, -ds.pose.y])
+                )  # from turtle frame to quad frame
                 des_fov_matrix = np.array(
                     [
                         [self.des_fov[0], self.des_fov[2]],
@@ -601,12 +602,12 @@ class Guidance:
         mean_msg = ParticleMean()
         mean_msg.mean.x = self.filter.weighted_mean[0]
         mean_msg.mean.y = self.filter.weighted_mean[1]
-        mean_msg.mean.yaw = self.filter.weighted_mean[2]
+        mean_msg.mean.yaw = np.linalg.norm(self.filter.weighted_mean[2:4])
         for ii in range(self.N):
             particle_msg = Particle()
             particle_msg.x = self.filter.particles[-1, ii, 0]
             particle_msg.y = self.filter.particles[-1, ii, 1]
-            particle_msg.yaw = self.filter.particles[-1, ii, 2]
+            particle_msg.yaw = np.linalg.norm(self.filter.particles[-1, ii, 2:4])
             particle_msg.weight = self.filter.weights[ii]
             mean_msg.all_particle.append(particle_msg)
         mean_msg.cov = np.diag(self.filter.var).flatten("C")
@@ -615,7 +616,6 @@ class Guidance:
         err_msg = PointStamped()
         err_msg.point.x = self.filter.weighted_mean[0] - self.actual_turtle_pose[0]
         err_msg.point.y = self.filter.weighted_mean[1] - self.actual_turtle_pose[1]
-        err_msg.point.z = self.filter.weighted_mean[2] - self.actual_turtle_pose[2]
         self.err_estimation_pub.publish(err_msg)
         # Number of effective particles pub
         neff_msg = Float32()
@@ -642,7 +642,6 @@ class Guidance:
                     [
                         err_msg.point.x,
                         err_msg.point.y,
-                        err_msg.point.z,
                         self.FOV_err[0],
                         self.FOV_err[1],
                         self.Hp_t,
@@ -655,7 +654,7 @@ class Guidance:
                 )
 
     def guidance_pf(self, event=None):
-        self.filter.pf_loop(self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity)
+        self.filter.pf_loop(self.noisy_turtle_pose)
 
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
@@ -663,6 +662,7 @@ class Guidance:
         rospy.sleep(0.1)
         rospy.signal_shutdown("Timer signal shutdown")
         # os.system("rosnode kill other_node")
+
 
 class Occlusions:
     def __init__(self, positions, widths):
@@ -693,7 +693,6 @@ if __name__ == "__main__":
                 [
                     "X error [m]",
                     "Y error [m]",
-                    "Yaw error [rad]",
                     "FOV X error [m]",
                     "FOV Y error [m]",
                     "Partial Entropy",
@@ -705,11 +704,11 @@ if __name__ == "__main__":
                 ]
             )
 
-    rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.guidance_pf) 
+    rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.guidance_pf)
     rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information":
         rospy.Timer(rospy.Duration(1.0 / 2), guidance.information_driven_guidance)
-    
+
     # Publish topics
     if guidance.is_viz:
         rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.pub_pf)
