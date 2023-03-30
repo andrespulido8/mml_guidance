@@ -24,7 +24,7 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
 
         # Initialization of variables
         self.quad_position = np.array([0, 0])
@@ -136,15 +136,16 @@ class Guidance:
             self.sampled_index = np.random.choice(a=self.N, size=self.N_s, p=prob)
         except:
             print("Bad particle weights when sampling for entropy calc :(\n")
+            # particles are basically lost, reinitialize
             self.filter.resample()
             self.sampled_index = np.arange(self.N_s)
         # Entropy of current distribution
         if self.filter.is_update:
             self.in_FOV = 1
             self.Hp_t = self.entropy_particle(
-                self.filter.prev_particles[:, self.sampled_index, :],
+                self.filter.prev_particles[-1, self.sampled_index, :],
                 np.copy(self.filter.prev_weights[self.sampled_index]),
-                self.filter.particles[:, self.sampled_index, :],
+                self.filter.particles[-1, self.sampled_index, :],
                 np.copy(self.filter.weights[self.sampled_index]),
                 self.noisy_turtle_pose,
             )
@@ -153,11 +154,11 @@ class Guidance:
             #rospy.logwarn("Current_entropy else statement:")
             #rospy.logwarn(self.filter.prev_particles.shape)
             self.Hp_t = self.entropy_particle(
-                self.filter.prev_particles[:, self.sampled_index,:],
+                self.filter.prev_particles[-1, self.sampled_index,:],
                 np.copy(
                     self.filter.weights[self.sampled_index]
                 ),  # current weights are the (t-1) weights because no update
-                self.filter.particles[:, self.sampled_index, :],
+                self.filter.particles[-1, self.sampled_index, :],
             )
 
         entropy_time = rospy.get_time() - self.initial_time
@@ -179,21 +180,26 @@ class Guidance:
         Hp_k = np.zeros(self.N_s)  # partial entropy
         Ip = np.zeros(self.N_s)  # partial information gain
 
-        prev_future_parts = np.copy(self.filter.prev_particles)
+        prev_future_parts = np.copy(self.filter.prev_particles[-1, :, :])
         future_parts = np.copy(self.filter.particles)
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
             #future_parts = self.filter.motion_model.predict(future_parts)
-            future_parts, last_future_time = self.filter.predict(
+            future_parts, prev_future_parts, last_future_time = self.filter.predict(
                 future_parts,
                 self.filter.weights,
                last_future_time + 0.1,
-                angular_velocity=self.angular_velocity,
+                angular_velocity=np.zeros(1),
                 linear_velocity=self.linear_velocity,
             )
         # Future possible measurements
         # TODO: implement N_m sampled measurements
-        z_hat = self.filter.add_noise(future_parts[-1,self.sampled_index,:], self.filter.measurement_covariance)
+        print('future_parts.shape', future_parts.shape)
+        z_hat = self.filter.add_noise(future_parts[-1, self.sampled_index,:], self.filter.measurement_covariance)
+        print('z_hat.shape', z_hat.shape)
+        print('future_parts[:, self.sampled_index,:].shape', future_parts[:, self.sampled_index,:].shape)
+        likelihood = self.filter.likelihood(z_hat, future_parts[-1, self.sampled_index,:])
+        print('likelihood.shape\n', likelihood.shape)
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
@@ -211,17 +217,17 @@ class Guidance:
                 # TODO: figure out how to prevent weights from changing inside this function
                 #rospy.logerr(future_weight.shape)
                 Hp_k[jj] = self.entropy_particle(
-                    prev_future_parts[:,self.sampled_index, :],
+                    prev_future_parts[-1, self.sampled_index, :],
                     np.copy(self.filter.weights[self.sampled_index]),
-                    future_parts[:, self.sampled_index, :],
+                    future_parts[-1, self.sampled_index, :],
                     future_weight[self.sampled_index, jj],
                     z_hat[jj],
                 )
             else:
                 Hp_k[jj] = self.entropy_particle(
-                    prev_future_parts[:, self.sampled_index, :],
+                    prev_future_parts[-1, self.sampled_index, :],
                     np.copy(self.filter.weights[self.sampled_index]),
-                    future_parts[:, self.sampled_index, :],
+                    future_parts[-1, self.sampled_index, :],
                 )
 
             # Information Gain
@@ -230,7 +236,8 @@ class Guidance:
         # EER = I.mean() # implemented when N_m is implemented
         self.t_EER = rospy.get_time() - self.initial_time - now
 
-        action_index = np.argmax(Ip)
+        EER = likelihood * Ip 
+        action_index = np.argmax(EER)
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         # print("possible actions: ", z_hat[:, :2])
@@ -261,15 +268,15 @@ class Guidance:
             )
 
             # likelihood of particle p(xt|xt-1)
-            _, part_len, _ = particles.shape
+            part_len, _ = particles.shape
             process_part_like = np.zeros(part_len)
             
             for ii in range(part_len):
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
-                    x=prev_particles,
-                    mean=particles[-1, ii, :],
+                    x=prev_particles[:, :],
+                    mean=particles[ii, :],
                     cov=self.filter.process_covariance,
                 )
                 # TODO: investigate if I need to multiply this by prev_wgts
@@ -317,14 +324,14 @@ class Guidance:
                     )
         else:
             # likelihood of particle p(xt|xt-1)
-            _, part_len2, _ = prev_particles.shape
+            part_len2, _ = prev_particles.shape
             process_part_like = np.zeros(part_len2)
             for ii in range(part_len2):
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
-                    x=prev_particles,
-                    mean=particles[-1, ii, :],
+                    x=prev_particles[:, :],
+                    mean=particles[ii, :],
                     cov=self.filter.process_covariance,
                 )
                 process_part_like[ii] = np.sum(like_particle * prev_wgts)
@@ -530,8 +537,8 @@ class Guidance:
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = -self.goal_position[1]
                     elif self.guidance_mode == "Particles":
-                        ds.pose.x = self.noisy_turtle_pose[0]
-                        ds.pose.y = -self.noisy_turtle_pose[1]
+                        ds.pose.x = self.filter.weighted_mean[0]
+                        ds.pose.y = -self.filter.weighted_mean[1]
                     elif self.guidance_mode == "Lawnmower":
                         mower_position = self.lawnmower()
                         ds.pose.x = mower_position[0]

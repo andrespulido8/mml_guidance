@@ -29,15 +29,22 @@ class ParticleFilter:
         self.motion_model = deploy_mml.Motion_Model(model_file)
 
         self.N = num_particles
-        self.particles = self.uniform_sample()
-        np.savetxt("./Initial_first.csv", self.particles[:,0,:], delimiter=',')
-        self.prev_particles = np.copy(self.particles)
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
         self.measurement_covariance = np.array(
             [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
+        # Unfirmly sample particles
+        self.particles = self.uniform_sample()
+        # Use multivariate normal if you know the initial condition
+        #self.particles = np.array([
+        #    np.random.multivariate_normal(
+        #    np.array([1.3, -1.26, 0]), self.measurement_covariance, self.N
+        #    )
+        #])
+        self.prev_particles = np.copy(self.particles)
+
         self.is_update = False
 
         self.yaw_mean = self.yaw_mean = np.arctan2(
@@ -114,15 +121,15 @@ class ParticleFilter:
         # Resampling step
         self.neff = nEff(self.weights)
         if self.neff < self.N / 2 and self.is_update:
-            if self.neff < self.N / 100 + 5:
+            if self.neff < self.N / 100:
                 # particles are basically lost, reinitialize
-                #rospy.logwarn("Uniformly resampling particles")
-                #self.particles = np.random.uniform(
-                #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-                #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-                #    (1, self.N, 3),
-                #)
-                self.particles = self.uniform_sample()
+                # Use multivariate normal if you know the initial condition
+                self.particles = np.array([
+                    np.random.multivariate_normal(
+                    noisy_measurement, 4*self.measurement_covariance, self.N
+                    )
+                ])
+                #self.particles = self.uniform_sample()
                 self.prev_particles = np.copy(self.particles)
                 self.weights = np.ones(self.N) / self.N
             else:
@@ -144,12 +151,37 @@ class ParticleFilter:
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) weight of the particles
         """
-        weights = weights * stats.multivariate_normal.pdf(
-            x=particles[-1,:,:], mean=noisy_turtle_pose, cov=self.measurement_covariance
-        )
-
+        weights = weights * self.likelihood(particles[-1, :, :], np.tile(noisy_turtle_pose, (self.N, 1)))
         weights = weights / np.sum(weights) if np.sum(weights) > 0 else weights
         return weights
+
+        
+    def likelihood(self, particles, y_act):
+        """Particles that are closer to the noisy measurements are weighted higher than
+        particles which don't match the measurements very well.
+        There are two methods to compute this. 
+        """
+
+        # Method 1: Manual for loop with normal multivariate equation
+        shape =particles.shape[0]
+        like = np.zeros(shape)
+        for ii in range(shape):
+           # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
+           # likelihood, but it does not matter since it can be factored
+           # and then cancelled out during the normalization or expectation.
+           like[ii] = np.exp(
+               -0.5
+               * (particles[ii] - y_act[ii]).T
+               @ self.noise_inv
+               @ (particles[ii] - y_act[ii])
+           )
+
+        # Method 2: Vectorized using scipy.stats
+        # TODO fix to account for different measurements
+        #like = stats.multivariate_normal.pdf(
+        #    x=particles, mean=y_act[0], cov=self.measurement_covariance
+        #)
+        return like 
 
     def predict_mml(self):
         self.particles[:,:,:2] = self.motion_model.predict(self.particles[:,:,:2])
@@ -210,8 +242,8 @@ class ParticleFilter:
             prev_particles[-1, :, :2]
             + np.array(
                 [
-                    delta_distance * np.cos(particles[-1,:, 2]),
-                    delta_distance * np.sin(particles[-1,:, 2]),
+                    delta_distance * np.cos(particles[-1, :, 2]),
+                    delta_distance * np.sin(particles[-1, :, 2]),
                 ]
             ).T
         )
@@ -234,7 +266,7 @@ class ParticleFilter:
         )
         #print("Min: %.4f, Max: %.4f, Dot: %.4f"%(self.weights.min(), self.weights.max(), self.weights.dot(self.weights)))
         indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
-        self.particles = self.particles[:,indexes,:]
+        self.particles[-1, :, :] = self.particles[-1, indexes,:]
         self.weights = self.weights[indexes]
         # Roughening. See Bootstrap Filter from Crassidis and Junkins.
         G = 0.2
@@ -262,7 +294,7 @@ class ParticleFilter:
             )
             self.var = np.append(
                 np.average(
-                    (self.particles[-1,:, :2] - self.weighted_mean[:2]) ** 2,
+                    (self.particles[-1, :, :2] - self.weighted_mean[:2]) ** 2,
                     weights=self.weights,
                     axis=0,
                 ),
