@@ -2,7 +2,6 @@
 import csv
 import os
 
-from functools import partial
 import numpy as np
 import rospkg
 import rospy
@@ -136,14 +135,7 @@ class Guidance:
         try:
             self.sampled_index = np.random.choice(a=self.N, size=self.N_s, p=prob)
         except:
-            print("Bad particle weights :(\n")
-            # particles are basically lost, reinitialize
-            # self.particles = np.random.uniform(
-            #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-            #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-            #    (self.N, 3),
-            # )
-            # self.weights = np.ones(self.N) / self.N
+            print("Bad particle weights when sampling for entropy calc :(\n")
             self.filter.resample()
             self.sampled_index = np.arange(self.N_s)
         # Entropy of current distribution
@@ -237,14 +229,13 @@ class Guidance:
 
         # EER = I.mean() # implemented when N_m is implemented
         self.t_EER = rospy.get_time() - self.initial_time - now
-        #print("IG time: ", self.t_EER)
 
         action_index = np.argmax(Ip)
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
-        #print("Chosen action:", z_hat[action_index, :2])
+        # print("Chosen action:", z_hat[action_index, :2])
         self.goal_position = z_hat[action_index][:2]
 
     def entropy_particle(

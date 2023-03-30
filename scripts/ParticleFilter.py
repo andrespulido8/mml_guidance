@@ -37,18 +37,13 @@ class ParticleFilter:
         self.measurement_covariance = np.array(
             [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
-        # Use multivariate normal if you know the initial condition
-        self.particles = np.array([np.random.multivariate_normal(
-            np.array([1.3, -1.26, 0]), 2 * self.measurement_covariance, self.N
-        )])
-
         self.is_update = False
 
         self.yaw_mean = self.yaw_mean = np.arctan2(
             np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
             np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
         )
-        self.neff = self.nEff(self.weights)
+        self.neff = nEff(self.weights)
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.process_covariance = np.array(
@@ -116,7 +111,7 @@ class ParticleFilter:
             )
 
         # Resampling step
-        self.neff = self.nEff(self.weights)
+        self.neff = nEff(self.weights)
         if self.neff < self.N / 2 and self.is_update:
             if self.neff < self.N / 100 + 5:
                 # particles are basically lost, reinitialize
@@ -148,22 +143,6 @@ class ParticleFilter:
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) weight of the particles
         """
-        # Method 1: For loop
-        # for ii in range(self.N):
-        #    # The factor sqrt(det((2*pi)*measurement_cov)) is not included in the
-        #    # likelihood, but it does not matter since it can be factored
-        #    # and then cancelled out during the normalization.
-        #    like = (
-        #        -0.5
-        #        * (particles[ii, :] - y_act)
-        #        * self.noise_inv
-        #        * (particles[ii, :] - y_act)
-        #        @ self.noise_inv
-        #        @ (particles[ii, :] - y_act)
-        #    )
-        #    weight[ii] = weight[ii] * np.exp(like)
-
-        # Method 2: Vectorized using scipy.stats
         weights = weights * stats.multivariate_normal.pdf(
             x=particles[-1,:,:], mean=noisy_turtle_pose, cov=self.measurement_covariance
         )
