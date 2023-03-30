@@ -8,14 +8,14 @@ from mml_network.transformer_functions import TransAm
 
 class Motion_Model():
     def __init__(self, model_file):
-        self.input_window = 9 # number of input steps
+        self.input_window = 10 # number of input steps
         self.output_window = 1 # number of prediction steps
         batch_size = 32
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         #self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu") 
 
         #train_data, val_data = get_data(close, 0.1, input_window, output_window, device, scale_data = False) # 60% train, 40% test split
-        self.model = TransAm(in_dim=3, feature_size = 8, num_layers=1)
+        self.model = TransAm(in_dim=2, feature_size = 8, num_layers=1)
         self.model.load_state_dict(torch.load(model_file))
         self.model.eval()
         self.model = self.model.to(self.device)
@@ -30,7 +30,7 @@ class Motion_Model():
     def predict(self, particles):
         with torch.no_grad():
             output = self.model(torch.from_numpy(particles[:, :, :]).float().to(self.device))
-            forecast_seq = np.concatenate((particles[-9:,:,:],np.reshape(output[-1, :,:].cpu().numpy(), (1,-1,3))), 0)
+            forecast_seq = np.concatenate((particles[-9:,:,:],np.reshape(output[-1, :,:].cpu().numpy(), (1,-1,2))), 0)
             #np.savetxt("pred_%d.csv"%self.counter, output[-1,:,:].cpu().numpy(), delimiter=',')
             self.counter += 1
         return forecast_seq

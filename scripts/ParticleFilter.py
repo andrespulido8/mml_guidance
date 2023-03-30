@@ -23,13 +23,14 @@ class ParticleFilter:
 
         pkg_path = rospkg.RosPack().get_path('mml_guidance')
         model_file = pkg_path+'/scripts/mml_network/models/current.pth'
-        training_data_filename = pkg_path+'/scripts/mml_network/no_quad.csv' # squarest_yaw.csv'
-        self.training_data = np.loadtxt(training_data_filename, delimiter=',', skiprows=1)[500:4000, 1:] # Hardcoded samples
+        training_data_filename = pkg_path+'/scripts/mml_network/no_quad_3hz.csv' # squarest_yaw.csv'
+        self.training_data = np.loadtxt(training_data_filename, delimiter=',', skiprows=1)[:,1:]#[500:4000, 1:] # Hardcoded samples
         self.n_training_samples = self.training_data.shape[0] - 9
         self.motion_model = deploy_mml.Motion_Model(model_file)
 
         self.N = num_particles
         self.particles = self.uniform_sample()
+        np.savetxt("./Initial_first.csv", self.particles[:,0,:], delimiter=',')
         self.prev_particles = np.copy(self.particles)
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
@@ -119,7 +120,7 @@ class ParticleFilter:
                 #self.particles = np.random.uniform(
                 #    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
                 #    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-                #    (self.N, 3),
+                #    (1, self.N, 3),
                 #)
                 self.particles = self.uniform_sample()
                 self.prev_particles = np.copy(self.particles)
@@ -151,7 +152,9 @@ class ParticleFilter:
         return weights
 
     def predict_mml(self):
-        self.particles = self.motion_model.predict(self.particles)
+        self.particles[:,:,:2] = self.motion_model.predict(self.particles[:,:,:2])
+        for i in range (2):
+            self.particles[-1,:,i] += self.add_noise( np.zeros(self.N), 0.01*self.process_covariance[i, i], size=self.N )
 
         self.yaw_mean = self.yaw_mean = np.arctan2(
             np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
@@ -231,7 +234,7 @@ class ParticleFilter:
         )
         #print("Min: %.4f, Max: %.4f, Dot: %.4f"%(self.weights.min(), self.weights.max(), self.weights.dot(self.weights)))
         indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
-        self.particles = self.particles[-1,indexes,:]
+        self.particles = self.particles[:,indexes,:]
         self.weights = self.weights[indexes]
         # Roughening. See Bootstrap Filter from Crassidis and Junkins.
         G = 0.2
