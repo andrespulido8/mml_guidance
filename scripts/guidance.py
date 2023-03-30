@@ -513,15 +513,13 @@ class Guidance:
             # self.quad_position[1] = -self.quad_position[1] if not self.guidance_mode else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position)
 
-    def pub_desired_state(self, event=None):
+    def pub_desired_state(self, is_velocity=False, xvel=0, yvel=0, event=None):
         if self.init_finished:
-            is_velocity = False  # [not used] might be useful later
             ds = DesiredState()
             # run the quad if sim or the remote controller
             # sends signal of autonomous control
             if self.position_following or self.is_sim:
                 if is_velocity:
-                    xvel = yvel = 0
                     ds.velocity.x = xvel
                     ds.velocity.y = yvel
                     ds.position_valid = False
