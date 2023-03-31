@@ -24,7 +24,7 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
 
         # Initialization of variables
         self.quad_position = np.array([0.0, 0.0])
@@ -187,7 +187,7 @@ class Guidance:
         # Future possible measurements
         # TODO: implement N_m sampled measurements
         z_hat = self.filter.add_noise(
-            future_parts[-1, self.sampled_index, :], self.filter.measurement_covariance
+            future_parts[-1, self.sampled_index, :2], self.filter.measurement_covariance
         )
         likelihood = self.filter.likelihood(
             z_hat, future_parts[-1, self.sampled_index, :]
@@ -539,8 +539,8 @@ class Guidance:
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = -self.goal_position[1]
                     elif self.guidance_mode == "Particles":
-                        ds.pose.x = self.actual_turtle_pose[0]
-                        ds.pose.y = -self.actual_turtle_pose[1]
+                        ds.pose.x = self.filter.weighted_mean[0]
+                        ds.pose.y = -self.filter.weighted_mean[1]
                     elif self.guidance_mode == "Lawnmower":
                         mower_position = self.lawnmower()
                         ds.pose.x = mower_position[0]

@@ -199,10 +199,14 @@ class ParticleFilter:
         t = rospy.get_time() - self.initial_time
         dt = t - last_time
 
+        print("max  vel: ", np.max(particles[-1, :, 2:]))
+        print("min  vel: ", np.min(particles[-1, :, 2:]))
         prev_particles = np.copy(particles)
         delta_distance = particles[-1, :, 2:] * dt + particles[
             -1, :, 2:
         ] * dt * self.add_noise(np.array([0, 0]), self.process_covariance, size=self.N)
+        print("max delta: ", np.max(delta_distance))
+        print("min delta: ", np.min(delta_distance))
         particles[-1, :, :2] = (
             prev_particles[-1, :, :2] + delta_distance * particles[-1, :, :2]
         )
