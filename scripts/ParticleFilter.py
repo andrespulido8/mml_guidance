@@ -35,7 +35,7 @@ class ParticleFilter:
         # PF
         self.N = num_particles
         self.Nx = 4  # number of states
-        self.vmax = 0.8  # m/s
+        self.vmax = 0.7  # m/s
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
@@ -67,8 +67,6 @@ class ParticleFilter:
         self.last_time = 0.0
         self.time_reset = 0.0
         self.measurement_update_time = 2.0  # seconds
-
-        self.turtle_pose = np.array([0.0, 0.0, 0.0, 0.0])
 
         self.pred_counter = 0
 
@@ -120,14 +118,14 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
-        if self.neff < self.N / 2 and self.is_update:
-            if self.neff < self.N / 100:
+        if self.neff < self.N * 0.9 and self.is_update:
+            if self.neff < self.N * 0.7:
                 # particles are basically lost, reinitialize
                 self.particles[-1, :, :2] = np.array(
                     [
                         np.random.multivariate_normal(
                             noisy_measurement[:2],
-                            4 * self.measurement_covariance,
+                            self.measurement_covariance,
                             self.N,
                         )
                     ]
@@ -137,12 +135,8 @@ class ParticleFilter:
                 self.weights = np.ones(self.N) / self.N
             else:
                 # some are good but some are bad, resample
-                # rospy.logwarn(
-                #    "Resampling particles. Neff: %f < %f",
-                #    self.neff,
-                #    self.N / 2,
-                # )
                 self.resample()
+                # self.systematic_resample()
 
         self.estimate()
 
@@ -216,6 +210,26 @@ class ParticleFilter:
         last_time = t
 
         return particles, prev_particles, last_time
+
+    def systematic_resample(self):
+        """Systemic resampling. As with stratified resampling the space is divided into divisions.
+        We then choose a random offset to use for all of the divisions, ensuring that each sample
+        is exactly 1/N apart"""
+        random = np.random.rand(self.N)
+        positions = (random + np.arange(self.N)) / self.N
+
+        indexes = np.zeros(self.N, "i")
+        cumulative_sum = np.cumsum(self.weights)
+        i, j = 0, 0
+        while i < self.N:
+            if positions[i] < cumulative_sum[j]:
+                indexes[i] = j
+                i += 1
+            else:
+                j += 1
+
+        self.particles[-1, :, :] = self.particles[-1, indexes, :]
+        self.weights = np.ones(self.N) / self.N
 
     def resample(self):
         """Uses the resampling algorithm to update the belief in the system state. In our case, the

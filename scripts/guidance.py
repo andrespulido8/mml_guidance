@@ -27,12 +27,12 @@ class Guidance:
         self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
 
         # Initialization of variables
-        self.quad_position = np.array([0, 0])
-        self.actual_turtle_pose = np.array([0, 0, 0])
-        self.noisy_turtle_pose = np.array([0, 0, 0])
-        self.goal_position = np.array([0, 0])
-        self.linear_velocity = np.array([0, 0])
-        self.angular_velocity = np.array([0])
+        self.quad_position = np.array([0.0, 0.0])
+        self.actual_turtle_pose = np.array([0.0, 0.0, 0.0])
+        self.noisy_turtle_pose = np.array([0.0, 0.0, 0.0])
+        self.goal_position = np.array([0.0, 0.0])
+        self.linear_velocity = np.array([0.0, 0.0])
+        self.angular_velocity = np.array([0.0])
         deg2rad = lambda deg: np.pi * deg / 180
         # Number of future measurements per sampled particle to consider in EER
         self.N_m = 1
@@ -457,6 +457,7 @@ class Guidance:
                 self.actual_turtle_pose = np.array(
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
+                self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
                 self.noisy_turtle_pose[:2] = self.filter.add_noise(
                     self.actual_turtle_pose[:2], self.filter.measurement_covariance
                 )
@@ -480,8 +481,6 @@ class Guidance:
                 # in hardware we assume the pose is already noisy
                 self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
                 self.pub_desired_state()
-
-            self.filter.turtle_pose = self.noisy_turtle_pose
 
             if self.is_in_FOV(
                 self.noisy_turtle_pose, self.FOV
@@ -540,8 +539,8 @@ class Guidance:
                         ds.pose.x = self.goal_position[0]
                         ds.pose.y = -self.goal_position[1]
                     elif self.guidance_mode == "Particles":
-                        ds.pose.x = self.noisy_turtle_pose[0]
-                        ds.pose.y = -self.noisy_turtle_pose[1]
+                        ds.pose.x = self.actual_turtle_pose[0]
+                        ds.pose.y = -self.actual_turtle_pose[1]
                     elif self.guidance_mode == "Lawnmower":
                         mower_position = self.lawnmower()
                         ds.pose.x = mower_position[0]
