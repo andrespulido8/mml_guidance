@@ -24,7 +24,7 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
 
         # Initialization of variables
         self.quad_position = np.array([0.0, 0.0])

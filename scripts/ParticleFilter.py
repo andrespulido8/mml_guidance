@@ -30,7 +30,7 @@ class ParticleFilter:
             500:4000, 1:
         ]  # Hardcoded samples
         self.n_training_samples = self.training_data.shape[0] - 9
-        self.motion_model = deploy_mml.Motion_Model(model_file)
+        # self.motion_model = deploy_mml.Motion_Model(model_file)
 
         # PF
         self.N = num_particles
@@ -118,8 +118,8 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
-        if self.neff < self.N * 0.9 and self.is_update:
-            if self.neff < self.N * 0.7:
+        if self.neff < self.N * 0.8 or self.neff == np.inf and self.is_update:
+            if self.neff < self.N * 0.6:
                 # particles are basically lost, reinitialize
                 self.particles[-1, :, :2] = np.array(
                     [
@@ -199,8 +199,6 @@ class ParticleFilter:
         t = rospy.get_time() - self.initial_time
         dt = t - last_time
 
-        print("max  vel: ", np.max(particles[-1, :, 2:]))
-        print("min  vel: ", np.min(particles[-1, :, 2:]))
         prev_particles = np.copy(particles)
         delta_distance = particles[-1, :, 2:] * dt + particles[
             -1, :, 2:
