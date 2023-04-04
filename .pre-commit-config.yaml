@@ -5,12 +5,12 @@ default_language_version:
   python: python3.8
 
 repos:
-  - repo: https://github.com/pycqa/isort
-    rev: 5.10.1
-    hooks:
-      - id: isort
-        name: isort (python)
-        args: ['--profile', 'black']
+  #- repo: https://github.com/pycqa/isort
+  #  rev: 5.10.1
+  #  hooks:
+  #    - id: isort
+  #      name: isort (python)
+  #      args: ['--profile', 'black']
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.27.1
     hooks:
@@ -37,7 +37,6 @@ repos:
           - --skip="./.*,*.csv,*.json"
           - --quiet-level=2
         exclude_types: [csv, json]
-        exclude: ^NaviGator/perception/darknet_ros|NaviGator/simulation/VRX
   - repo: https://github.com/tier4/pre-commit-hooks-ros
     rev: v0.7.0
     hooks:
