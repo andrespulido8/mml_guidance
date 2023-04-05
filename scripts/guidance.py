@@ -588,6 +588,7 @@ class Guidance:
                 )
                 fov_msg.data = des_fov_matrix.flatten("C")
                 self.des_fov_pub.publish(fov_msg)
+                # Is update pub
                 update_msg = Bool()
                 update_msg.data = self.filter.is_update
                 self.update_pub.publish(update_msg)
@@ -630,15 +631,16 @@ class Guidance:
         entropy_msg.data = self.Hp_t
         self.entropy_pub.publish(entropy_msg)
 
+    def write_csv(self, event=None):
         if self.is_sim:
             pkgDir = rospkg.RosPack().get_path("mml_guidance")
             with open(pkgDir + "/data/errors.csv", "a") as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(
                     [
-                        err_msg.point.x,
-                        err_msg.point.y,
-                        err_msg.point.z,
+                        self.filter.weighted_mean[0] - self.actual_turtle_pose[0],
+                        self.filter.weighted_mean[1] - self.actual_turtle_pose[1],
+                        self.filter.weighted_mean[2] - self.actual_turtle_pose[2],
                         self.FOV_err[0],
                         self.FOV_err[1],
                         self.Hp_t,
@@ -713,5 +715,6 @@ if __name__ == "__main__":
     if guidance.is_viz:
         rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_pf)
     rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_desired_state)
+    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.write_csv)
 
     rospy.spin()
