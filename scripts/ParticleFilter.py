@@ -13,29 +13,33 @@ ANG_VEL = 0.0
 
 
 class ParticleFilter:
-    def __init__(self, num_particles=10):
+    def __init__(self, num_particles=10, use_network=False):
 
         deg2rad = lambda deg: np.pi * deg / 180
 
+        self.use_network = use_network
+        self.N_th = 10  # Number of time history particles
+        self.N = num_particles
+
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        # self.AVL_dims = np.array([[-0.75, -1.75], [2.75, 1.75]])  # road network outline
         self.AVL_dims = np.array([[-1.5, -1.2], [1.5, 1.8]])  # road network outline
 
-        pkg_path = rospkg.RosPack().get_path("mml_guidance")
-        model_file = pkg_path + "/scripts/mml_network/models/current.pth"
-        training_data_filename = (
-            pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
-        )  # squarest_yaw.csv'
-        self.training_data = np.loadtxt(
-            training_data_filename, delimiter=",", skiprows=1
-        )[
-            :, 1:
-        ]  # [500:4000, 1:] # Hardcoded samples
-        self.n_training_samples = self.training_data.shape[0] - 9
-        self.motion_model = deploy_mml.Motion_Model(model_file)
+        if self.use_network:
+            pkg_path = rospkg.RosPack().get_path("mml_guidance")
+            model_file = pkg_path + "/scripts/mml_network/models/current.pth"
+            training_data_filename = (
+                pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
+            )  # squarest_yaw.csv'
+            self.training_data = np.loadtxt(
+                training_data_filename, delimiter=",", skiprows=1
+            )[
+                :, 1:
+            ]  # [500:4000, 1:] # Hardcoded samples
+            self.n_training_samples = (
+                self.training_data.shape[0] - 9
+            )  # TODO: Kyle change this to use N_th
+            self.motion_model = deploy_mml.Motion_Model(model_file)
 
-        self.N = num_particles
-        self.N_th = 10  # Number of time history particles
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
@@ -50,8 +54,6 @@ class ParticleFilter:
         #    np.array([1.3, -1.26, 0]), self.measurement_covariance, self.N
         #    )
         # ])
-        self.prev_particles = np.copy(self.particles)  # not use with NN
-
         self.is_update = False
 
         self.yaw_mean = self.yaw_mean = np.arctan2(
@@ -68,12 +70,6 @@ class ParticleFilter:
 
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
-        self.time_reset = 0.0
-        self.measurement_update_time = 2.0  # seconds
-
-        self.turtle_pose = np.array([0.0, 0.0, 0.0])
-
-        self.pred_counter = 0
 
     def uniform_sample(self):
         SAMPLE_ALONG_PATH = False
@@ -112,15 +108,16 @@ class ParticleFilter:
         t = rospy.get_time() - self.initial_time
 
         # Prediction step
-        # self.particles, self.prev_particles, self.last_time = self.predict(
-        #    self.particles,
-        #    self.weights,
-        #    self.last_time,
-        #    angular_velocity=ang_vel,
-        #    linear_velocity=lin_vel,
-        # )
-        self.predict_mml()
-        self.pred_counter += 1
+        if self.use_network:
+            self.particles = self.predict_mml(self.particles)
+        else:
+            self.particles, self.last_time = self.predict(
+                self.particles,
+                self.weights,
+                self.last_time,
+                angular_velocity=ang_vel,
+                linear_velocity=lin_vel,
+            )
 
         # rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f || True: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1]), self.turtle_pose[0], self.turtle_pose[1]))
 
@@ -131,16 +128,18 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
-        if self.neff < self.N * 0.7 and self.is_update:
-            if self.neff < self.N * 0.5:
+        if self.neff < self.N * 0.8 or self.neff == np.inf and self.is_update:
+            if self.neff < self.N * 0.4:
                 # particles are basically lost, reinitialize
                 # Use multivariate normal if you know the initial condition
                 self.particles[-1, :, :] = np.random.multivariate_normal(
                     noisy_measurement, 4 * self.measurement_covariance, self.N
                 )
-                # TODO: change this to arbitrary time histories
-                # self.particles = self.uniform_sample()
-                self.prev_particles = np.copy(self.particles)
+                # TODO: add buffer of measurements to resample all histories
+                # measureemts + np.random.multivariate_normal(
+                #    0, self.measurement_covariance, (10, self.N)
+                #    )
+
                 self.weights = np.ones(self.N) / self.N
             else:
                 # some are good but some are bad, resample
@@ -152,6 +151,7 @@ class ParticleFilter:
                 self.resample()
 
         self.estimate()
+        # print("time for PF: ", rospy.get_time() - t - self.initial_time)
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief in the system state.
@@ -194,17 +194,16 @@ class ParticleFilter:
         # )
         return like
 
-    def predict_mml(self):
-        self.particles[:, :, :2] = self.motion_model.predict(self.particles[:, :, :2])
-        for i in range(2):
-            self.particles[-1, :, i] += self.add_noise(
-                np.zeros(self.N), 0.01 * self.process_covariance[i, i], size=self.N
-            )
+    def predict_mml(self, particles):
+        particles[:, :, :2] = self.motion_model.predict(particles[:, :, :2])
+        # for i in range (2):
+        #    self.particles[-1,:,i] += self.add_noise( np.zeros(self.N), 0.01*self.process_covariance[i, i], size=self.N )
 
         self.yaw_mean = self.yaw_mean = np.arctan2(
             np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
             np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
         )
+        return particles
 
     def predict(
         self,
@@ -223,10 +222,10 @@ class ParticleFilter:
         t = rospy.get_time() - self.initial_time
         dt = t - last_time
 
-        prev_particles = np.copy(particles)
+        particles[:-1, :, :] = particles[1:, :, :]
         delta_theta = angular_velocity[0] * dt
         particles[-1, :, 2] = (
-            prev_particles[-1, :, 2]
+            particles[-2, :, 2]
             + delta_theta
             + (delta_theta / (2 * np.pi))
             * self.add_noise(
@@ -252,7 +251,7 @@ class ParticleFilter:
             0, self.process_covariance[0, 0], size=self.N
         )
         particles[-1, :, :2] = (
-            prev_particles[-1, :, :2]
+            particles[-2, :, :2]
             + np.array(
                 [
                     delta_distance * np.cos(particles[-1, :, 2]),
@@ -263,7 +262,7 @@ class ParticleFilter:
 
         last_time = t
 
-        return particles, prev_particles, last_time
+        return particles, last_time
 
     def resample(self):
         """Uses the resampling algorithm to update the belief in the system state. In our case, the
@@ -284,7 +283,7 @@ class ParticleFilter:
         # Roughening. See Bootstrap Filter from Crassidis and Junkins.
         G = 0.2
         E = np.array([0, 0, 0])
-        for ii in range(self.turtle_pose.shape[0]):
+        for ii in range(self.particles.shape[2]):
             E[ii] = np.max(self.particles[-1, :, ii]) - np.min(
                 self.particles[-1, :, ii]
             )

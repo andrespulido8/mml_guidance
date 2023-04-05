@@ -24,7 +24,8 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Particles"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
+        self.use_network = True
 
         # Initialization of variables
         self.quad_position = np.array([0, 0])
@@ -57,7 +58,7 @@ class Guidance:
         ## PARTICLE FILTER  ##
         # number of particles
         self.N = 1000
-        self.filter = ParticleFilter(self.N)
+        self.filter = ParticleFilter(self.N, self.use_network)
 
         # Occlusions
         occ_width = 0.5
@@ -137,7 +138,7 @@ class Guidance:
         if self.filter.is_update:
             self.in_FOV = 1
             self.Hp_t = self.entropy_particle(
-                self.filter.prev_particles[-1, self.sampled_index, :],
+                self.filter.particles[-2, self.sampled_index, :],
                 np.copy(self.filter.prev_weights[self.sampled_index]),
                 self.filter.particles[-1, self.sampled_index, :],
                 np.copy(self.filter.weights[self.sampled_index]),
@@ -146,9 +147,8 @@ class Guidance:
         else:
             self.in_FOV = 0
             # rospy.logwarn("Current_entropy else statement:")
-            # rospy.logwarn(self.filter.prev_particles.shape)
             self.Hp_t = self.entropy_particle(
-                self.filter.prev_particles[-1, self.sampled_index, :],
+                self.filter.particles[-2, self.sampled_index, :],
                 np.copy(
                     self.filter.weights[self.sampled_index]
                 ),  # current weights are the (t-1) weights because no update
@@ -174,18 +174,20 @@ class Guidance:
         Hp_k = np.zeros(self.N_s)  # partial entropy
         Ip = np.zeros(self.N_s)  # partial information gain
 
-        prev_future_parts = np.copy(self.filter.prev_particles[-1, :, :])
         future_parts = np.copy(self.filter.particles)
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
             # future_parts = self.filter.motion_model.predict(future_parts)
-            future_parts, prev_future_parts, last_future_time = self.filter.predict(
-                future_parts,
-                self.filter.weights,
-                last_future_time + 0.1,
-                angular_velocity=np.zeros(1),
-                linear_velocity=self.linear_velocity,
-            )
+            if self.use_network:
+                future_parts = self.filter.predict_mml(future_parts)
+            else:
+                future_parts, last_future_time = self.filter.predict(
+                    future_parts,
+                    self.filter.weights,
+                    last_future_time + 0.1,
+                    angular_velocity=np.zeros(1),
+                    linear_velocity=self.linear_velocity,
+                )
         # Future possible measurements
         # TODO: implement N_m sampled measurements
         z_hat = self.filter.add_noise(
@@ -199,19 +201,13 @@ class Guidance:
             k_fov = self.construct_FOV(z_hat[jj])
             # checking for measurement outside of fov or in occlusion
             if self.is_in_FOV(z_hat[jj], k_fov) and not self.in_occlusion(z_hat[jj]):
-                # TODO: read Jane's math to see exactly how EER is computed
-                # the expectation can be either over all possible measurements
-                # or over only the measurements from each sampled particle (1 in this case)
                 future_weight[:, jj] = self.filter.update(
                     self.filter.weights, future_parts, z_hat[jj]
                 )
-                # Check to see if weight dimension vs particle dimension is an issue
 
                 # H (x_{t+k} | \hat{z}_{t+k})
-                # TODO: figure out how to prevent weights from changing inside this function
-                # rospy.logerr(future_weight.shape)
                 Hp_k[jj] = self.entropy_particle(
-                    prev_future_parts[-1, self.sampled_index, :],
+                    future_parts[-2, self.sampled_index, :],
                     np.copy(self.filter.weights[self.sampled_index]),
                     future_parts[-1, self.sampled_index, :],
                     future_weight[self.sampled_index, jj],
@@ -219,7 +215,7 @@ class Guidance:
                 )
             else:
                 Hp_k[jj] = self.entropy_particle(
-                    prev_future_parts[-1, self.sampled_index, :],
+                    future_parts[-2, self.sampled_index, :],
                     np.copy(self.filter.weights[self.sampled_index]),
                     future_parts[-1, self.sampled_index, :],
                 )
@@ -592,7 +588,6 @@ class Guidance:
                 )
                 fov_msg.data = des_fov_matrix.flatten("C")
                 self.des_fov_pub.publish(fov_msg)
-                # TODO: change publisher to service
                 update_msg = Bool()
                 update_msg.data = self.filter.is_update
                 self.update_pub.publish(update_msg)
@@ -709,14 +704,14 @@ if __name__ == "__main__":
                 ]
             )
 
-    rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.guidance_pf)
-    rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.current_entropy)
+    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.guidance_pf)
+    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information":
         rospy.Timer(rospy.Duration(1.0 / 2), guidance.information_driven_guidance)
 
     # Publish topics
     if guidance.is_viz:
-        rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.pub_pf)
-    rospy.Timer(rospy.Duration(1.0 / 20.0), guidance.pub_desired_state)
+        rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_pf)
+    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_desired_state)
 
     rospy.spin()
