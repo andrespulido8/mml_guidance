@@ -46,6 +46,9 @@ class ParticleFilter:
         self.measurement_covariance = np.array(
             [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
         )
+        self.measurement_history = np.zeros(
+            (self.N_th, self.measurement_covariance.shape[0])
+        )
         # Unfirmly sample particles
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
@@ -99,13 +102,16 @@ class ParticleFilter:
         noisy_measurement,
         ang_vel=np.array([ANG_VEL]),
         lin_vel=np.array([FWD_VEL]),
-        event=None,
     ):
         """Main function of the particle filter
         where the predict, update, resample, estimate
         and publish PF values for visualization if needed
         """
         t = rospy.get_time() - self.initial_time
+
+        # update measurement history with noisy_measurement
+        self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
+        self.measurement_history[-1, :] = noisy_measurement
 
         # Prediction step
         if self.use_network:
@@ -124,7 +130,9 @@ class ParticleFilter:
         # Update step
         if self.is_update:
             self.prev_weights = np.copy(self.weights)
-            self.weights = self.update(self.weights, self.particles, noisy_measurement)
+            self.weights = self.update(
+                self.weights, self.particles, self.measurement_history[-1]
+            )
 
         # Resampling step
         self.neff = self.nEff(self.weights)
@@ -132,13 +140,16 @@ class ParticleFilter:
             if self.neff < self.N * 0.4:
                 # particles are basically lost, reinitialize
                 # Use multivariate normal if you know the initial condition
-                self.particles[-1, :, :] = np.random.multivariate_normal(
-                    noisy_measurement, 4 * self.measurement_covariance, self.N
+                noise = np.random.multivariate_normal(
+                    np.zeros(self.measurement_history.shape[1]),
+                    self.measurement_covariance,
+                    size=(self.N_th, self.N),
                 )
-                # TODO: add buffer of measurements to resample all histories
-                # measureemts + np.random.multivariate_normal(
-                #    0, self.measurement_covariance, (10, self.N)
-                #    )
+                # repeat the measurement history to be the same size as the particles
+                measurement_history_repeated = np.tile(
+                    self.measurement_history.reshape(self.N_th, 1, 3), (1, self.N, 1)
+                )
+                self.particles = measurement_history_repeated + noise
 
                 self.weights = np.ones(self.N) / self.N
             else:
