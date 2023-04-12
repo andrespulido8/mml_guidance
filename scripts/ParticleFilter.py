@@ -54,6 +54,7 @@ class ParticleFilter:
 
         self.neff = self.nEff(self.weights)
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
+        self.measurement_history = np.zeros((2, 2))
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.process_covariance = np.array(
             [
@@ -100,6 +101,12 @@ class ParticleFilter:
         """
         t = rospy.get_time() - self.initial_time
 
+        dt = t - self.last_time
+        self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
+        self.measurement_history[-1, :] = noisy_measurement[:2]
+        estimate_velocity = ( self.measurement_history[-1, :] - 
+                self.measurement_history[-2, :] ) * dt
+
         # Prediction step
         self.particles, self.prev_particles, self.last_time = self.predict(
             self.particles,
@@ -121,16 +128,17 @@ class ParticleFilter:
         if self.neff < self.N * 0.8 or self.neff == np.inf and self.is_update:
             if self.neff < self.N * 0.6:
                 # particles are basically lost, reinitialize
-                self.particles[-1, :, :2] = np.array(
-                    [
-                        np.random.multivariate_normal(
+                self.particles[-1, :, :2] = np.random.multivariate_normal(
                             noisy_measurement[:2],
                             self.measurement_covariance,
                             self.N,
                         )
-                    ]
-                )
-                self.particles[-1, :, 2:] = self.uniform_sample()[-1, :, 2:]
+                #self.particles[-1, :, 2:] = self.uniform_sample()[-1, :, 2:]
+                self.particles[-1, :, 2:] = np.random.multivariate_normal(
+                            estimate_velocity,
+                            dt * self.measurement_covariance,
+                            self.N,
+                        )
                 self.prev_particles = np.copy(self.particles)
                 self.weights = np.ones(self.N) / self.N
             else:
