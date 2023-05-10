@@ -25,7 +25,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
-        self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
+        self.prediction_method = "Velocity"  # 'NN', 'Velocity' or 'Unicycle'
 
         # Initialization of variables
         self.quad_position = np.array([0.0, 0.0])
@@ -79,6 +79,7 @@ class Guidance:
         rospy.loginfo(f"...and parameter is_viz: {self.is_viz}")
         rospy.loginfo(f"Quadcopter in mode: {self.guidance_mode}")
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
+        self.err_tracking_pub = rospy.Publisher("err_tracking", PointStamped, queue_size=1)
 
         if self.is_sim:
             self.turtle_odom_sub = rospy.Subscriber(
@@ -100,11 +101,9 @@ class Guidance:
             self.rc_sub = rospy.Subscriber("rc_raw", RCRaw, self.rc_cb, queue_size=1)
 
         if self.is_viz:
-            # Particle filter ROS stuff
             self.particle_pub = rospy.Publisher(
                 "xyTh_estimate", ParticleMean, queue_size=1
             )
-            self.err_fov_pub = rospy.Publisher("err_fov", PointStamped, queue_size=1)
             self.err_estimation_pub = rospy.Publisher(
                 "err_estimation", PointStamped, queue_size=1
             )
@@ -561,12 +560,12 @@ class Guidance:
                 ds.velocity_valid = False
             ds.pose.z = -self.height
             self.pose_pub.publish(ds)
-            # FOV err pub
+            # tracking err pub
             self.FOV_err = self.quad_position - self.actual_turtle_pose[:2]
-            err_fov_msg = PointStamped()
-            err_fov_msg.point.x = self.FOV_err[0]
-            err_fov_msg.point.y = self.FOV_err[1]
-            self.err_fov_pub.publish(err_fov_msg)
+            err_tracking_msg = PointStamped()
+            err_tracking_msg.point.x = self.FOV_err[0]
+            err_tracking_msg.point.y = self.FOV_err[1]
+            self.err_tracking_pub.publish(err_tracking_msg)
             if self.is_viz:
                 # FOV pub
                 fov_msg = Float32MultiArray()

@@ -145,7 +145,7 @@ class ParticleFilter:
             estimate_velocity = ( self.measurement_history[-1, :] - 
                     self.measurement_history[-2, :] ) * dt
 
-            self.partirles, self.prev_particles, self.last_time = self.predict(
+            self.particles, self.last_time = self.predict(
                 self.particles,
                 self.weights,
                 self.last_time,

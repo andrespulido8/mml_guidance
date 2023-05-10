@@ -9,6 +9,6 @@
 		<!-- record the bag file. Change -O to -o for only prefix instead of full name-->
     	<node name="record" pkg="rosbag" type="record" args="-o $(arg bag_name) /xyTh_estimate
 		/odom /n_eff_particles /takahe/nwu/pose_stamped /rail/nwu/pose_stamped /entropy 
-		/err_fov /err_estimation /eer_time /desired_state /is_update /info_gain"/>
+		/err_tracking /err_estimation /eer_time /desired_state /is_update /info_gain"/>
 	</group>
 </launch>

@@ -16,14 +16,14 @@ is_plot = False
 
 # Set the list of column names to include in the plots
 include_data = {
-    'err estimation x', 'err estimation y', 'err fov x', 'err fov y', 
+    'err estimation x', 'err estimation y', 'err tracking x', 'err tracking y', 
     'entropy data', 'info_gain', 'eer time data'
     }
 include_plot = {
     'entropy data', 'rail  nwu  pose stamped x', 'rail  nwu  pose stamped y',
     'takahe  nwu  pose stamped x', 'takahe  nwu  pose stamped y', 'xyTh estimate x',
     'xyTh estimate y', 'xyTh estimate yaw', 'err estimation x', 'err estimation y',
-    'err fov x', 'err fov y', 'n eff particles data', 'eer time data',
+    'err tracking x', 'err tracking y', 'n eff particles data', 'eer time data',
     'desired state x', 'desired state y', 'info_gain'
     }
 
@@ -112,17 +112,17 @@ def main():
         plt.ylabel("Estimation Error [m]", fontdict=font)
         plt.legend()
         plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
-        # Err fov
+        # Err tracking
         plt.figure(figsize=fig_size)
-        t0 = df['err fov rosbagTimestamp'][0]
-        plt.plot(crop_col(df['err fov rosbagTimestamp']) - t0, crop_col(df['err fov x']), linewidth=2, label='x error')
-        plt.plot(crop_col(df['err fov rosbagTimestamp']) - t0, crop_col(df['err fov y']), linewidth=2, label='y error')
+        t0 = df['err tracking rosbagTimestamp'][0]
+        plt.plot(crop_col(df['err tracking rosbagTimestamp']) - t0, crop_col(df['err tracking x']), linewidth=2, label='x error')
+        plt.plot(crop_col(df['err tracking rosbagTimestamp']) - t0, crop_col(df['err tracking y']), linewidth=2, label='y error')
         plt.xlabel("Time [s]", fontdict=font)
-        plt.ylabel("FOV Error [m]", fontdict=font)
+        plt.ylabel("Tracking Error [m]", fontdict=font)
         plt.legend()
         plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
     else:
-        # Err fov for files where the err estimation data is not available
+        # Err tracking for files where the err estimation data is not available
         plt.figure(figsize=fig_size)
         errx = crop_col(df['takahe  nwu  pose stamped x'] - df['rail  nwu  pose stamped x'])
         erry = crop_col(df['takahe  nwu  pose stamped y'] - df['rail  nwu  pose stamped y'])
@@ -134,9 +134,9 @@ def main():
         print("RMS of " + "err x" + ": " + str(rms_x))
         print("RMS of " + "err y" + ": " + str(rms_y))
         plt.xlabel("Time [s]", fontdict=font)
-        plt.ylabel("FOV Error [m]", fontdict=font)
+        plt.ylabel("Tracking Error [m]", fontdict=font)
         plt.legend()
-        plt.savefig(outdir + 'fov' + '.png', dpi=dpi)
+        plt.savefig(outdir + 'tracking' + '.png', dpi=dpi)
     # Road network
     plt.figure(figsize=fig_size)
     plt.plot(crop_col(df['rail  nwu  pose stamped x']), crop_col(df['rail  nwu  pose stamped y']), linewidth=2, label='turtlebot path')
