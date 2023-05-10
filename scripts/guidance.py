@@ -25,15 +25,15 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
-        self.use_network = True
+        self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
 
         # Initialization of variables
-        self.quad_position = np.array([0, 0])
-        self.actual_turtle_pose = np.array([0, 0, 0])
-        self.noisy_turtle_pose = np.array([0, 0, 0])
-        self.goal_position = np.array([0, 0])
-        self.linear_velocity = np.array([0, 0])
-        self.angular_velocity = np.array([0])
+        self.quad_position = np.array([0.0, 0.0])
+        self.actual_turtle_pose = np.array([0.0, 0.0, 0.0])
+        self.noisy_turtle_pose = np.array([0.0, 0.0, 0.0])
+        self.goal_position = np.array([0.0, 0.0])
+        self.linear_velocity = np.array([0.0, 0.0])
+        self.angular_velocity = np.array([0.0])
         deg2rad = lambda deg: np.pi * deg / 180
         # Number of future measurements per sampled particle to consider in EER
         self.N_m = 1
@@ -58,7 +58,7 @@ class Guidance:
         ## PARTICLE FILTER  ##
         # number of particles
         self.N = 1000
-        self.filter = ParticleFilter(self.N, self.use_network)
+        self.filter = ParticleFilter(self.N, self.prediction_method)
 
         # Occlusions
         occ_width = 0.5
@@ -178,20 +178,26 @@ class Guidance:
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
             # future_parts = self.filter.motion_model.predict(future_parts)
-            if self.use_network:
+            if self.prediction_method == "NN": 
                 future_parts = self.filter.predict_mml(future_parts)
-            else:
+            elif self.prediction_method == "Unicycle":
                 future_parts, last_future_time = self.filter.predict(
                     future_parts,
                     self.filter.weights,
-                    last_future_time + 0.1,
-                    angular_velocity=np.zeros(1),
+                    last_future_time + 0.3,
+                    angular_velocity=self.angular_velocity,
                     linear_velocity=self.linear_velocity,
+                )
+            elif self.prediction_method == "Unicycle":
+                future_parts, last_future_time = self.filter.predict(
+                    future_parts,
+                    self.filter.weights,
+                    last_future_time + 0.3,
                 )
         # Future possible measurements
         # TODO: implement N_m sampled measurements
         z_hat = self.filter.add_noise(
-            future_parts[-1, self.sampled_index, :], self.filter.measurement_covariance
+            future_parts[-1, self.sampled_index, :2], self.filter.measurement_covariance
         )
         likelihood = self.filter.likelihood(
             z_hat, future_parts[-1, self.sampled_index, :]
@@ -225,6 +231,7 @@ class Guidance:
 
         # EER = I.mean() # implemented when N_m is implemented
         self.t_EER = rospy.get_time() - self.initial_time - now
+        # print("IG time: ", self.t_EER)
 
         EER = likelihood * Ip
         action_index = np.argmax(EER)
@@ -254,7 +261,9 @@ class Guidance:
             # (how likely is each of the particles in the gaussian of the measurement)
             # TODO: change the N to be the general case (Default)
             like_meas = stats.multivariate_normal.pdf(
-                x=particles, mean=y_meas, cov=self.filter.measurement_covariance
+                x=particles[:, :2],
+                mean=y_meas[:2],
+                cov=self.filter.measurement_covariance,
             )
 
             # likelihood of particle p(xt|xt-1)
@@ -265,8 +274,8 @@ class Guidance:
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
-                    x=prev_particles[:, :],
-                    mean=particles[ii, :],
+                    x=prev_particles[:, :2],
+                    mean=particles[ii, :2],
                     cov=self.filter.process_covariance,
                 )
                 # TODO: investigate if I need to multiply this by prev_wgts
@@ -320,8 +329,8 @@ class Guidance:
                 # maybe kinematics with gaussian
                 # maybe get weight wrt to previous state (distance)
                 like_particle = stats.multivariate_normal.pdf(
-                    x=prev_particles[:, :],
-                    mean=particles[ii, :],
+                    x=prev_particles[:, :2],
+                    mean=particles[ii, :2],
                     cov=self.filter.process_covariance,
                 )
                 process_part_like[ii] = np.sum(like_particle * prev_wgts)
@@ -452,8 +461,9 @@ class Guidance:
                 self.actual_turtle_pose = np.array(
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
-                self.noisy_turtle_pose = self.filter.add_noise(
-                    self.actual_turtle_pose, self.filter.measurement_covariance
+                self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
+                self.noisy_turtle_pose[:2] = self.filter.add_noise(
+                    self.actual_turtle_pose[:2], self.filter.measurement_covariance
                 )
             else:
                 self.actual_turtle_pose = np.array(
@@ -475,8 +485,6 @@ class Guidance:
                 # in hardware we assume the pose is already noisy
                 self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
                 self.pub_desired_state()
-
-            self.filter.turtle_pose = self.noisy_turtle_pose
 
             if self.is_in_FOV(
                 self.noisy_turtle_pose, self.FOV
@@ -598,12 +606,12 @@ class Guidance:
         mean_msg = ParticleMean()
         mean_msg.mean.x = self.filter.weighted_mean[0]
         mean_msg.mean.y = self.filter.weighted_mean[1]
-        mean_msg.mean.yaw = self.filter.weighted_mean[2]
+        mean_msg.mean.yaw = np.linalg.norm(self.filter.weighted_mean[2:4])
         for ii in range(self.N):
             particle_msg = Particle()
             particle_msg.x = self.filter.particles[-1, ii, 0]
             particle_msg.y = self.filter.particles[-1, ii, 1]
-            particle_msg.yaw = self.filter.particles[-1, ii, 2]
+            particle_msg.yaw = np.linalg.norm(self.filter.particles[-1, ii, 2:4])
             particle_msg.weight = self.filter.weights[ii]
             mean_msg.all_particle.append(particle_msg)
         mean_msg.cov = np.diag(self.filter.var).flatten("C")
@@ -612,7 +620,6 @@ class Guidance:
         err_msg = PointStamped()
         err_msg.point.x = self.filter.weighted_mean[0] - self.actual_turtle_pose[0]
         err_msg.point.y = self.filter.weighted_mean[1] - self.actual_turtle_pose[1]
-        err_msg.point.z = self.filter.weighted_mean[2] - self.actual_turtle_pose[2]
         self.err_estimation_pub.publish(err_msg)
         # Number of effective particles pub
         neff_msg = Float32()
@@ -640,7 +647,6 @@ class Guidance:
                     [
                         self.filter.weighted_mean[0] - self.actual_turtle_pose[0],
                         self.filter.weighted_mean[1] - self.actual_turtle_pose[1],
-                        self.filter.weighted_mean[2] - self.actual_turtle_pose[2],
                         self.FOV_err[0],
                         self.FOV_err[1],
                         self.Hp_t,
@@ -653,9 +659,12 @@ class Guidance:
                 )
 
     def guidance_pf(self, event=None):
-        self.filter.pf_loop(
-            self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
-        )
+        if self.prediction_method == "Unicycle":
+            self.filter.pf_loop(
+                self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
+            )
+        else:
+            self.filter.pf_loop(self.noisy_turtle_pose)
 
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
@@ -694,7 +703,6 @@ if __name__ == "__main__":
                 [
                     "X error [m]",
                     "Y error [m]",
-                    "Yaw error [rad]",
                     "FOV X error [m]",
                     "FOV Y error [m]",
                     "Partial Entropy",
@@ -706,15 +714,15 @@ if __name__ == "__main__":
                 ]
             )
 
-    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.guidance_pf)
-    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.current_entropy)
+    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.guidance_pf)
+    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information":
-        rospy.Timer(rospy.Duration(1.0 / 2), guidance.information_driven_guidance)
+        rospy.Timer(rospy.Duration(1.0 / 1.5), guidance.information_driven_guidance)
 
     # Publish topics
     if guidance.is_viz:
-        rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_pf)
-    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.pub_desired_state)
-    rospy.Timer(rospy.Duration(1.0 / 5.0), guidance.write_csv)
+        rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_pf)
+    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_desired_state)
+    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.write_csv)
 
     rospy.spin()

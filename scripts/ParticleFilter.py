@@ -13,18 +13,18 @@ ANG_VEL = 0.0
 
 
 class ParticleFilter:
-    def __init__(self, num_particles=10, use_network=False):
+    def __init__(self, num_particles=10, prediction_method="NN"):
 
         deg2rad = lambda deg: np.pi * deg / 180
 
-        self.use_network = use_network
+        self.prediction_method = prediction_method
         self.N_th = 10  # Number of time history particles
         self.N = num_particles
 
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
         self.AVL_dims = np.array([[-1.5, -1.2], [1.5, 1.8]])  # road network outline
 
-        if self.use_network:
+        if self.prediction_method == "NN":
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             model_file = pkg_path + "/scripts/mml_network/models/current.pth"
             training_data_filename = (
@@ -40,13 +40,20 @@ class ParticleFilter:
             )  # TODO: Kyle change this to use N_th
             self.motion_model = deploy_mml.Motion_Model(model_file)
 
+        # PF
+        self.N = num_particles
+        if self.prediction_method == "Velocity":
+            self.Nx = 4  # number of states
+            self.vmax = 0.7  # m/s
+        elif self.prediction_method == "Unicycle":
+            self.Nx = 3
+        elif self.prediction_method == "NN":
+            self.Nx = 2 
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
-        self.measurement_covariance = np.array(
-            [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
-        )
-        # Unfirmly sample particles
+        self.measurement_covariance = np.array([[0.01, 0.0], [0.0, 0.01]])
+        # Uniformly sample particles
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles = np.array([
@@ -56,17 +63,17 @@ class ParticleFilter:
         # ])
         self.is_update = False
 
-        self.yaw_mean = self.yaw_mean = np.arctan2(
-            np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
-            np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
-        )
         self.neff = self.nEff(self.weights)
         self.noise_inv = np.linalg.inv(self.measurement_covariance)
+        self.measurement_history = np.zeros((2, 2))
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.process_covariance = np.array(
-            [[0.02, 0.0, 0.0], [0.0, 0.02, 0.0], [0.0, 0.0, deg2rad(5)]]
+            [
+                [0.001, 0.0],
+                [0.0, 0.001],
+            ]
         )
-        self.var = np.diag(self.measurement_covariance)  # variance of particles
+        self.var = np.diag(self.process_covariance)  # variance of particles
 
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
@@ -87,11 +94,24 @@ class ParticleFilter:
                 )
 
         else:
-            local_particles = np.random.uniform(
-                [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-                [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-                (self.N_th, self.N, 3),
-            )
+            if self.prediction_method == "Velocity":
+                local_particles = np.random.uniform(
+                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -self.vmax, -self.vmax],
+                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], self.vmax, self.vmax],
+                    (2, self.N, self.Nx),
+                )
+            elif self.prediction_method == "Unicycle":
+                local_particles = np.random.uniform(
+                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
+                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
+                    (2, self.N, self.Nx),
+                )
+            elif self.prediction_method == "NN":
+                local_particles = np.random.uniform(
+                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
+                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
+                    (self.N_th, self.N, self.Nx),
+                )
         return local_particles
 
     def pf_loop(
@@ -108,9 +128,9 @@ class ParticleFilter:
         t = rospy.get_time() - self.initial_time
 
         # Prediction step
-        if self.use_network:
+        if self.prediction_method == "NN":
             self.particles = self.predict_mml(self.particles)
-        else:
+        elif self.prediction_method == "Unicycle":
             self.particles, self.last_time = self.predict(
                 self.particles,
                 self.weights,
@@ -118,7 +138,18 @@ class ParticleFilter:
                 angular_velocity=ang_vel,
                 linear_velocity=lin_vel,
             )
+        elif self.prediction_method == "Velocity":
+            dt = t - self.last_time
+            self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
+            self.measurement_history[-1, :] = noisy_measurement[:2]
+            estimate_velocity = ( self.measurement_history[-1, :] - 
+                    self.measurement_history[-2, :] ) * dt
 
+            self.partirles, self.prev_particles, self.last_time = self.predict(
+                self.particles,
+                self.weights,
+                self.last_time,
+            )
         # rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f || True: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1]), self.turtle_pose[0], self.turtle_pose[1]))
 
         # Update step
@@ -129,26 +160,25 @@ class ParticleFilter:
         # Resampling step
         self.neff = self.nEff(self.weights)
         if self.neff < self.N * 0.8 or self.neff == np.inf and self.is_update:
-            if self.neff < self.N * 0.4:
+            if self.neff < self.N * 0.6:
                 # particles are basically lost, reinitialize
-                # Use multivariate normal if you know the initial condition
-                self.particles[-1, :, :] = np.random.multivariate_normal(
-                    noisy_measurement, 4 * self.measurement_covariance, self.N
-                )
-                # TODO: add buffer of measurements to resample all histories
-                # measureemts + np.random.multivariate_normal(
-                #    0, self.measurement_covariance, (10, self.N)
-                #    )
-
+                self.particles[-1, :, :2] = np.random.multivariate_normal(
+                            noisy_measurement[:2],
+                            self.measurement_covariance,
+                            self.N,
+                        )
+                #self.particles[-1, :, 2:] = self.uniform_sample()[-1, :, 2:]
+                if self.prediction_method == "Velocity":
+                    self.particles[-1, :, 2:] = np.random.multivariate_normal(
+                                estimate_velocity,
+                                dt * self.measurement_covariance,
+                                self.N,
+                            )
                 self.weights = np.ones(self.N) / self.N
             else:
                 # some are good but some are bad, resample
-                # rospy.logwarn(
-                #    "Resampling particles. Neff: %f < %f",
-                #    self.neff,
-                #    self.N / 2,
-                # )
                 self.resample()
+                # self.systematic_resample()
 
         self.estimate()
         # print("time for PF: ", rospy.get_time() - t - self.initial_time)
@@ -182,9 +212,9 @@ class ParticleFilter:
             # and then cancelled out during the normalization or expectation.
             like[ii] = np.exp(
                 -0.5
-                * (particles[ii] - y_act[ii]).T
+                * (particles[ii, :2] - y_act[ii, :2]).T
                 @ self.noise_inv
-                @ (particles[ii] - y_act[ii])
+                @ (particles[ii, :2] - y_act[ii, :2])
             )
 
         # Method 2: Vectorized using scipy.stats
@@ -198,11 +228,6 @@ class ParticleFilter:
         particles[:, :, :2] = self.motion_model.predict(particles[:, :, :2])
         # for i in range (2):
         #    self.particles[-1,:,i] += self.add_noise( np.zeros(self.N), 0.01*self.process_covariance[i, i], size=self.N )
-
-        self.yaw_mean = self.yaw_mean = np.arctan2(
-            np.sum(self.weights * np.sin(self.particles[-1, :, 2])),
-            np.sum(self.weights * np.cos(self.particles[-1, :, 2])),
-        )
         return particles
 
     def predict(
@@ -210,8 +235,8 @@ class ParticleFilter:
         particles,
         wgts,
         last_time,
-        angular_velocity,
-        linear_velocity,
+        linear_velocity=np.zeros(2),
+        angular_velocity=np.zeros(1),
     ):
         """Uses the process model to propagate the belief in the system state.
         In our case, the process model is the motion of the turtlebot in 2D with added gaussian noise.
@@ -223,46 +248,74 @@ class ParticleFilter:
         dt = t - last_time
 
         particles[:-1, :, :] = particles[1:, :, :]
-        delta_theta = angular_velocity[0] * dt
-        particles[-1, :, 2] = (
-            particles[-2, :, 2]
-            + delta_theta
-            + (delta_theta / (2 * np.pi))
-            * self.add_noise(
-                np.zeros(self.N), self.process_covariance[2, 2], size=self.N
-            )
-        )
-
-        for ii in range(self.N):
-            if np.abs(particles[-1, ii, 2]) > np.pi:
-                # Wraps angle
-                particles[-1, ii, 2] = (
-                    particles[-1, ii, 2] - np.sign(particles[-1, ii, 2]) * 2 * np.pi
+        if self.prediction_method == "Unicycle":
+            delta_theta = angular_velocity[0] * dt
+            particles[-1, :, 2] = (
+                particles[-2, :, 2]
+                + delta_theta
+                + (delta_theta / (2 * np.pi))
+                * self.add_noise(
+                    np.zeros(self.N), self.process_covariance[2, 2], size=self.N
                 )
+            )
 
-        # Component mean in the complex plane to prevent wrong average
-        # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
-        self.yaw_mean = np.arctan2(
-            np.sum(wgts * np.sin(particles[-1, :, 2])),
-            np.sum(wgts * np.cos(particles[-1, :, 2])),
-        )
-        norm_lin_vel = np.linalg.norm(linear_velocity)
-        delta_distance = norm_lin_vel * dt + norm_lin_vel * dt * self.add_noise(
-            0, self.process_covariance[0, 0], size=self.N
-        )
-        particles[-1, :, :2] = (
-            particles[-2, :, :2]
-            + np.array(
-                [
-                    delta_distance * np.cos(particles[-1, :, 2]),
-                    delta_distance * np.sin(particles[-1, :, 2]),
-                ]
-            ).T
-        )
+            for ii in range(self.N):
+                if np.abs(particles[-1, ii, 2]) > np.pi:
+                    # Wraps angle
+                    particles[-1, ii, 2] = (
+                        particles[-1, ii, 2] - np.sign(particles[-1, ii, 2]) * 2 * np.pi
+                    )
+
+            # Component mean in the complex plane to prevent wrong average
+            # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
+            self.yaw_mean = np.arctan2(
+                np.sum(wgts * np.sin(particles[-1, :, 2])),
+                np.sum(wgts * np.cos(particles[-1, :, 2])),
+            )
+            norm_lin_vel = np.linalg.norm(linear_velocity)
+            delta_distance = norm_lin_vel * dt + norm_lin_vel * dt * self.add_noise(
+                0, self.process_covariance[0, 0], size=self.N
+            )
+            particles[-1, :, :2] = (
+                particles[-2, :, :2]
+                + np.array(
+                    [
+                        delta_distance * np.cos(particles[-1, :, 2]),
+                        delta_distance * np.sin(particles[-1, :, 2]),
+                    ]
+                ).T
+            )
+        elif self.prediction_method == "Velocity":
+            delta_distance = particles[-1, :, 2:] * dt + particles[
+                -1, :, 2:
+            ] * dt * self.add_noise(np.array([0, 0]), self.process_covariance, size=self.N)
+            particles[-1, :, :2] = (
+                particles[-2, :, :2] + delta_distance * particles[-1, :, :2]
+            )
 
         last_time = t
 
         return particles, last_time
+
+    def systematic_resample(self):
+        """Systemic resampling. As with stratified resampling the space is divided into divisions.
+        We then choose a random offset to use for all of the divisions, ensuring that each sample
+        is exactly 1/N apart"""
+        random = np.random.rand(self.N)
+        positions = (random + np.arange(self.N)) / self.N
+
+        indexes = np.zeros(self.N, "i")
+        cumulative_sum = np.cumsum(self.weights)
+        i, j = 0, 0
+        while i < self.N:
+            if positions[i] < cumulative_sum[j]:
+                indexes[i] = j
+                i += 1
+            else:
+                j += 1
+
+        self.particles[-1, :, :] = self.particles[-1, indexes, :]
+        self.weights = np.ones(self.N) / self.N
 
     def resample(self):
         """Uses the resampling algorithm to update the belief in the system state. In our case, the
@@ -282,8 +335,8 @@ class ParticleFilter:
         self.weights = self.weights[indexes]
         # Roughening. See Bootstrap Filter from Crassidis and Junkins.
         G = 0.2
-        E = np.array([0, 0, 0])
-        for ii in range(self.particles.shape[2]):
+        E = np.zeros(self.Nx)
+        for ii in range(self.Nx):
             E[ii] = np.max(self.particles[-1, :, ii]) - np.min(
                 self.particles[-1, :, ii]
             )
@@ -298,23 +351,14 @@ class ParticleFilter:
     def estimate(self):
         """returns mean and variance of the weighted particles"""
         if np.sum(self.weights) > 0.0:
-            self.weighted_mean = np.append(
-                np.average(self.particles[-1, :, :2], weights=self.weights, axis=0),
-                self.yaw_mean,
+            self.weighted_mean = np.average(
+                self.particles[-1, :, :], weights=self.weights, axis=0
             )
-            angle_diff = self.particles[-1, :, 2] - self.weighted_mean[2]
-            angle_diff_sq = ((angle_diff + np.pi) % (2 * np.pi) - np.pi) ** 2
-            yaw_var = np.arctan2(
-                np.sum(self.weights * np.sin(angle_diff_sq)),
-                np.sum(self.weights * np.cos(angle_diff_sq)),
-            )
-            self.var = np.append(
-                np.average(
-                    (self.particles[-1, :, :2] - self.weighted_mean[:2]) ** 2,
-                    weights=self.weights,
-                    axis=0,
-                ),
-                yaw_var,
+            # TODO: change in pf_viz to only use 2 covariance
+            self.var = np.average(
+                (self.particles[-1, :, :3] - self.weighted_mean[:3]) ** 2,
+                weights=self.weights,
+                axis=0,
             )
             # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
             self.H_gauss = (
