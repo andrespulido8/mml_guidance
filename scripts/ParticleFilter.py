@@ -22,7 +22,7 @@ class ParticleFilter:
         self.N = num_particles
 
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        self.AVL_dims = np.array([[-1.5, -1.2], [1.5, 1.8]])  # road network outline
+        self.AVL_dims = np.array([[-1.5, -3], [1.5, 3]])  # road network outline
 
         if self.prediction_method == "NN":
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
@@ -159,8 +159,8 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
-        if self.neff < self.N * 0.8 or self.neff == np.inf and self.is_update:
-            if self.neff < self.N * 0.6:
+        if self.neff < self.N * 0.9 or self.neff == np.inf and self.is_update:
+            if self.neff < self.N * 0.3:
                 # particles are basically lost, reinitialize
                 self.particles[-1, :, :2] = np.random.multivariate_normal(
                             noisy_measurement[:2],

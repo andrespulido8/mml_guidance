@@ -24,7 +24,7 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Information"  # 'Information', 'Particles' or 'Lawnmower'
+        self.guidance_mode = "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         self.prediction_method = "Velocity"  # 'NN', 'Velocity' or 'Unicycle'
 
         # Initialization of variables
@@ -36,11 +36,11 @@ class Guidance:
         self.angular_velocity = np.array([0.0])
         deg2rad = lambda deg: np.pi * deg / 180
         # Number of future measurements per sampled particle to consider in EER
-        self.N_m = 1
+        # self.N_m = 1  # not implemented yet
         # Number of sampled particles
-        self.N_s = 50
+        self.N_s = 100
         # Time steps to propagate in the future for EER
-        self.k = 1
+        self.k = 5
         # initiate entropy
         self.Hp_t = 0  # partial entropy
         self.IG_range = np.array([0, 0, 0])
@@ -61,7 +61,7 @@ class Guidance:
         self.filter = ParticleFilter(self.N, self.prediction_method)
 
         # Occlusions
-        occ_width = 0.5
+        occ_width = 0.75
         occ_center = [-1.25, -1.05]
         rospy.set_param("/occlusions", [occ_center, occ_width])
         self.occlusions = Occlusions([occ_center], [occ_width])
@@ -543,12 +543,15 @@ class Guidance:
                         ds.pose.y = -self.goal_position[1]
                     elif self.guidance_mode == "Particles":
                         # TODO: change to particle mean after testing
-                        ds.pose.x = self.actual_turtle_pose[0]
-                        ds.pose.y = -self.actual_turtle_pose[1]
+                        ds.pose.x = self.filter.weighted_mean[0]
+                        ds.pose.y = -self.filter.weighted_mean[1]
                     elif self.guidance_mode == "Lawnmower":
                         mower_position = self.lawnmower()
                         ds.pose.x = mower_position[0]
                         ds.pose.y = -mower_position[1]
+                    elif self.guidance_mode == "Estimator":
+                        ds.pose.x = self.actual_turtle_pose[0]
+                        ds.pose.y = -self.actual_turtle_pose[1]
                     ds.pose.yaw = 1.571  # 90 degrees
                     ds.position_valid = True
                     ds.velocity_valid = False
