@@ -561,6 +561,10 @@ class Guidance:
                 ds.position_valid = True
                 ds.velocity_valid = False
             ds.pose.z = -self.height
+            # Given boundary of the lab [[x_min, y_min], [x_max, y_,max]]
+            # clip the x and y position to the  space self.filter.AVL_dims
+            ds.pose.x = np.clip(ds.pose.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]) 
+            ds.pose.y = np.clip(ds.pose.y, self.filter.AVL_dims[0][1], self.filter.AVL_dims[1][1])
             self.pose_pub.publish(ds)
             # tracking err pub
             self.FOV_err = self.quad_position - self.actual_turtle_pose[:2]
