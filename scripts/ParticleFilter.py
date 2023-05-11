@@ -52,8 +52,16 @@ class ParticleFilter:
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
-        self.measurement_covariance = np.array([[0.01, 0.0], [0.0, 0.01]])
-        # Uniformly sample particles
+        if self.prediction_method == "Unicycle":
+            self.measurement_covariance = np.array(
+                [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
+            )
+        else:
+            self.measurement_covariance = np.array([[0.01, 0.0], [0.0, 0.01]])
+        self.measurement_history = np.zeros(
+            (self.N_th, self.measurement_covariance.shape[0])
+        )
+        # Unformly sample particles
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles = np.array([
@@ -119,13 +127,16 @@ class ParticleFilter:
         noisy_measurement,
         ang_vel=np.array([ANG_VEL]),
         lin_vel=np.array([FWD_VEL]),
-        event=None,
     ):
         """Main function of the particle filter
         where the predict, update, resample, estimate
         and publish PF values for visualization if needed
         """
         t = rospy.get_time() - self.initial_time
+
+        # update measurement history with noisy_measurement
+        self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
+        self.measurement_history[-1, :] = noisy_measurement
 
         # Prediction step
         if self.prediction_method == "NN":
@@ -140,8 +151,6 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             dt = t - self.last_time
-            self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
-            self.measurement_history[-1, :] = noisy_measurement[:2]
             estimate_velocity = ( self.measurement_history[-1, :] - 
                     self.measurement_history[-2, :] ) * dt
 
@@ -155,25 +164,33 @@ class ParticleFilter:
         # Update step
         if self.is_update:
             self.prev_weights = np.copy(self.weights)
-            self.weights = self.update(self.weights, self.particles, noisy_measurement)
+            self.weights = self.update(
+                self.weights, self.particles, self.measurement_history[-1]
+            )
 
         # Resampling step
         self.neff = self.nEff(self.weights)
         if self.neff < self.N * 0.9 or self.neff == np.inf and self.is_update:
             if self.neff < self.N * 0.3:
-                # particles are basically lost, reinitialize
-                self.particles[-1, :, :2] = np.random.multivariate_normal(
-                            noisy_measurement[:2],
-                            self.measurement_covariance,
-                            self.N,
-                        )
-                #self.particles[-1, :, 2:] = self.uniform_sample()[-1, :, 2:]
                 if self.prediction_method == "Velocity":
                     self.particles[-1, :, 2:] = np.random.multivariate_normal(
                                 estimate_velocity,
                                 dt * self.measurement_covariance,
                                 self.N,
                             )
+                else:
+                    # Use multivariate normal if you know the initial condition
+                    noise = np.random.multivariate_normal(
+                        np.zeros(self.measurement_history.shape[1]),
+                        self.measurement_covariance,
+                        size=(self.N_th, self.N),
+                    )
+                    # repeat the measurement history to be the same size as the particles
+                    measurement_history_repeated = np.tile(
+                        self.measurement_history.reshape(self.N_th, 1, 3), (1, self.N, 1)
+                    )
+                    self.particles = measurement_history_repeated + noise
+
                 self.weights = np.ones(self.N) / self.N
             else:
                 # some are good but some are bad, resample

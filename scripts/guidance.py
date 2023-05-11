@@ -258,7 +258,6 @@ class Guidance:
         if wgts.size > 0:
             # likelihoof of measurement p(zt|xt)
             # (how likely is each of the particles in the gaussian of the measurement)
-            # TODO: change the N to be the general case (Default)
             like_meas = stats.multivariate_normal.pdf(
                 x=particles[:, :2],
                 mean=y_meas[:2],
