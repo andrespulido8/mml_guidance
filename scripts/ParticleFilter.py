@@ -48,7 +48,7 @@ class ParticleFilter:
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
         elif self.prediction_method == "NN":
-            self.Nx = 2 
+            self.Nx = 2
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
@@ -56,8 +56,22 @@ class ParticleFilter:
             self.measurement_covariance = np.array(
                 [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
             )
+            self.process_covariance = np.array(
+                [
+                    [0.001, 0.0, 0.0],
+                    [0.0, 0.001, 0.0],
+                    [0.0, 0.0, 0.0001],
+                ]
+            )
         else:
             self.measurement_covariance = np.array([[0.01, 0.0], [0.0, 0.01]])
+            self.process_covariance = np.array(
+                [
+                    [0.001, 0.0],
+                    [0.0, 0.001],
+                ]
+            )
+
         self.measurement_history = np.zeros(
             (self.N_th, self.measurement_covariance.shape[0])
         )
@@ -72,16 +86,16 @@ class ParticleFilter:
         self.is_update = False
 
         self.neff = self.nEff(self.weights)
-        self.noise_inv = np.linalg.inv(self.measurement_covariance)
-        self.measurement_history = np.zeros((2, 2))
+        self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
-        self.process_covariance = np.array(
+
+        self.var = np.array(
             [
-                [0.001, 0.0],
-                [0.0, 0.001],
+                self.process_covariance[0, 0],
+                self.process_covariance[1, 1],
+                self.process_covariance[0, 0],
             ]
-        )
-        self.var = np.diag(self.process_covariance)  # variance of particles
+        )  # initialization of variance of particles
 
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
@@ -136,12 +150,13 @@ class ParticleFilter:
 
         # update measurement history with noisy_measurement
         self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
-        self.measurement_history[-1, :] = noisy_measurement
+        self.measurement_history[-1, :2] = noisy_measurement[:2]
 
         # Prediction step
         if self.prediction_method == "NN":
             self.particles = self.predict_mml(self.particles)
         elif self.prediction_method == "Unicycle":
+            self.measurement_history[-1, 2] = noisy_measurement[2]
             self.particles, self.last_time = self.predict(
                 self.particles,
                 self.weights,
@@ -151,8 +166,9 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             dt = t - self.last_time
-            estimate_velocity = ( self.measurement_history[-1, :] - 
-                    self.measurement_history[-2, :] ) * dt
+            estimate_velocity = (
+                self.measurement_history[-1, :] - self.measurement_history[-2, :]
+            ) * dt
 
             self.particles, self.last_time = self.predict(
                 self.particles,
@@ -173,11 +189,16 @@ class ParticleFilter:
         if self.neff < self.N * 0.9 or self.neff == np.inf and self.is_update:
             if self.neff < self.N * 0.3:
                 if self.prediction_method == "Velocity":
+                    self.particles[-1, :, :2] = np.random.multivariate_normal(
+                        self.measurement_history[-1, :2],
+                        self.measurement_covariance,
+                        self.N,
+                    )
                     self.particles[-1, :, 2:] = np.random.multivariate_normal(
-                                estimate_velocity,
-                                dt * self.measurement_covariance,
-                                self.N,
-                            )
+                        estimate_velocity,
+                        dt * self.measurement_covariance,
+                        self.N,
+                    )
                 else:
                     # Use multivariate normal if you know the initial condition
                     noise = np.random.multivariate_normal(
@@ -187,7 +208,8 @@ class ParticleFilter:
                     )
                     # repeat the measurement history to be the same size as the particles
                     measurement_history_repeated = np.tile(
-                        self.measurement_history.reshape(self.N_th, 1, 3), (1, self.N, 1)
+                        self.measurement_history.reshape(self.N_th, 1, self.Nx),
+                        (1, self.N, 1),
                     )
                     self.particles = measurement_history_repeated + noise
 
@@ -305,7 +327,9 @@ class ParticleFilter:
         elif self.prediction_method == "Velocity":
             delta_distance = particles[-1, :, 2:] * dt + particles[
                 -1, :, 2:
-            ] * dt * self.add_noise(np.array([0, 0]), self.process_covariance, size=self.N)
+            ] * dt * self.add_noise(
+                np.array([0, 0]), self.process_covariance, size=self.N
+            )
             particles[-1, :, :2] = (
                 particles[-2, :, :2] + delta_distance * particles[-1, :, :2]
             )
@@ -372,11 +396,17 @@ class ParticleFilter:
                 self.particles[-1, :, :], weights=self.weights, axis=0
             )
             # TODO: change in pf_viz to only use 2 covariance
-            self.var = np.average(
-                (self.particles[-1, :, :3] - self.weighted_mean[:3]) ** 2,
+            self.var[:2] = np.average(
+                (self.particles[-1, :, :2] - self.weighted_mean[:2]) ** 2,
                 weights=self.weights,
                 axis=0,
             )
+            if self.prediction_method == "Unicycle":
+                self.var[2] = np.average(
+                    (self.particles[-1, :, 2] - self.weighted_mean[2]) ** 2,
+                    weights=self.weights,
+                    axis=0,
+                )
             # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
             self.H_gauss = (
                 np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(self.var))) / 2

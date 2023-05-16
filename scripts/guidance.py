@@ -24,8 +24,10 @@ class Guidance:
         self.is_sim = rospy.get_param("/is_sim", False)
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
-        self.guidance_mode = "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
-        self.prediction_method = "Velocity"  # 'NN', 'Velocity' or 'Unicycle'
+        self.guidance_mode = (
+            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+        )
+        self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
 
         # Initialization of variables
         self.quad_position = np.array([0.0, 0.0])
@@ -79,7 +81,9 @@ class Guidance:
         rospy.loginfo(f"...and parameter is_viz: {self.is_viz}")
         rospy.loginfo(f"Quadcopter in mode: {self.guidance_mode}")
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
-        self.err_tracking_pub = rospy.Publisher("err_tracking", PointStamped, queue_size=1)
+        self.err_tracking_pub = rospy.Publisher(
+            "err_tracking", PointStamped, queue_size=1
+        )
 
         if self.is_sim:
             self.turtle_odom_sub = rospy.Subscriber(
@@ -177,7 +181,7 @@ class Guidance:
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
             # future_parts = self.filter.motion_model.predict(future_parts)
-            if self.prediction_method == "NN": 
+            if self.prediction_method == "NN":
                 future_parts = self.filter.predict_mml(future_parts)
             elif self.prediction_method == "Unicycle":
                 future_parts, last_future_time = self.filter.predict(
@@ -229,12 +233,12 @@ class Guidance:
             Ip[jj] = self.Hp_t - Hp_k[jj]
 
         # EER = I.mean() # implemented when N_m is implemented
-        self.t_EER = rospy.get_time() - self.initial_time - now
-        # print("IG time: ", self.t_EER)
-
         EER = likelihood * Ip
         action_index = np.argmax(EER)
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
+
+        self.t_EER = rospy.get_time() - self.initial_time - now
+        print("EER time: ", self.t_EER)
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
@@ -261,7 +265,7 @@ class Guidance:
             like_meas = stats.multivariate_normal.pdf(
                 x=particles[:, :2],
                 mean=y_meas[:2],
-                cov=self.filter.measurement_covariance,
+                cov=self.filter.measurement_covariance[:2, :2],
             )
 
             # likelihood of particle p(xt|xt-1)
@@ -274,7 +278,7 @@ class Guidance:
                 like_particle = stats.multivariate_normal.pdf(
                     x=prev_particles[:, :2],
                     mean=particles[ii, :2],
-                    cov=self.filter.process_covariance,
+                    cov=self.filter.process_covariance[:2, :2],
                 )
                 # TODO: investigate if I need to multiply this by prev_wgts
                 process_part_like[ii] = np.sum(like_particle)
@@ -329,7 +333,7 @@ class Guidance:
                 like_particle = stats.multivariate_normal.pdf(
                     x=prev_particles[:, :2],
                     mean=particles[ii, :2],
-                    cov=self.filter.process_covariance,
+                    cov=self.filter.process_covariance[:2, :2],
                 )
                 process_part_like[ii] = np.sum(like_particle * prev_wgts)
 
@@ -461,7 +465,8 @@ class Guidance:
                 )
                 self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
                 self.noisy_turtle_pose[:2] = self.filter.add_noise(
-                    self.actual_turtle_pose[:2], self.filter.measurement_covariance
+                    self.actual_turtle_pose[:2],
+                    self.filter.measurement_covariance[:2, :2],
                 )
             else:
                 self.actual_turtle_pose = np.array(
@@ -563,8 +568,12 @@ class Guidance:
             ds.pose.z = -self.height
             # Given boundary of the lab [[x_min, y_min], [x_max, y_,max]]
             # clip the x and y position to the  space self.filter.AVL_dims
-            ds.pose.x = np.clip(ds.pose.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]) 
-            ds.pose.y = np.clip(ds.pose.y, self.filter.AVL_dims[0][1], self.filter.AVL_dims[1][1])
+            ds.pose.x = np.clip(
+                ds.pose.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]
+            )
+            ds.pose.y = np.clip(
+                ds.pose.y, self.filter.AVL_dims[0][1], self.filter.AVL_dims[1][1]
+            )
             self.pose_pub.publish(ds)
             # tracking err pub
             self.FOV_err = self.quad_position - self.actual_turtle_pose[:2]
