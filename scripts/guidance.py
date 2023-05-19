@@ -40,7 +40,7 @@ class Guidance:
         # Number of future measurements per sampled particle to consider in EER
         # self.N_m = 1  # not implemented yet
         # Number of sampled particles
-        self.N_s = 100
+        self.N_s = 50
         # Time steps to propagate in the future for EER
         self.k = 5
         # initiate entropy
