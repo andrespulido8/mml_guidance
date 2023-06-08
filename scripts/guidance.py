@@ -25,7 +25,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+                "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
 
@@ -40,7 +40,7 @@ class Guidance:
         # Number of future measurements per sampled particle to consider in EER
         # self.N_m = 1  # not implemented yet
         # Number of sampled particles
-        self.N_s = 50
+        self.N_s = 25 
         # Time steps to propagate in the future for EER
         self.k = 5
         # initiate entropy
@@ -59,7 +59,7 @@ class Guidance:
         self.idg_counter = 0
         ## PARTICLE FILTER  ##
         # number of particles
-        self.N = 1000
+        self.N = 500 
         self.filter = ParticleFilter(self.N, self.prediction_method)
 
         # Occlusions
@@ -69,7 +69,7 @@ class Guidance:
         self.occlusions = Occlusions([occ_center], [occ_width])
 
         # Lawnmower
-        lawnmower = LawnmowerPath([0, 0], [2, 2], 1.5)
+        lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5)
         self.path = lawnmower.trajectory()
         self.lawnmower_idx = 0
         self.increment = 1
@@ -79,7 +79,8 @@ class Guidance:
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
         )
         rospy.loginfo(f"...and parameter is_viz: {self.is_viz}")
-        rospy.loginfo(f"Quadcopter in mode: {self.guidance_mode}")
+        rospy.loginfo(f"Quadcopter in guidance mode: {self.guidance_mode}")
+        rospy.loginfo(f"... and in prediction method: {self.prediction_method}")
         self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
         self.err_tracking_pub = rospy.Publisher(
             "err_tracking", PointStamped, queue_size=1
@@ -378,17 +379,19 @@ class Guidance:
 
     def lawnmower(self):
         """Return the position of the measurement if there is one,
-        else return the next position in the lawnmower path
+        else return the next position in the lawnmower path.
+        If the rate of pub_desired_state changes, the increment 
+        variable needs to change
         """
         if self.filter.is_update:
             return self.noisy_turtle_pose[:2]
         else:
-            if self.lawnmower_idx == 0:
+            if self.lawnmower_idx <= 0:
                 self.increment = 1
             if self.lawnmower_idx >= self.path.shape[0] - 1:
                 self.increment = -1
             self.lawnmower_idx += self.increment
-            return self.path[self.lawnmower_idx, :2]
+            return self.path[int(np.floor(self.lawnmower_idx)), :2]
 
     def in_occlusion(self, pos):
         """Return true if the position measurement is in occlusion zones
@@ -487,7 +490,6 @@ class Guidance:
                 # )
                 # in hardware we assume the pose is already noisy
                 self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
-                self.pub_desired_state()
 
             if self.is_in_FOV(
                 self.noisy_turtle_pose, self.FOV
@@ -701,7 +703,7 @@ if __name__ == "__main__":
     rospy.init_node("guidance", anonymous=True)
     guidance = Guidance()
 
-    time_to_shutdown = 200
+    time_to_shutdown = 2000
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
     working_directory = os.getcwd()
