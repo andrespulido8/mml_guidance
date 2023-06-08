@@ -143,7 +143,10 @@ class LawnmowerPath:
         plt.show() if self.is_plot else None
         # TODO: set axis name with dimensions
 
-        return [self.X + s0[0] - 1, self.Y + s0[1] - 1 ]  # TODO: CHANGE quick fix offset for hardware
+        path = np.array([self.X + s0[0] - 1.2, self.Y + s0[1] - 1.5]) 
+        angle = np.deg2rad(-90)
+        tf = [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        return np.matmul(tf, path)  # TODO: CHANGE quick fix offset for hardware
 
     def heading(self):
         """Computes the heading of the path at each index

@@ -11,14 +11,15 @@ class Motion_Model():
         self.input_window = 10 # number of input steps
         self.output_window = 1 # number of prediction steps
         batch_size = 32
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device('cpu')
         #self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu") 
 
         #train_data, val_data = get_data(close, 0.1, input_window, output_window, device, scale_data = False) # 60% train, 40% test split
         self.model = TransAm(in_dim=2, feature_size = 8, num_layers=1)
-        self.model.load_state_dict(torch.load(model_file))
-        self.model.eval()
         self.model = self.model.to(self.device)
+        self.model.load_state_dict(torch.load(model_file, map_location='cpu'))
+        self.model.eval()
         self.counter = 0
 
         # This block is only included because I put forecast_seq in the trainer class
