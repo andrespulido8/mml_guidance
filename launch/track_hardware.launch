@@ -1,10 +1,10 @@
 <launch>
 
+    <arg name="use_camera" default="false"/>
+
     <arg name="vehicle" default="takahe"/>
     <arg name="vehicle_type" default="quad"/>
     <arg name="run_estimator" default="true"/>
-    <arg name="run_uncc" default="false"/>
-    <arg name="run_demo_rgbd" default="false"/>
 
     <arg name="control_mode" value="velocity_altitude"/>
     <arg name="record_bag" default="false"/>
@@ -57,4 +57,5 @@
 
     <node if="$(arg record_bag)" name="record" pkg="rosbag" type="record" args="-O $(arg bag_name) pose_stamped attitude attitude/euler rc_raw imu/data sonar status pose_stamped xyz_debug_estimate xyz_estimate velocity/body_level_frame controller_state added_torque total_torque"/>
 
+    <include if="$(arg use_camera)" file="$(find realsense2_camera)/launch/rs_camera.launch"/>
 </launch>
