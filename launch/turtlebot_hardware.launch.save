@@ -14,22 +14,20 @@
 
         <!--turtlebot PID-->
         <!--Example node: pkg=package your code is located, name=identifier for ROS (can be anything), type=c++ executable or python script to be run-->
-        <!--<node pkg="andres_turtlebot_pid" name="turtlebot_pid" type="turtlebot_pid.py" output="screen">-->
-            <!--<param name='is_sim' value='false'/>-->
-
-        <node pkg="rospy_turtlebot_pid" name="pid_controller" type="controller_node.py" output="screen">
-            <remap from="agent_pose" to="/$(arg rigid_body)/nwu/pose_stamped" />
-            <remap from="target_pose" to="/$(arg rigid_body)/goal_pose" />
-            <remap from="pub_info" to="/mobile_base/commands/velocity"/>
-            <rosparam file="$(find rospy_turtlebot_pid)/config/params.yaml" />
+        <!--<node pkg="andres_turtlebot_pid" name="turtlebot_pid" type="andres_turtlebot_pid_node" output="screen"-->
+        <node pkg="andres_turtlebot_pid" name="turtlebot_pid" type="turtlebot_pid.py" output="screen">
+            <param name='is_sim' value='false'/>
+                 
+            <!--Remaping topics: from=original_topic to=new_topic-->
+            <remap from="pose_stamped" to="nwu/pose_stamped"/>
+            <remap from="/cmd_vel" to="/mobile_base/commands/velocity"/>
+            <remap from="/goal_pose" to="goal_pose"/>`
         </node>
 
         <!-- Road Network -->
-		<node pkg="mml_guidance" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
-			<remap from="agent_pose" to="/$(arg rigid_body)/nwu/pose_stamped" />
+		<node pkg="mml" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
 			<remap from="/goal_pose" to="/rail/goal_pose"/>
-            <!--<remap from="goal_pose" to="goal_pose"/>-->
-		</node>
+		</node> 
     </group>
 
 </launch>

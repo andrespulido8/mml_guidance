@@ -30,6 +30,10 @@ drone_guidance::drone_guidance(ros::NodeHandle &node) {
   turtle_pose_sub = node.subscribe("/robot0/odom", queueSize,
                                    &drone_guidance::turtle_odom_cb, this);
 
+  // subscribe to verify aruco topic and if the turtlebot is visible, pub data
+  // if not, do not pub data
+  /// https://github.com/uf-reef-avl/sim_helper/blob/relay_explorer_fake_aruco/launch/fleet_controller.launch
+
   ROS_INFO("Subscribed to turtle_pose_sub");
   des_state_pub =
       node.advertise<reef_msgs::DesiredState>("desired_state", queueSize);
