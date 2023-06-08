@@ -1,0 +1,7 @@
+scripts/mml_network/models/*.pth*
+*.pyc
+*.csv
+data/data*
+data/rms_*
+__pycache__/
+hardware_data/*
