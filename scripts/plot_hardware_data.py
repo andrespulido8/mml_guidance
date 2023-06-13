@@ -6,22 +6,22 @@ import csv
 import matplotlib.pyplot as plt
 
 # Set the name of the input CSV file
-guidance_mode = 'Information'
+filename = 'Information-Ns25_all_runs.csv'
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/joined/"
-csv_file = folder_path + guidance_mode + '_joined.csv'
+folder_path = package_dir + "/hardware_data/csv/all_runs/"
+csv_file = folder_path + filename 
 
 is_plot = False
 
 # Set the list of column names to include in the plots
 include_data = {
-    'err estimation x', 'err estimation y', 'err tracking x', 'err tracking y', 
+    'err estimation norm', 'err tracking norm', 
     'entropy data', 'info_gain', 'eer time data'
     }
 include_plot = {
-    'entropy data', 'rail  nwu  pose stamped x', 'rail  nwu  pose stamped y',
-    'takahe  nwu  pose stamped x', 'takahe  nwu  pose stamped y', 'xyTh estimate x',
+    'entropy data', 'rail nwu  pose stamped position x', 'rail nwu  pose stamped position y',
+    'takahe nwu pose stamped position x', 'takahe nwu  pose stamped position y', 'xyTh estimate x',
     'xyTh estimate y', 'xyTh estimate yaw', 'err estimation x', 'err estimation y',
     'err tracking x', 'err tracking y', 'n eff particles data', 'eer time data',
     'desired state x', 'desired state y', 'info_gain'
@@ -36,9 +36,9 @@ font = {'family' : 'serif',
 fig_size = (8, 6)  # inches
 dpi = 300
 
-def crop_col(df_col):
+def crop_col(df_col, begin, end):
     # Crop the column data to remove the first 20% of the data
-    return df_col.dropna().iloc[int(0.3 * len(df_col.dropna())):]
+    return df_col.dropna().iloc[int(begin* len(df_col.dropna())):int(end* len(df_col.dropna()))]
 
 def main():
     # Read the CSV file into a pandas dataframe
@@ -55,6 +55,9 @@ def main():
 
             # Set the x axis label to the full column name
             x_label = col_name
+
+            #print("\nColumn name: ", col_name)
+            #print("Data size: ", len(df[x_label].dropna()))
         elif any(col_name == word for word in include_plot):
             # Check if the column name contains any word in the include_plot set
             
@@ -71,7 +74,7 @@ def main():
 
                 # Plot the data
                 t0 = df[x_label][0]
-                plt.plot(crop_col(df[x_label]) - t0, crop_col(df[y_label]), linewidth=2)
+                plt.plot(df[x_label] - t0, df[y_label], linewidth=2)
 
                 # Plot the vertical line
                 #plt.axvline(x=df[x_label][indx], color='g', linestyle='-')
@@ -79,6 +82,7 @@ def main():
                 # Add the legend and axis labels
                 plt.xlabel("Time [s]", fontdict=font)
                 plt.ylabel(y_label, fontdict=font)
+                plt.show()
                 plt.savefig(outdir + y_label.replace(" ", "_") + '.png', dpi=dpi)
         
         if any(col_name == word for word in include_data):
@@ -102,58 +106,53 @@ def main():
           str(perc) + "%")
 
     # Err estimation
-    if guidance_mode != 'Lawnmower':
-        # Err estimation
-        plt.figure(figsize=fig_size)
-        t0 = df['err estimation rosbagTimestamp'][0]
-        plt.plot(crop_col(df['err estimation rosbagTimestamp']) - t0, crop_col(df['err estimation x']), linewidth=2, label='x error')
-        plt.plot(crop_col(df['err estimation rosbagTimestamp']) - t0, crop_col(df['err estimation y']), linewidth=2, label='y error')
-        plt.xlabel("Time [s]", fontdict=font)
-        plt.ylabel("Estimation Error [m]", fontdict=font)
-        plt.legend()
-        plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
-        # Err tracking
-        plt.figure(figsize=fig_size)
-        t0 = df['err tracking rosbagTimestamp'][0]
-        plt.plot(crop_col(df['err tracking rosbagTimestamp']) - t0, crop_col(df['err tracking x']), linewidth=2, label='x error')
-        plt.plot(crop_col(df['err tracking rosbagTimestamp']) - t0, crop_col(df['err tracking y']), linewidth=2, label='y error')
-        plt.xlabel("Time [s]", fontdict=font)
-        plt.ylabel("Tracking Error [m]", fontdict=font)
-        plt.legend()
-        plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
-    else:
-        # Err tracking for files where the err estimation data is not available
-        plt.figure(figsize=fig_size)
-        errx = crop_col(df['takahe  nwu  pose stamped x'] - df['rail  nwu  pose stamped x'])
-        erry = crop_col(df['takahe  nwu  pose stamped y'] - df['rail  nwu  pose stamped y'])
-        t0 = df['takahe  nwu  pose stamped rosbagTimestamp'][0]
-        plt.plot(crop_col(df['takahe  nwu  pose stamped rosbagTimestamp']) - t0, errx, linewidth=2, label='x error')
-        plt.plot(crop_col(df['takahe  nwu  pose stamped rosbagTimestamp']) - t0, erry, linewidth=2, label='y error')
-        rms_x = round(np.sqrt(np.mean(errx**2)), 3)
-        rms_y = round(np.sqrt(np.mean(erry**2)), 3)
-        print("RMS of " + "err x" + ": " + str(rms_x))
-        print("RMS of " + "err y" + ": " + str(rms_y))
-        plt.xlabel("Time [s]", fontdict=font)
-        plt.ylabel("Tracking Error [m]", fontdict=font)
-        plt.legend()
-        plt.savefig(outdir + 'tracking' + '.png', dpi=dpi)
-    # Road network
+    #plt.figure(figsize=fig_size)
+    #t0 = df['err estimation rosbagTimestamp'][0]
+    #plt.plot(df['err estimation rosbagTimestamp'] - t0, df['err estimation x'], linewidth=2, label='x error')
+    #plt.plot(df['err estimation rosbagTimestamp'] - t0, df['err estimation y'], linewidth=2, label='y error')
+    #plt.xlabel("Time [s]", fontdict=font)
+    #plt.ylabel("Estimation Error [m]", fontdict=font)
+    #plt.legend()
+    #plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
+    ## Err tracking
+    #plt.figure(figsize=fig_size)
+    #t0 = df['err tracking rosbagTimestamp'][0]
+    #plt.plot(df['err tracking rosbagTimestamp'] - t0, df['err tracking x'], linewidth=2, label='x error')
+    #plt.plot(df['err tracking rosbagTimestamp'] - t0, df['err tracking y'], linewidth=2, label='y error')
+    #plt.xlabel("Time [s]", fontdict=font)
+    #plt.ylabel("Tracking Error [m]", fontdict=font)
+    #plt.legend()
+    #plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
+    ## Road network
+    #plt.figure(figsize=fig_size)
+    #plt.plot(df['rail nwu pose stamped position x'], df['rail nwu pose stamped position y'], linewidth=2, label='turtlebot path')
+    #plt.plot(df['takahe nwu pose stamped position x'], df['takahe nwu pose stamped position y'], linewidth=2, label='drone path')
+    #plt.plot(df['desired state x'], df['desired state y'], linewidth=2, label='desired position')
+    #plt.xlabel("X position [m]", fontdict=font)
+    #plt.ylabel("Y position [m]", fontdict=font)
+    #plt.legend()
+    #plt.savefig(outdir + 'road' + '.png', dpi=dpi)
+    ## Entropy
+    #plt.figure(figsize=fig_size)
+    #plt.plot(df['entropy rosbagTimestamp'] - t0, df['entropy data'], linewidth=2)
+    #plt.xlabel("Time [s]", fontdict=font)
+    #plt.ylabel("Entropy", fontdict=font)
+    #plt.savefig(outdir + 'entropy' + '.png', dpi=dpi)
+    ## Show the plot
+    #plt.show()
+    # FOV
     plt.figure(figsize=fig_size)
-    plt.plot(crop_col(df['rail  nwu  pose stamped x']), crop_col(df['rail  nwu  pose stamped y']), linewidth=2, label='turtlebot path')
-    plt.plot(crop_col(df['takahe  nwu  pose stamped x']), crop_col(df['takahe  nwu  pose stamped y']), linewidth=2, label='drone path')
-    plt.plot(crop_col(df['desired state x']), crop_col(df['desired state y']), linewidth=2, label='desired position')
+    beg = 0.20
+    end = 0.3
+    plt.plot(crop_col(df['rail nwu pose stamped position x'], beg, end), crop_col(df['rail nwu pose stamped position y'], beg, end), linewidth=2, label='turtlebot path')
+    plt.plot(crop_col(df['takahe nwu pose stamped position x'], beg, end), crop_col(df['takahe nwu pose stamped position y'], beg, end), linewidth=2, label='drone path')
+    # scatter plot of square
+    plt.scatter(crop_col(df['desired state x'], beg, end), crop_col(df['desired state y'], beg, end), c='g', marker='s', s=100, label='desired position') 
     plt.xlabel("X position [m]", fontdict=font)
     plt.ylabel("Y position [m]", fontdict=font)
-    plt.legend()
-    plt.savefig(outdir + 'road' + '.png', dpi=dpi)
-
-    # Entropy
-    #plt.figure(figsize=fig_size)
-    #plt.plot(crop_col(df['entropy rosbagTimestamp']) - t0, crop_col(df['entropy data']), linewidth=2)
-    #plt.xlabel("Time [s]", fontdict=font)
-         
-    # Show the plot
+    plt.title("Field of View Road Network", fontdict=font)
     plt.show()
+
 
 if __name__ == '__main__':
     main()
