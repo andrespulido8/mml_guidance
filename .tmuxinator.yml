@@ -1,7 +1,7 @@
 # /home/andrespulido/.config/tmuxinator/visualization.yml
 
 name: visualization
-root: ~/catkin_ws
+root: ~/mml_ws
 
 windows:
   - guidance_viz:
