@@ -4,28 +4,27 @@ import pandas as pd
 import numpy as np
 import csv
 import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.set()
+sns.set_style('white')
+sns.set_context("paper", font_scale = 2)
 
 # Set the name of the input CSV file
-filename = 'Information-Ns25_all_runs.csv'
+filename = 'Lawnmower_2023-06-07-16-41-58_joined.csv'
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/csv/all_runs/"
+folder_path = package_dir + "/hardware_data/csv/joined/"
 csv_file = folder_path + filename 
 
-is_plot = False
+is_plot = False 
 
 # Set the list of column names to include in the plots
 include_data = {
     'err estimation norm', 'err tracking norm', 
-    'entropy data', 'info_gain', 'eer time data'
+    'entropy data', 'n eff particles data', 'eer time data'
     }
-include_plot = {
-    'entropy data', 'rail nwu  pose stamped position x', 'rail nwu  pose stamped position y',
-    'takahe nwu pose stamped position x', 'takahe nwu  pose stamped position y', 'xyTh estimate x',
-    'xyTh estimate y', 'xyTh estimate yaw', 'err estimation x', 'err estimation y',
-    'err tracking x', 'err tracking y', 'n eff particles data', 'eer time data',
-    'desired state x', 'desired state y', 'info_gain'
-    }
+include_plot = include_data 
 
 # Set the font sizes for the plot labels
 font = {'family' : 'serif',
@@ -47,6 +46,9 @@ def main():
     # Initialize the x and y axis labels
     x_label = ''
     y_label = ''
+
+    # Indices where 'is update data' is false
+    indx_not = np.where(df['is update data'].dropna().astype(bool).to_numpy() == False)[0] #
 
     for col_name in df.columns:
 
@@ -76,14 +78,18 @@ def main():
                 t0 = df[x_label][0]
                 plt.plot(df[x_label] - t0, df[y_label], linewidth=2)
 
-                # Plot the vertical line
-                #plt.axvline(x=df[x_label][indx], color='g', linestyle='-')
+                # vertical line when there is occlusions or target lost
+                for xi in df['is update rosbagTimestamp'][indx_not] - t0:
+                    plt.axvline(x=xi, alpha=0.3, color='r', linestyle='-', linewidth=0.8)
+                plt.axvline(x=df['is update rosbagTimestamp'][indx_not[0]] - t0, alpha=0.3, 
+                            color='r', linestyle='-', linewidth=0.8, label="Occlusion")
 
                 # Add the legend and axis labels
                 plt.xlabel("Time [s]", fontdict=font)
                 plt.ylabel(y_label, fontdict=font)
-                plt.show()
+                plt.legend()
                 plt.savefig(outdir + y_label.replace(" ", "_") + '.png', dpi=dpi)
+                #plt.show()
         
         if any(col_name == word for word in include_data):
             with open(outdir + 'rms.csv', 'a') as csvfile:
@@ -105,53 +111,58 @@ def main():
     print("Percent of time 'is update data' is true: " + 
           str(perc) + "%")
 
-    # Err estimation
-    #plt.figure(figsize=fig_size)
-    #t0 = df['err estimation rosbagTimestamp'][0]
-    #plt.plot(df['err estimation rosbagTimestamp'] - t0, df['err estimation x'], linewidth=2, label='x error')
-    #plt.plot(df['err estimation rosbagTimestamp'] - t0, df['err estimation y'], linewidth=2, label='y error')
-    #plt.xlabel("Time [s]", fontdict=font)
-    #plt.ylabel("Estimation Error [m]", fontdict=font)
-    #plt.legend()
-    #plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
-    ## Err tracking
-    #plt.figure(figsize=fig_size)
-    #t0 = df['err tracking rosbagTimestamp'][0]
-    #plt.plot(df['err tracking rosbagTimestamp'] - t0, df['err tracking x'], linewidth=2, label='x error')
-    #plt.plot(df['err tracking rosbagTimestamp'] - t0, df['err tracking y'], linewidth=2, label='y error')
-    #plt.xlabel("Time [s]", fontdict=font)
-    #plt.ylabel("Tracking Error [m]", fontdict=font)
-    #plt.legend()
-    #plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
-    ## Road network
-    #plt.figure(figsize=fig_size)
-    #plt.plot(df['rail nwu pose stamped position x'], df['rail nwu pose stamped position y'], linewidth=2, label='turtlebot path')
-    #plt.plot(df['takahe nwu pose stamped position x'], df['takahe nwu pose stamped position y'], linewidth=2, label='drone path')
-    #plt.plot(df['desired state x'], df['desired state y'], linewidth=2, label='desired position')
-    #plt.xlabel("X position [m]", fontdict=font)
-    #plt.ylabel("Y position [m]", fontdict=font)
-    #plt.legend()
-    #plt.savefig(outdir + 'road' + '.png', dpi=dpi)
-    ## Entropy
-    #plt.figure(figsize=fig_size)
-    #plt.plot(df['entropy rosbagTimestamp'] - t0, df['entropy data'], linewidth=2)
-    #plt.xlabel("Time [s]", fontdict=font)
-    #plt.ylabel("Entropy", fontdict=font)
-    #plt.savefig(outdir + 'entropy' + '.png', dpi=dpi)
-    ## Show the plot
-    #plt.show()
-    # FOV
-    plt.figure(figsize=fig_size)
-    beg = 0.20
-    end = 0.3
-    plt.plot(crop_col(df['rail nwu pose stamped position x'], beg, end), crop_col(df['rail nwu pose stamped position y'], beg, end), linewidth=2, label='turtlebot path')
-    plt.plot(crop_col(df['takahe nwu pose stamped position x'], beg, end), crop_col(df['takahe nwu pose stamped position y'], beg, end), linewidth=2, label='drone path')
-    # scatter plot of square
-    plt.scatter(crop_col(df['desired state x'], beg, end), crop_col(df['desired state y'], beg, end), c='g', marker='s', s=100, label='desired position') 
-    plt.xlabel("X position [m]", fontdict=font)
-    plt.ylabel("Y position [m]", fontdict=font)
-    plt.title("Field of View Road Network", fontdict=font)
-    plt.show()
+    if is_plot:
+        # Err estimation
+        plt.figure(figsize=fig_size)
+        t0 = df['err estimation rosbagTimestamp'][0]
+        plt.plot(df['err estimation rosbagTimestamp'] - t0, df['err estimation x'], linewidth=2, label='x error')
+        plt.plot(df['err estimation rosbagTimestamp'] - t0, df['err estimation y'], linewidth=2, label='y error')
+        for xi in df['is update rosbagTimestamp'][indx_not] - t0:
+            plt.axvline(x=xi, alpha=0.3, color='r', linestyle='-', linewidth=0.8)
+        plt.axvline(x=df['is update rosbagTimestamp'][indx_not[0]] - t0, alpha=0.3, color='r', linestyle='-', linewidth=0.8, label="Occlusion")
+        plt.xlabel("Time [s]", fontdict=font)
+        plt.ylabel("Estimation Error [m]", fontdict=font)
+        plt.legend()
+        plt.savefig(outdir + 'estimation' + '.png', dpi=dpi)
+        #plt.show()
+        # Err tracking
+        plt.figure(figsize=fig_size)
+        t0 = df['err tracking rosbagTimestamp'][0]
+        plt.plot(df['err tracking rosbagTimestamp'] - t0, df['err tracking x'], linewidth=2, label='x error')
+        plt.plot(df['err tracking rosbagTimestamp'] - t0, df['err tracking y'], linewidth=2, label='y error')
+        for xi in df['is update rosbagTimestamp'][indx_not] - t0:
+            plt.axvline(x=xi, alpha=0.3, color='r', linestyle='-', linewidth=0.8)
+        plt.axvline(x=df['is update rosbagTimestamp'][indx_not[0]] - t0, alpha=0.3, color='r', linestyle='-', linewidth=0.8, label="Occlusion")
+        plt.xlabel("Time [s]", fontdict=font)
+        plt.ylabel("Tracking Error [m]", fontdict=font)
+        plt.legend()
+        plt.savefig(outdir + 'tracking' + '.png', dpi=dpi)
+        #plt.show()
+        # FOV
+        plt.figure(figsize=fig_size)
+        beg = 0.1
+        end = 0.9
+        plt.plot(crop_col(df['rail nwu pose stamped position x'], beg, end), crop_col(df['rail nwu pose stamped position y'], beg, end), linewidth=2, label='turtlebot path')
+        plt.plot(crop_col(df['takahe nwu pose stamped position x'], beg, end), crop_col(df['takahe nwu pose stamped position y'], beg, end), linewidth=2, label='drone path')
+        plt.scatter(crop_col(df['desired state x'], beg, end), crop_col(df['desired state y'], beg, end), alpha=0.2, c='g', marker='s', s=500, label='desired position') 
+        plt.xlabel("X position [m]", fontdict=font)
+        plt.ylabel("Y position [m]", fontdict=font)
+        plt.title("Field of View Road Network", fontdict=font)
+        plt.legend()
+        plt.savefig(outdir + 'road' + '.png', dpi=dpi)
+        #plt.show()
+
+
+    method_data = {} 
+    for filename in os.listdir(outdir):
+        if filename.endswith(".csv"):
+
+            # extract the first word from the file name
+            method_data[filename] = pd.read_csv(filename, low_memory=False)
+
+            #sns.boxplot(data=method_data, x='Method', y=['err estimation norm', 'err tracking norm', 'entropy data', 'n eff particles data', 'eer time data'])
+            # Convert selected columns to numeric data
+            numeric_cols = ['err estimation norm', 'err tracking norm', 'entropy data', 'n eff particles data', 'eer time data']
 
 
 if __name__ == '__main__':
