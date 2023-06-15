@@ -67,9 +67,8 @@ for filename in os.listdir(folder_path):
             continue
         elif last_words == 'desired_state':
             df = df[['rosbagTimestamp', 'x', 'y', 'z', 'yaw']]
-            angle = np.deg2rad(90)
-            tf = [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
-            df[['x', 'y']] = df[['x', 'y']].dot(tf)
+            # Transform from NED to NWU
+            df['y'] = df['y'] * -1
 
         elif last_words == 'err_estimation' or last_words == 'err_tracking':
             df = df[['rosbagTimestamp', 'x', 'y']]

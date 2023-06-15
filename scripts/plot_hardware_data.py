@@ -11,20 +11,24 @@ sns.set_style('white')
 sns.set_context("paper", font_scale = 2)
 
 # Set the name of the input CSV file
-filename = 'Lawnmower_2023-06-07-16-41-58_joined.csv'
+filename = 'Information-Ns25_2023-06-08-14-33-55_joined.csv'
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
 folder_path = package_dir + "/hardware_data/csv/joined/"
 csv_file = folder_path + filename 
 
 is_plot = False 
+print_rms = False
 
 # Set the list of column names to include in the plots
 include_data = {
     'err estimation norm', 'err tracking norm', 
     'entropy data', 'n eff particles data', 'eer time data'
     }
-include_plot = include_data 
+include_plot = { 
+    'desired state x', 'rail nwu pose stamped position x', 'takahe nwu pose stamped position x', 
+    'desired state y', 'rail nwu pose stamped position y', 'takahe nwu pose stamped position y', 
+    }
 
 # Set the font sizes for the plot labels
 font = {'family' : 'serif',
@@ -35,11 +39,15 @@ font = {'family' : 'serif',
 fig_size = (8, 6)  # inches
 dpi = 300
 
-def crop_col(df_col, begin, end):
-    # Crop the column data to remove the first 20% of the data
-    return df_col.dropna().iloc[int(begin* len(df_col.dropna())):int(end* len(df_col.dropna()))]
+def crop_col(df_col):
+    """Crop the column of a dataframe between begin and end percentage of the time"""
+    #return df_col.dropna().iloc[int(begin* len(df_col.dropna())):int(end* len(df_col.dropna()))]
+    beg = time_bounds[df_col.name][0]
+    end = time_bounds[df_col.name][1]
+    return df_col.dropna().iloc[beg:end]
 
 def main():
+    global time_bounds
     # Read the CSV file into a pandas dataframe
     df = pd.read_csv(csv_file, low_memory=False)
 
@@ -49,6 +57,15 @@ def main():
 
     # Indices where 'is update data' is false
     indx_not = np.where(df['is update data'].dropna().astype(bool).to_numpy() == False)[0] #
+    beg = 0.27
+    end = 0.31
+    # Get min and max time from "takahe nwu pose stamped rosbagTimestamp"
+    min_time = df['takahe nwu pose stamped rosbagTimestamp'].min() / 10e8
+    max_time = df['takahe nwu pose stamped rosbagTimestamp'].max() / 10e8
+    print("Time range is: ", max_time - min_time)
+    beg_time = (max_time - min_time) * beg 
+    end_time = (max_time - min_time) * end
+    time_bounds = {}
 
     for col_name in df.columns:
 
@@ -57,10 +74,9 @@ def main():
 
             # Set the x axis label to the full column name
             x_label = col_name
+            df[x_label] = df[x_label] / 10e8 - min_time 
 
-            #print("\nColumn name: ", col_name)
-            #print("Data size: ", len(df[x_label].dropna()))
-        elif any(col_name == word for word in include_plot):
+        elif any(col_name == word for word in include_data):
             # Check if the column name contains any word in the include_plot set
             
             # Set the y axis label to the full column name
@@ -90,16 +106,23 @@ def main():
                 plt.legend()
                 plt.savefig(outdir + y_label.replace(" ", "_") + '.png', dpi=dpi)
                 #plt.show()
+        elif any(col_name == word for word in include_plot):
+            # Get index of min and max time
+            min_indx = df.index[df[x_label] >= beg_time].tolist()[0]
+            max_indx = df.index[df[x_label] >= end_time].tolist()[0] 
+            print("Max time: ", df[x_label][max_indx], "for column: ", col_name)
+            time_bounds[col_name] = [min_indx, max_indx]
         
-        if any(col_name == word for word in include_data):
-            with open(outdir + 'rms.csv', 'a') as csvfile:
-                row_list = [col_name]
-                # Print the root mean square of the y data with two decimal places
-                rms = round(np.sqrt(np.mean(df[y_label]**2)), 3)
-                print("RMS of " + y_label + ": " + str(rms))
-                row_list.append(rms)
-                writer = csv.writer(csvfile)
-                writer.writerow(row_list)
+        if print_rms:
+            if any(col_name == word for word in include_data):
+                with open(outdir + 'rms.csv', 'a') as csvfile:
+                    row_list = [col_name]
+                    # Print the root mean square of the y data with two decimal places
+                    rms = round(np.sqrt(np.mean(df[y_label]**2)), 3)
+                    print("RMS of " + y_label + ": " + str(rms))
+                    row_list.append(rms)
+                    writer = csv.writer(csvfile)
+                    writer.writerow(row_list)
 
     # Print the percent of the total length that 'is update data' column is true
     with open(outdir + 'rms.csv', 'a') as csvfile:
@@ -110,6 +133,8 @@ def main():
         writer.writerow(row_list)
     print("Percent of time 'is update data' is true: " + 
           str(perc) + "%")
+        
+    print("time bounds: ", time_bounds)
 
     if is_plot:
         # Err estimation
@@ -138,32 +163,97 @@ def main():
         plt.legend()
         plt.savefig(outdir + 'tracking' + '.png', dpi=dpi)
         #plt.show()
-        # FOV
-        plt.figure(figsize=fig_size)
-        beg = 0.1
-        end = 0.9
-        plt.plot(crop_col(df['rail nwu pose stamped position x'], beg, end), crop_col(df['rail nwu pose stamped position y'], beg, end), linewidth=2, label='turtlebot path')
-        plt.plot(crop_col(df['takahe nwu pose stamped position x'], beg, end), crop_col(df['takahe nwu pose stamped position y'], beg, end), linewidth=2, label='drone path')
-        plt.scatter(crop_col(df['desired state x'], beg, end), crop_col(df['desired state y'], beg, end), alpha=0.2, c='g', marker='s', s=500, label='desired position') 
-        plt.xlabel("X position [m]", fontdict=font)
-        plt.ylabel("Y position [m]", fontdict=font)
-        plt.title("Field of View Road Network", fontdict=font)
-        plt.legend()
-        plt.savefig(outdir + 'road' + '.png', dpi=dpi)
+    import matplotlib.cm as cm
+
+    # FOV
+    fig_size = (10, 12)  # inches
+    dpi = 600
+    plt.figure(figsize=fig_size)
+    plt.plot(crop_col(df['rail nwu pose stamped position x']), crop_col(df['rail nwu pose stamped position y']), linewidth=2, label='turtlebot path')
+    plt.plot(crop_col(df['takahe nwu pose stamped position x']), crop_col(df['takahe nwu pose stamped position y']), linewidth=2, label='drone path')
+    alphas = np.linspace(0.05, 0.55, len(crop_col(df['desired state x'])))
+    colors_fov = cm.Greens(alphas)
+    plt.scatter(crop_col(df['desired state x']), crop_col(df['desired state y']), c=colors_fov, marker='s', s=4000, label='desired position')
+    plt.xlabel("X position [m]", fontdict=font)
+    plt.ylabel("Y position [m]", fontdict=font)
+    plt.title("Field of View Road Network", fontdict=font)
+    plt.legend()
+    plt.savefig(outdir + 'zoomed_road' + '.png', dpi=dpi)
+    plt.show()
+
+    if is_plot:
+        ## All methods comparison 
+        error_df = pd.DataFrame(columns=['filename', 'hue', 'y'])
+        entropy_df = pd.DataFrame(columns=['filename', 'y'])
+        #cat_list = ['entropy data', 'n eff particles data']
+        err_list = ['err estimation norm', 'err tracking norm']
+        for filename in os.listdir(folder_path):
+            if filename.endswith(".csv"):
+                first_word = filename.split("_")[0]
+
+                # extract the first word from the file name
+                file_df = pd.read_csv(folder_path + filename, low_memory=False)
+
+                for col in err_list:
+                    values = file_df[col]
+
+                    row = pd.DataFrame({
+                        'Guidance Method': first_word,
+                        'hue': col,
+                        'Error [m]': values
+                    })
+                    error_df = pd.concat([error_df, row], ignore_index=True)
+
+                values = file_df['entropy data']
+                row = pd.DataFrame({
+                    'Guidance Method': first_word,
+                    'Entropy': values
+                })
+                entropy_df = pd.concat([entropy_df, row], ignore_index=True)
+
+        rms_estimator = lambda x: np.sqrt(np.mean(np.square(x))) 
+
+        # BOX
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.boxplot(x = "Guidance Method",
+                    y = "Error [m]",
+                    data = error_df,
+                    ax = ax,
+                    hue = "hue", 
+                    showfliers=False)
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels, title='', fontsize=16, title_fontsize=20)
+        sns.despine(right = True)
+        plt.savefig(outdir + 'box_guidance' + '.png', dpi=dpi)
+
+        # BAR
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.barplot(x = "Guidance Method",
+                    y = "Error [m]",
+                    data = error_df,
+                    ax = ax,
+                    hue = "hue", 
+                    estimator = rms_estimator,
+                    capsize = 0.1,
+                    errorbar =  "sd")
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels, title='', fontsize=16, title_fontsize=20)
+        sns.despine(right = True)
+        plt.savefig(outdir + 'box_guidance' + '.png', dpi=dpi)
         #plt.show()
 
-
-    method_data = {} 
-    for filename in os.listdir(outdir):
-        if filename.endswith(".csv"):
-
-            # extract the first word from the file name
-            method_data[filename] = pd.read_csv(filename, low_memory=False)
-
-            #sns.boxplot(data=method_data, x='Method', y=['err estimation norm', 'err tracking norm', 'entropy data', 'n eff particles data', 'eer time data'])
-            # Convert selected columns to numeric data
-            numeric_cols = ['err estimation norm', 'err tracking norm', 'entropy data', 'n eff particles data', 'eer time data']
-
+        # BAR entropy
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.barplot(x = "Guidance Method",
+                    y = "Entropy",
+                    data = entropy_df,
+                    ax = ax,
+                    estimator = rms_estimator,
+                    capsize = 0.1,
+                    errorbar =  "sd")
+        sns.despine(right = True)
+        plt.savefig(outdir + 'bar_entropy' + '.png', dpi=dpi)
+        #plt.show()
 
 if __name__ == '__main__':
     main()
