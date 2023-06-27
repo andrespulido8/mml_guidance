@@ -1,1 +1,2 @@
+torch  # we used version 2.0.1+cu117
 pre-commit==2.20.0
