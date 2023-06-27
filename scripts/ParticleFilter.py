@@ -221,7 +221,7 @@ class ParticleFilter:
                 # self.systematic_resample()
 
         self.estimate()
-        # print("time for PF: ", rospy.get_time() - t - self.initial_time)
+        # print("PF time: ", rospy.get_time() - t - self.initial_time)
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief in the system state.

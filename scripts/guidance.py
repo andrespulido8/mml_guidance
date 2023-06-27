@@ -34,7 +34,6 @@ class Guidance:
         self.actual_turtle_pose = np.array([0.0, 0.0, 0.0])
         self.noisy_turtle_pose = np.array([0.0, 0.0, 0.0])
         self.goal_position = np.array([0.0, 0.0])
-        self.eer_goal = np.array([0.0, 0.0])
         self.linear_velocity = np.array([0.0, 0.0])
         self.angular_velocity = np.array([0.0])
         deg2rad = lambda deg: np.pi * deg / 180
@@ -128,7 +127,7 @@ class Guidance:
         self.init_finished = True
 
     def current_entropy(self, event=None):
-        now = rospy.get_time() - self.initial_time
+        t = rospy.get_time() - self.initial_time
         prob = np.nan_to_num(self.filter.weights, copy=True, nan=0)
         prob = prob / np.sum(prob)
         # try choosing next particles, if there is an error, return list from 0 to N_s
@@ -160,8 +159,8 @@ class Guidance:
                 self.filter.particles[-1, self.sampled_index, :],
             )
 
-        entropy_time = rospy.get_time() - self.initial_time
-        # print("Entropy time: ", entropy_time - now)
+        entropy_time = rospy.get_time() - t - self.initial_time
+        print("Entropy time: ", entropy_time)
 
     def information_driven_guidance(self, event=None):
         """Compute the current entropy and future entropy using particles
@@ -240,12 +239,11 @@ class Guidance:
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         self.t_EER = rospy.get_time() - self.initial_time - now
-        #print("EER time: ", self.t_EER)
+        print("EER time: ", self.t_EER)
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
         # print("Chosen action:", z_hat[action_index, :2])
-        self.eer_goal = z_hat[action_index][:2]
 
     def entropy_particle(
         self,
@@ -253,7 +251,7 @@ class Guidance:
         prev_wgts,
         particles,
         wgts=np.array([]),
-        y_meas=np.array([]),
+        z_meas=np.array([]),
     ):
         """Compute the entropy of the particle distribution based on the equation in the
         paper: Y. Boers, H. Driessen, A. Bagchi, and P. Mandal, 'Particle filter based entropy'
@@ -262,11 +260,11 @@ class Guidance:
         Output: entropy: numpy.int64
         """
         if wgts.size > 0:
-            # likelihoof of measurement p(zt|xt)
+            # likelihod of measurement p(zt|xt)
             # (how likely is each of the particles in the gaussian of the measurement)
             like_meas = stats.multivariate_normal.pdf(
                 x=particles[:, :2],
-                mean=y_meas[:2],
+                mean=z_meas[:2],
                 cov=self.filter.measurement_covariance[:2, :2],
             )
 
@@ -348,19 +346,28 @@ class Guidance:
 
         return np.clip(entropy, -20, 1000)
 
-    def is_in_FOV(self, sparticle, fov) -> bool:
+    @staticmethod
+    def is_in_FOV(sparticles, fov):
         """Check if the particles are in the FOV of the camera.
-        Input: Particle, FOV
-        Output: Boolean, True if the particle is in the FOV, False otherwise
+        Input: Array of particles, FOV
+        Output: Array of booleans indicating if each particle is in the FOV
         """
-        return np.all(
-            [
-                sparticle[0] > fov[0],
-                sparticle[0] < fov[1],
-                sparticle[1] > fov[2],
-                sparticle[1] < fov[3],
-            ]
-        )
+        if sparticles.ndim == 1:
+            return np.all(
+                [
+                    sparticles[0] > fov[0],
+                    sparticles[0] < fov[1],
+                    sparticles[1] > fov[2],
+                    sparticles[1] < fov[3],
+                ]
+            )
+        else:
+            return np.logical_and.reduce([
+                sparticles[:, 0] > fov[0],
+                sparticles[:, 0] < fov[1],
+                sparticles[:, 1] > fov[2],
+                sparticles[:, 1] < fov[3]
+            ])
 
     def construct_FOV(self, fov_center=np.array([0, 0])) -> np.ndarray:
         """Construct the FOV of the camera given the center
@@ -381,7 +388,7 @@ class Guidance:
     def lawnmower(self):
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
-        If the rate of get_goal_position changes, the increment 
+        If the rate of pub_desired_state changes, the increment 
         variable needs to change
         """
         if self.filter.is_update:
@@ -555,9 +562,21 @@ class Guidance:
                     ds.position_valid = False
                     ds.velocity_valid = True
                 else:
-                    ds.pose.x = self.goal_position[0]
-                    ds.pose.y = -self.goal_position[1]
                     # flip sign of y to transform from NWU to NED
+                    if self.guidance_mode == "Information":
+                        ds.pose.x = self.goal_position[0]
+                        ds.pose.y = -self.goal_position[1]
+                    elif self.guidance_mode == "Particles":
+                        # TODO: change to particle mean after testing
+                        ds.pose.x = self.filter.weighted_mean[0]
+                        ds.pose.y = -self.filter.weighted_mean[1]
+                    elif self.guidance_mode == "Lawnmower":
+                        mower_position = self.lawnmower()
+                        ds.pose.x = mower_position[0]
+                        ds.pose.y = -mower_position[1]
+                    elif self.guidance_mode == "Estimator":
+                        ds.pose.x = self.actual_turtle_pose[0]
+                        ds.pose.y = -self.actual_turtle_pose[1]
                     ds.pose.yaw = 1.571  # 90 degrees
                     ds.position_valid = True
                     ds.velocity_valid = False
@@ -707,8 +726,6 @@ if __name__ == "__main__":
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
     working_directory = os.getcwd()
-    # print("Working directory: ", working_directory)
-    # empty the errors file without writing on it
     pkgDir = rospkg.RosPack().get_path("mml_guidance")
 
     if guidance.is_sim:
@@ -730,6 +747,7 @@ if __name__ == "__main__":
                 ]
             )
 
+    # Running functions at a certain rate
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.guidance_pf)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information":
