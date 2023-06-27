@@ -34,6 +34,7 @@ class Guidance:
         self.actual_turtle_pose = np.array([0.0, 0.0, 0.0])
         self.noisy_turtle_pose = np.array([0.0, 0.0, 0.0])
         self.goal_position = np.array([0.0, 0.0])
+        self.eer_goal = np.array([0.0, 0.0])
         self.linear_velocity = np.array([0.0, 0.0])
         self.angular_velocity = np.array([0.0])
         deg2rad = lambda deg: np.pi * deg / 180
@@ -239,12 +240,12 @@ class Guidance:
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         self.t_EER = rospy.get_time() - self.initial_time - now
-        print("EER time: ", self.t_EER)
+        #print("EER time: ", self.t_EER)
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
         # print("Chosen action:", z_hat[action_index, :2])
-        self.goal_position = z_hat[action_index][:2]
+        self.eer_goal = z_hat[action_index][:2]
 
     def entropy_particle(
         self,
@@ -380,7 +381,7 @@ class Guidance:
     def lawnmower(self):
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
-        If the rate of pub_desired_state changes, the increment 
+        If the rate of get_goal_position changes, the increment 
         variable needs to change
         """
         if self.filter.is_update:
@@ -416,6 +417,17 @@ class Guidance:
                     return True
 
         return False
+
+    def get_goal_position(self, event=None):
+        if self.guidance_mode == "Information":
+            self.goal_position = self.eer_goal
+        elif self.guidance_mode == "Particles":
+            self.goal_position = self.filter.weighted_mean
+        elif self.guidance_mode == "Lawnmower":
+            mower_position = self.lawnmower()
+            self.goal_position = mower_position
+        elif self.guidance_mode == "Estimator":
+            self.goal_position = self.actual_turtle_pose
 
     @staticmethod
     def euler_from_quaternion(q):
@@ -543,21 +555,9 @@ class Guidance:
                     ds.position_valid = False
                     ds.velocity_valid = True
                 else:
+                    ds.pose.x = self.goal_position[0]
+                    ds.pose.y = -self.goal_position[1]
                     # flip sign of y to transform from NWU to NED
-                    if self.guidance_mode == "Information":
-                        ds.pose.x = self.goal_position[0]
-                        ds.pose.y = -self.goal_position[1]
-                    elif self.guidance_mode == "Particles":
-                        # TODO: change to particle mean after testing
-                        ds.pose.x = self.filter.weighted_mean[0]
-                        ds.pose.y = -self.filter.weighted_mean[1]
-                    elif self.guidance_mode == "Lawnmower":
-                        mower_position = self.lawnmower()
-                        ds.pose.x = mower_position[0]
-                        ds.pose.y = -mower_position[1]
-                    elif self.guidance_mode == "Estimator":
-                        ds.pose.x = self.actual_turtle_pose[0]
-                        ds.pose.y = -self.actual_turtle_pose[1]
                     ds.pose.yaw = 1.571  # 90 degrees
                     ds.position_valid = True
                     ds.velocity_valid = False
@@ -733,11 +733,12 @@ if __name__ == "__main__":
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.guidance_pf)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information":
-        rospy.Timer(rospy.Duration(1.0 / 1.5), guidance.information_driven_guidance)
+        rospy.Timer(rospy.Duration(1.0 / 1.7), guidance.information_driven_guidance)
 
     # Publish topics
     if guidance.is_viz:
         rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_pf)
+    rospy.Timer(rospy.Duration(1.0 / 1.65), guidance.get_goal_position)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_desired_state)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.write_csv)
 
