@@ -47,6 +47,7 @@ class Guidance:
         self.Hp_t = 0  # partial entropy
         self.IG_range = np.array([0, 0, 0])
         self.t_EER = 0
+        self.eer_particle = 0 # intialize future particle to follow randomly (index 0)    
         self.position_following = False
         # Measurement Model
         self.height = 1.5
@@ -179,7 +180,6 @@ class Guidance:
         future_parts = np.copy(self.filter.particles)
         last_future_time = np.copy(self.filter.last_time)
         for k in range(self.k):
-            # future_parts = self.filter.motion_model.predict(future_parts)
             if self.prediction_method == "NN":
                 future_parts = self.filter.predict_mml(future_parts)
             elif self.prediction_method == "Unicycle":
@@ -237,11 +237,13 @@ class Guidance:
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         self.t_EER = rospy.get_time() - self.initial_time - now
-        print("EER time: ", self.t_EER)
+        # print("EER time: ", self.t_EER)
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
         # print("Chosen action:", z_hat[action_index, :2])
+        #self.eer_goal = z_hat[action_index][:2]
+        self.eer_particle = self.sampled_index[action_index]
 
     def entropy_particle(
         self,
@@ -342,7 +344,7 @@ class Guidance:
 
             entropy = -np.nansum(prev_wgts * np.log(process_part_like))
 
-        return np.clip(entropy, -20, 1000)
+        return np.clip(entropy, -100, 1000)
 
     @staticmethod
     def is_in_FOV(sparticles, fov):
@@ -425,7 +427,29 @@ class Guidance:
 
     def get_goal_position(self, event=None):
         if self.guidance_mode == "Information":
-            self.goal_position = self.eer_goal
+            future_part = np.copy(self.filter.particles[:, self.eer_particle
+                            , :]).reshape((self.filter.N_th, 1, self.filter.Nx))
+            last_future_time = np.copy(self.filter.last_time)
+            for k in range(self.k):
+                if self.prediction_method == "NN":
+                    future_part = self.filter.predict_mml(future_part)
+                elif self.prediction_method == "Unicycle":
+                    future_part, last_future_time = self.filter.predict(
+                        future_part,
+                        self.filter.weights[self.eer_particle],
+                        last_future_time + 0.3,
+                        angular_velocity=self.angular_velocity,
+                        linear_velocity=self.linear_velocity,
+                    )
+                elif self.prediction_method == "Unicycle":
+                    future_part, last_future_time = self.filter.predict(
+                        future_part,
+                        self.filter.weights[self.eer_particle],
+                        last_future_time + 0.3,
+                    )
+            print("future_part: ", future_part.shape)
+            print("future_part: ", future_part[-1, 0, :2])
+            self.goal_position = future_part[-1, 0, :2]
         elif self.guidance_mode == "Particles":
             self.goal_position = self.filter.weighted_mean
         elif self.guidance_mode == "Lawnmower":
@@ -686,7 +710,7 @@ class Guidance:
                         self.IG_range[0],
                         self.IG_range[1],
                         self.IG_range[2],
-                        self.in_FOV,
+                        self.filter.is_update,
                         self.t_EER,
                     ]
                 )
@@ -706,7 +730,7 @@ class Guidance:
 
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
-        rospy.logfatal("Timer expired. Stopping the node...")
+        rospy.logfatal("Timer expired or user terminated. Stopping the node...")
         rospy.sleep(0.1)
         rospy.signal_shutdown("Timer signal shutdown")
         # os.system("rosnode kill other_node")
@@ -757,9 +781,9 @@ if __name__ == "__main__":
         rospy.Timer(rospy.Duration(1.0 / 1.7), guidance.information_driven_guidance)
 
     # Publish topics
+    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.get_goal_position)
     if guidance.is_viz:
         rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_pf)
-    rospy.Timer(rospy.Duration(1.0 / 1.65), guidance.get_goal_position)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_desired_state)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.write_csv)
 

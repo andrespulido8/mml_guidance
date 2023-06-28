@@ -98,6 +98,8 @@ class ParticleFilter:
             ]
         )  # initialization of variance of particles
 
+        self.resample_index = np.arange(self.N)
+
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
 
@@ -264,9 +266,11 @@ class ParticleFilter:
         return like
 
     def predict_mml(self, particles):
+        """Propagtes the current particles through the motion model learned with the 
+        neural network. 
+        Input: N_th (number of time histories) sets of particles
+        """
         particles[:, :, :2] = self.motion_model.predict(particles[:, :, :2])
-        # for i in range (2):
-        #    self.particles[-1,:,i] += self.add_noise( np.zeros(self.N), 0.01*self.process_covariance[i, i], size=self.N )
         return particles
 
     def predict(
