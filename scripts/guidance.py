@@ -140,7 +140,6 @@ class Guidance:
             self.sampled_index = np.arange(self.N_s)
         # Entropy of current distribution
         if self.filter.is_update:
-            self.in_FOV = 1
             self.Hp_t = self.entropy_particle(
                 self.filter.particles[-2, self.sampled_index, :],
                 np.copy(self.filter.prev_weights[self.sampled_index]),
@@ -149,7 +148,6 @@ class Guidance:
                 self.noisy_turtle_pose,
             )
         else:
-            self.in_FOV = 0
             # rospy.logwarn("Current_entropy else statement:")
             self.Hp_t = self.entropy_particle(
                 self.filter.particles[-2, self.sampled_index, :],
@@ -160,7 +158,7 @@ class Guidance:
             )
 
         entropy_time = rospy.get_time() - t - self.initial_time
-        print("Entropy time: ", entropy_time)
+        # print("Entropy time: ", entropy_time)
 
     def information_driven_guidance(self, event=None):
         """Compute the current entropy and future entropy using particles
@@ -699,6 +697,11 @@ class Guidance:
                 self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             )
         else:
+            # Select to resample the particles that are not in the FOV if there is a 
+            # measurement or select the particles in FOV if there is no measurement (negative information)
+            self.filter.resample_index = np.where(self.is_in_FOV(self.filter.particles[-1], self.FOV))[0]
+            if self.filter.is_update:
+                self.filter.resample_index = list(set(range(self.N)) - set(self.filter.resample_index))
             self.filter.pf_loop(self.noisy_turtle_pose)
 
     def shutdown(self, event=None):

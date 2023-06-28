@@ -187,8 +187,8 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
-        if self.neff < self.N * 0.9 or self.neff == np.inf and self.is_update:
-            if self.neff < self.N * 0.3 or self.neff == np.inf:
+        if self.neff < self.N * 0.9 or self.neff == np.inf:
+            if self.neff < self.N * 0.3 or self.neff == np.inf and self.is_update:
                 if self.prediction_method == "Velocity":
                     self.particles[-1, :, :2] = np.random.multivariate_normal(
                         self.measurement_history[-1, :2],
@@ -218,7 +218,6 @@ class ParticleFilter:
             else:
                 # some are good but some are bad, resample
                 self.resample()
-                # self.systematic_resample()
 
         self.estimate()
         # print("PF time: ", rospy.get_time() - t - self.initial_time)
@@ -339,26 +338,6 @@ class ParticleFilter:
 
         return particles, last_time
 
-    def systematic_resample(self):
-        """Systemic resampling. As with stratified resampling the space is divided into divisions.
-        We then choose a random offset to use for all of the divisions, ensuring that each sample
-        is exactly 1/N apart"""
-        random = np.random.rand(self.N)
-        positions = (random + np.arange(self.N)) / self.N
-
-        indexes = np.zeros(self.N, "i")
-        cumulative_sum = np.cumsum(self.weights)
-        i, j = 0, 0
-        while i < self.N:
-            if positions[i] < cumulative_sum[j]:
-                indexes[i] = j
-                i += 1
-            else:
-                j += 1
-
-        self.particles[-1, :, :] = self.particles[-1, indexes, :]
-        self.weights = np.ones(self.N) / self.N
-
     def resample(self):
         """Uses the resampling algorithm to update the belief in the system state. In our case, the
         resampling algorithm is the multinomial resampling, where the particles are copied randomly with
@@ -366,29 +345,32 @@ class ParticleFilter:
         Inputs: Updated state of the particles
         Outputs: Resampled updated state of the particles
         """
-        self.weights = (
-            self.weights / np.sum(self.weights)
-            if np.sum(self.weights) > 0
-            else self.weights
-        )
-        # print("Min: %.4f, Max: %.4f, Dot: %.4f"%(self.weights.min(), self.weights.max(), self.weights.dot(self.weights)))
-        indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
-        self.particles[-1, :, :] = self.particles[-1, indexes, :]
-        self.weights = self.weights[indexes]
-        # Roughening. See Bootstrap Filter from Crassidis and Junkins.
-        G = 0.2
-        E = np.zeros(self.Nx)
-        for ii in range(self.Nx):
-            E[ii] = np.max(self.particles[-1, :, ii]) - np.min(
-                self.particles[-1, :, ii]
+        N_r = len(self.resample_index)
+        if N_r > 0:
+            # Normalize weights
+            self.weights = (
+                self.weights / np.sum(self.weights)
+                if np.sum(self.weights) > 0
+                else self.weights
             )
-        cov = (G * E * self.N ** (-1 / 3)) ** 2
-        P_sigmas = np.diag(cov)
+            # Copy particles that are weighted higher
+            rand_ind = np.random.choice(a=self.N, size=N_r, p=self.weights)
+            self.particles[-1, self.resample_index, :] = self.particles[-1, rand_ind, :]
+            self.weights[self.resample_index] = self.weights[rand_ind]
+            # Roughening. See Bootstrap Filter from Crassidis and Junkins.
+            G = 0.2
+            E = np.zeros(self.Nx)
+            for ii in range(self.Nx):
+                E[ii] = np.max(self.particles[-1, self.resample_index, ii]) - np.min(
+                    self.particles[-1, self.resample_index, ii]
+                )
+            cov = (G * E * N_r ** (-1 / 3)) ** 2
+            P_sigmas = np.diag(cov)
 
-        for ii in range(self.N):
-            self.particles[-1, ii, :] = self.add_noise(
-                self.particles[-1, ii, :], P_sigmas
-            )
+            for ii in self.resample_index:
+                self.particles[-1, ii, :] = self.add_noise(
+                    self.particles[-1, ii, :], P_sigmas
+                )
 
     def estimate(self):
         """returns mean and variance of the weighted particles"""
