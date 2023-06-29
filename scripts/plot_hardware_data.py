@@ -7,10 +7,6 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import seaborn as sns
 
-sns.set()
-sns.set_style('white')
-sns.set_context("paper", font_scale = 2)
-
 # Set the name of the input CSV file
 filename = 'Information-Ns25_2023-06-08-14-33-55_joined.csv'
 rospack = rospkg.RosPack()
@@ -35,10 +31,9 @@ cropped_plot = {
 font = {'family' : 'serif',
         'weight' : 'normal',
         'size'   : 16}
-
-# Set the figure size and resolution
-fig_size = (8, 6)  # inches
-dpi = 300
+sns.set()
+sns.set_style('white')
+sns.set_context("paper", font_scale = 2)
 
 def crop_col(df_col):
     """Crop the column of a dataframe between begin and end percentage of the time"""
@@ -60,11 +55,11 @@ def main():
     occ_width = 0.75
     occ_center = [-1.25, -1.05]
     # list of positions of the occlusions to plot in x and y
-    occ_pos = [[occ_center[0] - occ_width, occ_center[0] + occ_width, 
-                occ_center[0] + occ_width, occ_center[0] - occ_width, 
-                occ_center[0] - occ_width], [occ_center[1] - occ_width,
-                occ_center[1] - occ_width, occ_center[1] + occ_width,
-                occ_center[1] + occ_width, occ_center[1] - occ_width]]
+    occ_pos = [[occ_center[0] - occ_width / 2, occ_center[0] + occ_width / 2,
+                occ_center[0] + occ_width / 2, occ_center[0] - occ_width / 2,
+                occ_center[0] - occ_width / 2], [occ_center[1] - occ_width / 2,
+                occ_center[1] - occ_width / 2, occ_center[1] + occ_width / 2,
+                occ_center[1] + occ_width / 2, occ_center[1] - occ_width / 2]]
 
     # Indices where 'is update data' is false
     indx_not_upd = np.where(df['is update data'].dropna().astype(bool).to_numpy() == False)[0] #
