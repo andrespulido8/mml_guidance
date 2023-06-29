@@ -98,6 +98,7 @@ class ParticleFilter:
             ]
         )  # initialization of variance of particles
 
+        # Particles to be resampled wheter we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
 
         self.initial_time = rospy.get_time()
@@ -221,7 +222,7 @@ class ParticleFilter:
                 # some are good but some are bad, resample
                 self.resample()
 
-        self.estimate()
+        self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
         # print("PF time: ", rospy.get_time() - t - self.initial_time)
 
     def update(self, weights, particles, noisy_turtle_pose):
@@ -376,28 +377,31 @@ class ParticleFilter:
                     self.particles[-1, ii, :], P_sigmas
                 )
 
-    def estimate(self):
+    def estimate(self, particles, weights):
         """returns mean and variance of the weighted particles"""
-        if np.sum(self.weights) > 0.0:
-            self.weighted_mean = np.average(
-                self.particles[-1, :, :], weights=self.weights, axis=0
+        if np.sum(weights) > 0.0:
+            weighted_mean = np.average(
+                particles, weights=weights, axis=0
             )
             # TODO: change in pf_viz to only use 2 covariance
-            self.var[:2] = np.average(
-                (self.particles[-1, :, :2] - self.weighted_mean[:2]) ** 2,
-                weights=self.weights,
+            var = np.zeros_like(self.var)
+            var[:2] = np.average(
+                (particles[:, :2] - weighted_mean[:2]) ** 2,
+                weights=weights,
                 axis=0,
             )
             if self.prediction_method == "Unicycle":
-                self.var[2] = np.average(
-                    (self.particles[-1, :, 2] - self.weighted_mean[2]) ** 2,
-                    weights=self.weights,
+                var[2] = np.average(
+                    (particles[:, 2] - weighted_mean[2]) ** 2,
+                    weights=weights,
                     axis=0,
                 )
-            # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
-            self.H_gauss = (
-                np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(self.var))) / 2
-            )
+            ## source: Differential Entropy for a Gaussian in Wikipedia
+            ## https://en.wikipedia.org/wiki/Differential_entropy
+            #H_gauss = (
+            #    np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(var))) / 2
+            #)
+            return weighted_mean, var
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
