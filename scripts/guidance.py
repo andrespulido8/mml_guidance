@@ -25,7 +25,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-                "Lawnmower"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+                "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
 
@@ -39,7 +39,7 @@ class Guidance:
         deg2rad = lambda deg: np.pi * deg / 180
         ## PARTICLE FILTER  ##
         # number of particles
-        self.N = 500 
+        self.N = 800 
         self.filter = ParticleFilter(self.N, self.prediction_method)
         # Measurement Model
         self.height = 1.5
@@ -241,7 +241,7 @@ class Guidance:
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         self.t_EER = rospy.get_time() - self.initial_time - now
-        # print("EER time: ", self.t_EER)
+        print("EER time: ", self.t_EER)
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
@@ -455,8 +455,8 @@ class Guidance:
                         self.filter.weights[self.eer_particle],
                         last_future_time + 0.3,
                     )
-            print("part: ", self.filter.particles[-1, self.eer_particle, :2])
-            print("future_part: ", future_part[-1, 0, :2])
+            # print("part: ", self.filter.particles[-1, self.eer_particle, :2])
+            # print("future_part: ", future_part[-1, 0, :2])
             self.goal_position = future_part[-1, 0, :2]
         elif self.guidance_mode == "Particles":
             self.goal_position = self.filter.weighted_mean
@@ -774,7 +774,7 @@ if __name__ == "__main__":
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.guidance_pf)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information":
-        rospy.Timer(rospy.Duration(1.0 / 1.7), guidance.information_driven_guidance)
+        rospy.Timer(rospy.Duration(1.0 / 2.5), guidance.information_driven_guidance)
 
     # Publish topics
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.get_goal_position)
