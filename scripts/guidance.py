@@ -241,7 +241,7 @@ class Guidance:
         self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
 
         self.t_EER = rospy.get_time() - self.initial_time - now
-        print("EER time: ", self.t_EER)
+        # print("EER time: ", self.t_EER)
 
         # print("possible actions: ", z_hat[:, :2])
         # print("information gain: ", I)
@@ -717,11 +717,12 @@ class Guidance:
                 self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             )
         else:
-            # Select to resample the particles that are not in the FOV if there is a 
-            # measurement or select the particles in FOV if there is no measurement (negative information)
-            self.filter.resample_index = np.where(self.is_in_FOV(self.filter.particles[-1], self.FOV))[0]
-            if self.filter.is_update:
-                self.filter.resample_index = list(set(range(self.N)) - set(self.filter.resample_index))
+            # Select to resample all particles if there is a measurement or select 
+            # the particles in FOV if there is no measurement (negative information)
+            if not self.filter.is_update:
+                self.filter.resample_index = np.where(self.is_in_FOV(self.filter.particles[-1], self.FOV))[0]
+            else:
+                self.filter.resample_index = np.arange(self.N)
             self.filter.pf_loop(self.noisy_turtle_pose)
 
     def shutdown(self, event=None):
