@@ -8,14 +8,14 @@ import matplotlib.cm as cm
 import seaborn as sns
 
 # Set the name of the input CSV file
-filename = 'Information-Ns25_2023-06-08-14-33-55_joined.csv'
+filename = 'Lawnmower_2023-06-21-16-48-49_joined.csv'
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance") 
 folder_path = package_dir + "/hardware_data/csv"
 csv_file = folder_path + "/joined/" + filename 
 
 is_plot = True 
-print_rms = False
+print_rms = True 
 
 # Set the list of column names to include in the plots
 include_data = {
@@ -38,12 +38,12 @@ sns.set_context("paper", font_scale = 2)
 def crop_col(df_col):
     """Crop the column of a dataframe between begin and end percentage of the time"""
     #return df_col.dropna().iloc[int(begin* len(df_col.dropna())):int(end* len(df_col.dropna()))]
-    beg = time_bounds[df_col.name][0]
-    end = time_bounds[df_col.name][1]
+    beg = time_bounds_dict[df_col.name][0]
+    end = time_bounds_dict[df_col.name][1]
     return df_col.dropna().iloc[beg:end]
 
 def main():
-    global time_bounds
+    global time_bounds_dict
     # Read the CSV file into a pandas dataframe
     df = pd.read_csv(csv_file, low_memory=False)
 
@@ -51,9 +51,33 @@ def main():
     x_label = ''
     y_label = ''
 
+    # Begin and end percentage of the time to plot 
+    beg_end = np.array([0.0, 0.99])
+    # Get min and max time from topic with most data 
+    min_time = df['takahe nwu pose stamped rosbagTimestamp'].min() / 10e8
+    max_time = df['takahe nwu pose stamped rosbagTimestamp'].max() / 10e8
+    crop_time = (max_time - min_time) * beg_end 
+    print("Time range before crop is: ", round(max_time - min_time, 2), "seconds" )
+    time_bounds_dict = {}
+    for col_name in df.columns:
+        if col_name.endswith('rosbagTimestamp'):
+            x_label = col_name
+            df[col_name] = df[col_name] / 10e8 - min_time
+            min_max_indx = [df.index[df[x_label] >= crop_time[0]].tolist()[0], 
+                            df.index[df[x_label] >= crop_time[1]-0.6].tolist()[0]]
+        time_bounds_dict[col_name] = min_max_indx 
+        df[col_name] = crop_col(df[col_name])
+
+    min_time = df['takahe nwu pose stamped rosbagTimestamp'].min()
+    max_time = df['takahe nwu pose stamped rosbagTimestamp'].max()
+    print("Time range: ", round(max_time - min_time, 2), "seconds" )
+    # Crop the data between begin and end for zoomed in plot 
+    zoomed_beg_end = np.array([0.7, 0.73])
+    zoomed_time = (max_time - min_time) * zoomed_beg_end 
+
     # Occlusions
     occ_width = 0.75
-    occ_center = [-1.25, -1.05]
+    occ_center = np.array([-1.25, -1.05])
     # list of positions of the occlusions to plot in x and y
     occ_pos = [[occ_center[0] - occ_width / 2, occ_center[0] + occ_width / 2,
                 occ_center[0] + occ_width / 2, occ_center[0] - occ_width / 2,
@@ -63,38 +87,19 @@ def main():
 
     # Indices where 'is update data' is false
     indx_not_upd = np.where(df['is update data'].dropna().astype(bool).to_numpy() == False)[0] #
-    indx_occ = np.where((df['rail nwu pose stamped position x'].dropna().to_numpy() > occ_center[0] - occ_width) &
-                        (df['rail nwu pose stamped position x'].dropna().to_numpy() < occ_center[0] + occ_width) &
-                        (df['rail nwu pose stamped position y'].dropna().to_numpy() > occ_center[1] - occ_width) &
-                        (df['rail nwu pose stamped position y'].dropna().to_numpy() < occ_center[1] + occ_width))[0]
-    print("Number of occlusions: ", len(indx_occ))
-
-    # Begin and end percentage of the time to plot in zoomed in FOV
-    beg = 0.28
-    end = 0.31
-    # Get min and max time from "takahe nwu pose stamped rosbagTimestamp"
-    min_time = df['takahe nwu pose stamped rosbagTimestamp'].min() / 10e8
-    max_time = df['takahe nwu pose stamped rosbagTimestamp'].max() / 10e8
-    df['is update rosbagTimestamp'] = df['is update rosbagTimestamp'] / 10e8 - min_time 
-    df['rail nwu pose stamped rosbagTimestamp'] = df['rail nwu pose stamped rosbagTimestamp'] / 10e8 - min_time
-    print("Time range is: ", round(max_time - min_time, 2), "seconds" )
-    beg_time = (max_time - min_time) * beg 
-    end_time = (max_time - min_time) * end
-    time_bounds = {}
+    indx_occ = np.where((df['rail nwu pose stamped position x'].dropna().to_numpy() > occ_center[0] - occ_width / 2) &
+                        (df['rail nwu pose stamped position x'].dropna().to_numpy() < occ_center[0] + occ_width / 2) &
+                        (df['rail nwu pose stamped position y'].dropna().to_numpy() > occ_center[1] - occ_width / 2) &
+                        (df['rail nwu pose stamped position y'].dropna().to_numpy() < occ_center[1] + occ_width / 2))[0]
+    # print("Number of occlusions: ", len(indx_occ))
 
     for col_name in df.columns:
-
-        # Check if the column name ends with "rosbagTimestamp"
         if col_name.endswith('rosbagTimestamp'):
-
             # Set the x axis label to the full column name
             x_label = col_name
-            if x_label != 'is update rosbagTimestamp' and x_label != 'rail nwu pose stamped rosbagTimestamp':
-                df[x_label] = df[x_label] / 10e8 - min_time 
+            df[x_label] = df[x_label] - min_time 
 
         elif any(col_name == word for word in include_data.keys()):
-            # Check if the column name contains any word in the include_plot set
-            
             # Set the y axis label to the full column name
             y_label = col_name
 
@@ -131,10 +136,10 @@ def main():
                 #plt.show()
         elif any(col_name == word for word in cropped_plot):
             # Get index of min and max time
-            min_indx = df.index[df[x_label] >= beg_time].tolist()[0]
-            max_indx = df.index[df[x_label] >= end_time].tolist()[0] 
-            #print("Max time: ", df[x_label][max_indx], "for column: ", col_name)
-            time_bounds[col_name] = [min_indx, max_indx]
+            min_max_indx = [df.index[df[x_label] >= zoomed_time[0]].tolist()[0], 
+                            df.index[df[x_label] >= zoomed_time[1]].tolist()[0]]
+            #print("Max time: ", df[x_label][min_max_indx[0]], "for column: ", col_name)
+            time_bounds_dict[col_name] = min_max_indx 
         
         if print_rms:
             if any(col_name == word for word in include_data):
@@ -147,15 +152,16 @@ def main():
                     writer = csv.writer(csvfile)
                     writer.writerow(row_list)
 
-    # Print the percent of the total length that 'is update data' column is true
-    with open(outdir + 'rms.csv', 'a') as csvfile:
-        row_list = ['is update percent']
-        perc = round(100 * np.sum(df['is update data'].dropna()) / len(df['is update data'].dropna()), 3)
-        row_list.append(perc)
-        writer = csv.writer(csvfile)
-        writer.writerow(row_list)
-    print("Percent of time 'is update data' is true: " + 
-          str(perc) + "%")
+    if print_rms:
+        # Print the percent of the total length that 'is update data' column is true
+        with open(outdir + 'rms.csv', 'a') as csvfile:
+            row_list = ['is update percent']
+            perc = round(100 * np.sum(df['is update data'].dropna()) / len(df['is update data'].dropna()), 3)
+            row_list.append(perc)
+            writer = csv.writer(csvfile)
+            writer.writerow(row_list)
+        print("Percent of time 'is update data' is true: " + 
+            str(perc) + "%")
         
     if is_plot:
         # zoomed in FOV
@@ -174,7 +180,7 @@ def main():
         plt.plot(crop_col(df['desired state x']), crop_col(df['desired state y']), alpha=0.2, color='g', label='Reference Position')
         plt.xlabel("X position [m]", fontdict=font)
         plt.ylabel("Y position [m]", fontdict=font)
-        plt.title("Field of View Road Network with beg and end: " + str(beg) + " " + str(end), fontdict=font)
+        plt.title("Field of View Road Network with beg and end: " + str(zoomed_beg_end), fontdict=font)
         plt.legend()
         plt.savefig(outdir + 'zoomed_road' + '.png', dpi=dpi)
         plt.show()
