@@ -24,7 +24,7 @@ def main():
         os.mkdir(outdir_all)
 
     include_data = {
-        'err estimation norm':'$e_{estimation}$ [m]', 'err tracking norm':'$e_{tracking}$ [m]', 
+        'err estimation norm':'$e_{estimation}$', 'err tracking norm':'$e_{tracking}$', 
         'entropy data':'Entropy', 'n eff particles data':'Effective Number of Particles',
         }
 
@@ -50,7 +50,7 @@ def main():
 
                 row = pd.DataFrame({
                     'Guidance Method': first_word,
-                    'hue': col,
+                    'hue': include_data[col],
                     'Error [m]': values
                 })
                 error_df = pd.concat([error_df, row], ignore_index=True)
@@ -68,7 +68,13 @@ def main():
                 if any(col_name == word for word in include_data):
                     # Calculate the RMS value for the column
                     rms = round(np.sqrt(np.mean(file_df[col_name] ** 2)), 3)
-                    csv_dict[first_word][col_name] = rms
+                    # standard deviation
+                    sd = round(np.std(file_df[col_name]), 3)
+                    csv_dict[first_word][col_name] = (rms, sd)
+                elif col_name == 'is update data':
+                    # Print the percent of the total length that 'is update data' column is true
+                    perc = round(100 * np.sum(file_df[col_name].dropna()) / len(file_df[col_name].dropna()), 3)
+                    csv_dict[first_word][col_name] = perc 
 
     csv_df = pd.DataFrame.from_dict(csv_dict, orient='index') 
     csv_df.T.to_csv(outdir_all + "all_runs_rms.csv", index=True)
