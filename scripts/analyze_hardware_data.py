@@ -5,6 +5,7 @@
 import os
 import pandas as pd
 import rospkg
+import ast
 import numpy as np
 
 # specify the folder containing the CSV files
@@ -42,25 +43,31 @@ for filename in os.listdir(folder_path):
         first_word = '_'.join(filename.split("_")[0:2])
 
         # read the CSV file into a pandas dataframe
-        df = pd.read_csv(os.path.join(folder_path, filename))
+        df = pd.read_csv(os.path.join(folder_path, filename), low_memory=False)
 
         # extract the topic name from the file name (-4 removes the ".csv" extension)
         last_words = '_'.join(filename.split("_")[4:])[0:-4] 
         # remove ny mention on the word "slash_" from last_words
         last_words = last_words.replace('slash_', '')
         if last_words == 'xyTh_estimate': 
+            # Convert the cov (covariance) string series to a list of floats
+            float_list = df['cov'].apply(lambda x: ast.literal_eval(x)).tolist()
+            # Filter the list to keep only the first and fifth non-zero values
+            df['cov'] = [[elem[0], elem[4]] if any(elem) else [] for elem in float_list]
             # loop through the columns in the dataframe
             columns_to_drop = ['header', 'seq', 'stamp', 'frame_id', 'secs', 'nsecs', 
                                'mean', 'yaw', 'weight']
             drop_col = False
             for i, col in enumerate(df.columns):
                 # ignore columns that are followed by the "all_particle" column
-                if i < len(df.columns) - 1 and df.columns[i+1] == "all_particle":
+                if i < len(df.columns) - 1 and df.columns[i] == "all_particle":
                     drop_col = True
                 if drop_col:
                     columns_to_drop.append(col)
             # drop the columns that are followed by the "all_particle" column
             df.drop(columns_to_drop, axis=1, inplace=True)
+            # add the determinant of the covariance matrix (for uncorrelated variables)
+            df['cov det'] = df['cov'].apply(lambda x: np.prod(x)) 
         elif last_words == 'rail_nwu_pose_stamped' or last_words == 'takahe_nwu_pose_stamped': 
             df = process_pose_stamped(df)
         elif last_words == 'odom':

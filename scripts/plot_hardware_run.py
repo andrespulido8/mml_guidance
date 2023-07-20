@@ -19,6 +19,7 @@ print_rms = False
 include_data = {
     'err estimation norm':'$e_{estimation}$ [m]', 'err tracking norm':'$e_{tracking}$ [m]', 
     'entropy data':'Entropy', 'n eff particles data':'Effective Number of Particles',
+    'xyTh estimate cov det': 'Measure of spread of particles $[m^2]$', 
     }
 cropped_plot = { 
     'desired state x', 'rail nwu pose stamped position x', 'takahe nwu pose stamped position x', 
@@ -28,7 +29,7 @@ cropped_plot = {
 # Set the font sizes for the plot labels
 font = {'family' : 'serif',
         'weight' : 'normal',
-        'size'   : 16}
+        'size'   : 20}
 sns.set()
 sns.set_style('white')
 sns.set_context("paper", font_scale = 2)
@@ -67,7 +68,7 @@ def main():
                 if col_name.endswith('rosbagTimestamp'):
                     x_label = col_name
                     df[col_name] = df[col_name] / 10e8 - min_time
-                    print('df[x_label].max(): ', df[x_label].max(), x_label)
+                    # print('df[x_label].max(): ', df[x_label].max(), x_label)
                     min_max_indx = [df.index[df[x_label] >= crop_time[0]].tolist()[0], 
                                     df.index[df[x_label] >= crop_time[1]].tolist()[0]]
                 time_bounds_dict[col_name] = min_max_indx 
@@ -112,7 +113,7 @@ def main():
                         os.mkdir(outdir)
 
                     # Create a new plot with the x and y data
-                    fig_size = (8, 8)  # inches
+                    fig_size = (8, 5.1)  # inches
                     dpi = 300
                     plt.figure(figsize=fig_size)
 
@@ -120,22 +121,26 @@ def main():
                     plt.plot(df[x_label], df[y_label], linewidth=1)
                     plt.scatter(df[x_label], df[y_label], marker='.', s=20)
 
-                    # vertical line when target lost
+                    # Target not in FOV 
                     for xi_u in df['is update rosbagTimestamp'][indx_not_upd]:
                         plt.axvline(x=xi_u, alpha=0.4, color='k', linestyle='-', linewidth=0.8)
                     plt.axvline(x=df['is update rosbagTimestamp'][indx_not_upd[0]], alpha=0.4, 
-                                color='k', linestyle='-', linewidth=0.8, label="No Update")
+                                color='k', linestyle='-', linewidth=0.8, label="$\mathbf{x}_T \in \mathcal{S}$")
                     # vertical line when there is occulsion (every 6th occulsion to avoid clutter) 
                     for xi_o in df['rail nwu pose stamped rosbagTimestamp'][indx_occ[::6]]: 
                         plt.axvline(x=xi_o, alpha=0.1, color='r', linestyle='-', linewidth=0.8)
                     plt.axvline(x=df['rail nwu pose stamped rosbagTimestamp'][indx_occ[0]], alpha=0.1, 
-                                color='r', linestyle='-', linewidth=0.8, label="Occlusion")
+                                color='r', linestyle='-', linewidth=0.8, label="$\mathbf{x}_T \in \mathcal{O}$")
 
                     # Add the legend and axis labels
                     plt.xlabel("Time [s]", fontdict=font)
-                    plt.ylabel(include_data[y_label], fontdict=font)
-                    plt.legend(loc='upper right', fontsize=16)
-                    plt.savefig(outdir + y_label.replace(" ", "_") + '.png', dpi=dpi)
+                    plt.ylabel(include_data[y_label], fontdict=font) 
+                    plt.ylim(0, 2.5) if y_label == "err estimation norm" else None
+                    plt.legend(loc='upper right', fontsize=20) 
+                    first_word = filename.split("_")[0]
+                    plt.title(first_word, fontdict=font)
+                    plt.tight_layout()
+                    plt.savefig(outdir + first_word + "_" + y_label.replace(" ", "_") + '.png', dpi=dpi)
                     #plt.show() if is_plot else plt.close()
                     plt.close()
 
@@ -183,6 +188,7 @@ def main():
                 colors_fov = cm.Greens(alphas_fov)
                 plt.scatter(crop_col(df['desired state x']), crop_col(df['desired state y']), alpha=0.7, c=colors_fov, marker='s', s=4000)
                 plt.plot(crop_col(df['desired state x']), crop_col(df['desired state y']), alpha=0.2, color='g', label='Reference Position')
+                plt.grid( linestyle='--', linewidth=0.5)
                 plt.xlabel("X position [m]", fontdict=font)
                 plt.ylabel("Y position [m]", fontdict=font)
                 plt.title("Field of View Road Network with beg and end: " + str(zoomed_beg_end), fontdict=font)

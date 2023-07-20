@@ -13,7 +13,7 @@ folder_path = package_dir + "/hardware_data/csv"
 # Set the font sizes for the plot labels
 font = {'family' : 'serif',
         'weight' : 'normal',
-        'size'   : 16}
+        'size'   : 18}
 sns.set()
 sns.set_style('white')
 sns.set_context("paper", font_scale = 2)
@@ -26,12 +26,13 @@ def main():
     include_data = {
         'err estimation norm':'$e_{estimation}$', 'err tracking norm':'$e_{tracking}$', 
         'entropy data':'Entropy', 'n eff particles data':'Effective Number of Particles',
-        }
+        'xyTh estimate cov det': '$\det{\Sigma_k}$  [m]',
+    }
 
     # empty dataframes to store the data for the bar plots
     error_df = pd.DataFrame()
     entropy_df = pd.DataFrame()
-    err_list = ['err estimation norm', 'err tracking norm']
+    err_list = ['xyTh estimate cov det', 'err estimation norm', 'err tracking norm']
 
     # empty dictionary to store the RMS values
     csv_dict = {}
@@ -96,6 +97,9 @@ def main():
                 errorbar =  "sd")
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles, labels, title='', fontsize=16, title_fontsize=20)
+    ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
+    ax.set_xlabel('Guidance Method', fontdict=font)
+    ax.set_ylabel('Error [m]', fontdict=font)
     sns.despine(right = True)
     plt.savefig(outdir_all + 'bar_guidance' + '.png', dpi=dpi)
     #plt.show()
@@ -109,6 +113,7 @@ def main():
                 estimator = rms_estimator,
                 capsize = 0.1,
                 errorbar =  "sd")
+    ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
     sns.despine(right = True)
     plt.savefig(outdir_all + 'bar_entropy' + '.png', dpi=dpi)
     #plt.show()
