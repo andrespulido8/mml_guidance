@@ -60,7 +60,7 @@ class Guidance:
         self.IG_range = np.array([0, 0, 0])
         self.t_EER = 0.0
         self.eer_particle = 0 # intialize future particle to follow randomly (index 0)    
-        self.sorted_index = np.arange(self.N)
+        self.sampled_index = np.arange(self.N)
         self.sampled_particles = self.filter.particles[:, :self.N_s, :] 
         self.sampled_weights = np.ones(self.N_s) / self.N_s
         self.position_following = False
@@ -132,21 +132,12 @@ class Guidance:
     def current_entropy(self, event=None):
         t = rospy.get_time() - self.initial_time
         
-        self.sorted_index = np.argsort(self.filter.weights)[::-1]
-        super_particle = np.zeros((self.filter.N_th, 1, self.filter.Nx))
-        for ii in range(self.filter.N_th):
-            super_particle[ii], _ = self.filter.estimate(
-                    self.filter.particles[ii, self.sorted_index[self.N_s-1:], :], 
-                    self.filter.weights[self.sorted_index[self.N_s-1:]],
-                    )  
-        super_weight = np.sum(self.filter.weights[self.sorted_index[self.N_s-1:]])
-        super_prev_weight = np.sum(self.filter.prev_weights[self.sorted_index[self.N_s-1:]])
-        self.sampled_particles = np.copy(self.filter.particles[:, self.sorted_index[:self.N_s-1], :])
-        self.sampled_weights = np.copy(self.filter.weights[self.sorted_index[:self.N_s-1]])
-        sampled_prev_weights = np.copy(self.filter.prev_weights[self.sorted_index[:self.N_s-1]])
-        self.sampled_particles = np.concatenate((self.sampled_particles, super_particle), axis=1)
-        self.sampled_weights = np.concatenate((self.sampled_weights, np.array([super_weight])), axis=0)
-        sampled_prev_weights = np.concatenate((sampled_prev_weights, np.array([super_prev_weight])), axis=0)
+        self.sampled_index = np.random.choice(a=self.N, size=self.N_s) 
+        super_weight = np.sum(self.filter.weights[self.sampled_index])
+        super_prev_weight = np.sum(self.filter.prev_weights[self.sampled_index])
+        self.sampled_particles = np.copy(self.filter.particles[:, self.sampled_index, :])
+        self.sampled_weights = np.copy(self.filter.weights[self.sampled_index])
+        sampled_prev_weights = np.copy(self.filter.prev_weights[self.sampled_index])
         # Entropy of current distribution
         if self.filter.is_update:
             self.Hp_t = self.entropy_particle(
@@ -251,7 +242,7 @@ class Guidance:
             # most EER is the super particle so we follow the max weight
             self.eer_particle = np.argmax(self.filter.weights) 
         else:
-            self.eer_particle = self.sorted_index[action_index]
+            self.eer_particle = self.sampled_index[action_index]
 
     def entropy_particle(
         self,
