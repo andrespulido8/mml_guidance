@@ -98,6 +98,9 @@ class ParticleFilter:
             ]
         )  # initialization of variance of particles
 
+        # Particles to be resampled wheter we have measurements or not (in guidance.py)
+        self.resample_index = np.arange(self.N)
+
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
 
@@ -187,8 +190,8 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
-        if self.neff < self.N * 0.9 or self.neff == np.inf and self.is_update:
-            if self.neff < self.N * 0.3 or self.neff == np.inf:
+        if self.neff < self.N * 0.9 or self.neff == np.inf:
+            if self.neff < self.N * 0.3 or self.neff == np.inf and self.is_update:
                 if self.prediction_method == "Velocity":
                     self.particles[-1, :, :2] = np.random.multivariate_normal(
                         self.measurement_history[-1, :2],
@@ -218,10 +221,9 @@ class ParticleFilter:
             else:
                 # some are good but some are bad, resample
                 self.resample()
-                # self.systematic_resample()
 
-        self.estimate()
-        # print("time for PF: ", rospy.get_time() - t - self.initial_time)
+        self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
+        # print("PF time: ", rospy.get_time() - t - self.initial_time)
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief in the system state.
@@ -265,9 +267,11 @@ class ParticleFilter:
         return like
 
     def predict_mml(self, particles):
+        """Propagtes the current particles through the motion model learned with the 
+        neural network. 
+        Input: N_th (number of time histories) sets of particles
+        """
         particles[:, :, :2] = self.motion_model.predict(particles[:, :, :2])
-        # for i in range (2):
-        #    self.particles[-1,:,i] += self.add_noise( np.zeros(self.N), 0.01*self.process_covariance[i, i], size=self.N )
         return particles
 
     def predict(
@@ -339,26 +343,6 @@ class ParticleFilter:
 
         return particles, last_time
 
-    def systematic_resample(self):
-        """Systemic resampling. As with stratified resampling the space is divided into divisions.
-        We then choose a random offset to use for all of the divisions, ensuring that each sample
-        is exactly 1/N apart"""
-        random = np.random.rand(self.N)
-        positions = (random + np.arange(self.N)) / self.N
-
-        indexes = np.zeros(self.N, "i")
-        cumulative_sum = np.cumsum(self.weights)
-        i, j = 0, 0
-        while i < self.N:
-            if positions[i] < cumulative_sum[j]:
-                indexes[i] = j
-                i += 1
-            else:
-                j += 1
-
-        self.particles[-1, :, :] = self.particles[-1, indexes, :]
-        self.weights = np.ones(self.N) / self.N
-
     def resample(self):
         """Uses the resampling algorithm to update the belief in the system state. In our case, the
         resampling algorithm is the multinomial resampling, where the particles are copied randomly with
@@ -366,52 +350,58 @@ class ParticleFilter:
         Inputs: Updated state of the particles
         Outputs: Resampled updated state of the particles
         """
-        self.weights = (
-            self.weights / np.sum(self.weights)
-            if np.sum(self.weights) > 0
-            else self.weights
-        )
-        # print("Min: %.4f, Max: %.4f, Dot: %.4f"%(self.weights.min(), self.weights.max(), self.weights.dot(self.weights)))
-        indexes = np.random.choice(a=self.N, size=self.N, p=self.weights)
-        self.particles[-1, :, :] = self.particles[-1, indexes, :]
-        self.weights = self.weights[indexes]
-        # Roughening. See Bootstrap Filter from Crassidis and Junkins.
-        G = 0.2
-        E = np.zeros(self.Nx)
-        for ii in range(self.Nx):
-            E[ii] = np.max(self.particles[-1, :, ii]) - np.min(
-                self.particles[-1, :, ii]
+        N_r = len(self.resample_index)
+        if N_r > 0:
+            # Normalize weights
+            self.weights = (
+                self.weights / np.sum(self.weights)
+                if np.sum(self.weights) > 0
+                else self.weights
             )
-        cov = (G * E * self.N ** (-1 / 3)) ** 2
-        P_sigmas = np.diag(cov)
+            # Copy particles that are weighted higher
+            rand_ind = np.random.choice(a=self.N, size=N_r, p=self.weights)
+            self.particles[-1, self.resample_index, :] = self.particles[-1, rand_ind, :]
+            self.weights[self.resample_index] = self.weights[rand_ind]
+            # Roughening. See Bootstrap Filter from Crassidis and Junkins.
+            G = 0.2
+            E = np.zeros(self.Nx)
+            for ii in range(self.Nx):
+                E[ii] = np.max(self.particles[-1, self.resample_index, ii]) - np.min(
+                    self.particles[-1, self.resample_index, ii]
+                )
+            cov = (G * E * N_r ** (-1 / 3)) ** 2
+            P_sigmas = np.diag(cov)
 
-        for ii in range(self.N):
-            self.particles[-1, ii, :] = self.add_noise(
-                self.particles[-1, ii, :], P_sigmas
-            )
+            for ii in self.resample_index:
+                self.particles[-1, ii, :] = self.add_noise(
+                    self.particles[-1, ii, :], P_sigmas
+                )
 
-    def estimate(self):
+    def estimate(self, particles, weights):
         """returns mean and variance of the weighted particles"""
-        if np.sum(self.weights) > 0.0:
-            self.weighted_mean = np.average(
-                self.particles[-1, :, :], weights=self.weights, axis=0
+        if np.sum(weights) > 0.0:
+            weighted_mean = np.average(
+                particles, weights=weights, axis=0
             )
             # TODO: change in pf_viz to only use 2 covariance
-            self.var[:2] = np.average(
-                (self.particles[-1, :, :2] - self.weighted_mean[:2]) ** 2,
-                weights=self.weights,
+            var = np.zeros_like(self.var)
+            var[:2] = np.average(
+                (particles[:, :2] - weighted_mean[:2]) ** 2,
+                weights=weights,
                 axis=0,
             )
             if self.prediction_method == "Unicycle":
-                self.var[2] = np.average(
-                    (self.particles[-1, :, 2] - self.weighted_mean[2]) ** 2,
-                    weights=self.weights,
+                var[2] = np.average(
+                    (particles[:, 2] - weighted_mean[2]) ** 2,
+                    weights=weights,
                     axis=0,
                 )
-            # source: Differential Entropy in Wikipedia - https://en.wikipedia.org/wiki/Differential_entropy
-            self.H_gauss = (
-                np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(self.var))) / 2
-            )
+            ## source: Differential Entropy for a Gaussian in Wikipedia
+            ## https://en.wikipedia.org/wiki/Differential_entropy
+            #H_gauss = (
+            #    np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(var))) / 2
+            #)
+            return weighted_mean, var
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
