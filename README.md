@@ -1,15 +1,18 @@
-# mml_guidance
+# Info-driven Guidance for Target Tracking
 
-Motion Model Learning (MML) guidance algorithms for turtlebot and quad-copter
+Code for the letter: Uncertainty-Aware Guidance for Target Tracking subject to Intermittent Measurements using Motion Model Learning
 
 ## Requirements
+- Run `pip3 install -r requirements.txt` to install all the required packages. You also need the following repositories.
 - [Reef estimator simulation](https://github.com/uf-reef-avl/reef_estimator_sim_bundle).
 	- You need to make sure all the submodules are up to date and tracking master branch. Do `git submodule update --init --recursive` to update the submodules.
 	- To track master for all submodules, type `git submodule foreach --recursive git checkout master`
 	- Note: to automatically change the number of turtlebots, inside the `sim_helper` repo, type `git remote set-url origin https://github.com/andrespulido8/sim_helper.git. Then `git checkout mml`
-- [Turtlebot packages](https://automaticaddison.com/how-to-launch-the-turtlebot3-simulation-with-ros/#gazebo)
-- [mag_pf](http://10.251.72.180/magnav/mag_pf) and [mag_pf_visualization](http://10.251.72.180/magnav/mag_pf_visualization)
-- [Andres turtlebot PID controller](http://10.251.72.180/andres/andres_turtlebot_pid)
+	- If you want to run only hardware then you only need reef_estimator
+- [Turtlebot packages](https://automaticaddison.com/how-to-launch-the-turtlebot3-simulation-with-ros/#gazebo) for the turtlebot simulation.
+- [mag_pf](http://10.251.72.180/magnav/mag_pf) and [mag_pf_visualization](http://10.251.72.180/magnav/mag_pf_visualization) for visualization of the particle filter.
+- [Andres turtlebot PID controller](http://10.251.72.180/andres/andres_turtlebot_pid) for turtlebot controller.
+- [RosFlight](https://github.com/uf-reef-avl/torque_flight) for quadcopter autopilot.
 
 ## Sim Usage
 
@@ -18,15 +21,17 @@ Motion Model Learning (MML) guidance algorithms for turtlebot and quad-copter
 3. In the `sim_helper` repository run `python scripts/Master.py` to start the simulation.
 4. Wait a few seconds until __Autopilot ARMED__ and __RC override active__ are printed and then in another terminal
 run `roslaunch mml_guidance mml_sim_estimator.launch` from the launch directory.
+NOTE: To visualize the particle filter and the motion model, run `roslaunch mml_guidance visualization.launch` instead of `mml_sim_estimator.launch`.
 
 ## Hardware Usage
-To run only the turtlebot, do `roslaunch mml_guidance turtlebot_hardware.launch`.  
-To run only the quadcopter, do `roslaunch mml_guidance track_hardware.launch`.  
+To run only the turtlebot, do `roslaunch mml_guidance turtlebot_hardware.launch`.
+To run only the quadcopter, do `roslaunch mml_guidance track_hardware.launch`.
 To bag data during hardware experiments run `roslaunch mml_guidance bag_hardware.launch prefix_name:="<insert prefix>"`
 
-## Visualization
-To visualize the particle filter and the motion model, run `roslaunch mml_guidance visualization.launch` instead of
-`mml_sim_estimator.launch`.
+## Motion Model Learning (Neural Network)
+The files needed to run the NN are located in [this DropBox](https://www.dropbox.com/sh/dmmskhd9mjbo9ws/AAD5oRf90joVTDinnghFxzG7a?dl=0).
+You should move the csv to `mml_guidance/scripts/mml_network/` and the .pth weights to `mml_guidance/scripts/mml_network/models/`.
+The DropBox also has the data used in the results of the letter.
 
 ## Train
 To turn off the Gazebo GUI to make the sim faster, change the argument `gui` to `false` in `camera_multirotor.launch`
@@ -44,4 +49,4 @@ Run `roslaunch mml_guidance mml_sim_estimator.launch` and then
 This will run the profiler and save the results in the directory where the command was called.
 
 ### Extra
-Install [**tmuxinator**](https://github.com/tmuxinator/tmuxinator). Use `sudo apt-get install -y tmuxinator`. Then to run the `tmuxinator` command in the /mml_guidance directory. You can change the layout of the sessions with `ctrl-b space`
+Install [**tmuxinator**](https://github.com/tmuxinator/tmuxinator) to easily run the sim. Use `sudo apt-get install -y tmuxinator`. Then to run the `tmuxinator` command in the /mml_guidance directory. You can change the layout of the sessions with `ctrl-b space`

@@ -1,9 +1,7 @@
-<!-- launch file for MML demo -->
+<!-- launch file for MML in simulation -->
 <launch>
 	<arg name="is_visualization" default="false"/>
 	<arg name="is_simulation" default="true"/>
-
-    <!--<node name='odom_to_pose_stamped' pkg='sim_helper' type='Odometry_to_PoseStamped.py' output='screen' if='$(arg is_simulation)' /-->
 
 	<!-- Launches the reef estimator -->
 	<arg name="control_mode" value="altitude_hold"/>
@@ -34,9 +32,6 @@
 	<rosparam file="$(find sim_helper)/params/$(arg vehicle)_pid.yaml"/>
 	<node name="reef_control_pid" pkg="reef_control" type="reef_control_node" output="screen"/>
 
-	<!-- Launches the drone guidance (C++)-->
-	<!--<node pkg="mml_guidance" name="drone_guidance" type="drone_guidance_node" output="screen"/>-->
-
   	<param name="is_viz" value="$(arg is_visualization)"/>
 	<param name="is_sim" value="$(arg is_simulation)"/>
 	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen"/>
@@ -49,9 +44,8 @@
 			<remap from="/cmd_vel" to="/robot0/cmd_vel"/>
 			<remap from="/odom" to="/robot0/odom"/>
 			<remap from="/goal_pose" to="/robot0/goal_pose"/>
-			<!--<remap from="/tb3_1/target_pose" to="/robot0/goal_pose"/>-->
 		</node>
-		<!-- Launches the turtlebot trajectory generator-->
+		<!-- Launches the turtlebot trajectory generator (road network)-->
 		<node pkg="mml_guidance" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
 			<remap from="/odom" to="/robot0/odom"/>
 			<remap from="/goal_pose" to="/robot0/goal_pose"/>

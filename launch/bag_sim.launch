@@ -1,30 +1,15 @@
-<!-- launch file for MML demo -->
 <launch>
-	<arg name="aruco_name"            value="/aruco"/>
-    <arg name="record_bag" default="false"/>
-    <arg name="bag_name" default="/home/andrespulido/Documents/bags/mml"/>
+	<!-- launches all sim nodes and bags appropriate topics -->
 
-    <!-- launches the quadcopter and the turtlebot with the guidance nodes -->
-    <include file="$(find mml_guidance)/launch/mml_sim_estimator.launch" />
+    <!-- launch the quadcopter and the turtlebot with the guidance nodes -->
+    <include file="$(find mml_guidance)/launch/visualization.launch" />
 
-	<!-- launches the aruco node that publishes relative pose if robot is in FOV of drone -->
-	<group ns="$(arg aruco_name)" >
-        <rosparam command="load" file="$(find verify_aruco)/params/body_to_camera.yaml" />
-        <!--<rosparam command="load" file="$(find verify_aruco)/params/boardbody_to_aruco.yaml" />-->
-		<node pkg="verify_aruco" name="verify_aruco_tf" type="verify_aruco" output="screen">
-		<param name ="send_gps" value="true"/>
-			<remap from="tf_cam_sim" to="/multirotor/truth/NWU"/>
-			<remap from="tf_calib_sim" to="/robot0/odom"/>
-			<!--<remap from="tf_estimate_cam" to="/quad/pose_stamped"/>-->
-			<param name="publishing_frequency" value="24"/> <!--rate of the charuco published data: 24 is considered as the human eye rate-->
-			<param name="azimuth_threshold" value="3.1"/> <!--yaw detection threshold in rad from logitech website (69 deg)-->
-			<param name="elevation_threshold" value="3.1"/> <!-- x,y detection threshold in rad from logitech website (42 deg)-->
-			<param name="z_threshold" value="3.0"/> <!--altitude detection threshold in meter-->
-		</node>
-	</group>
+    <!-- bags topics-->
+	<arg name="prefix_name" default="sim"/>
+    <arg name="bag_name" default="$(find mml_guidance)/sim_data/$(arg prefix_name)"/>
 
-	<group if="$(arg record_bag)">
-		<!-- record the bag file. Change -O to -o for only prefix instead of full name-->
-    	<node name="record" pkg="rosbag" type="record" args="-O $(arg bag_name) robot0/odom multirotor/truth/NWU"/>
-	</group>
+	<!-- record the bag file. Change -o to -O for only prefix instead of full name with datetime -->
+  	<node name="record" pkg="rosbag" type="record" args="-o $(arg bag_name) /xyTh_estimate
+	/odom /n_eff_particles robot0/odom multirotor/truth/NWU /entropy
+	/err_tracking /err_estimation /eer_time /desired_state /is_update /info_gain /camera/color/image_raw"/>
 </launch>

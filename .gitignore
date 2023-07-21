@@ -5,3 +5,4 @@ data/data*
 data/rms_*
 __pycache__/
 hardware_data/*
+.vscode

@@ -8,21 +8,23 @@ from nav_msgs.msg import Odometry
 class MarkovChain:
     def __init__(self):
         self.is_time_mode = (
-            False # Change this to False if you want to use distance mode
+            False  # Change this to False if you want to use distance mode
         )
 
         self.tolerance_radius = 0.2  # meters
 
-        # self.visited_states = np.zeros(self.n_states)
         self.init_time = np.array(rospy.get_time())
         self.prev_goal_in = 0
         self.prev_mult = 0
         self.position = np.array([0, 0])
-        self.check_dist = True
 
         # ROS stuff
         self.is_sim = rospy.get_param("/is_sim", False)
-        rospy.loginfo("Initializing markov_goal_pose node with parameter is_sim: {}".format(self.is_sim))
+        rospy.loginfo(
+            "Initializing markov_goal_pose node with parameter is_sim: {}".format(
+                self.is_sim
+            )
+        )
         if self.is_sim:
             self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
             self.p = Pose()
@@ -37,7 +39,6 @@ class MarkovChain:
             )
 
         self.goal_pose_square()
-        # self.p = Pose()
 
     def goal_pose_square(self):
         """Generates an square of sides 2*k"""
@@ -152,10 +153,10 @@ class MarkovChain:
 
             self.prev_mult = mult
         else:
-            #  print("dist to goal: ", np.linalg.norm(self.position - np.array([curr_goal_pose['x'], curr_goal_pose['y']])))
             dist_to_goal = np.linalg.norm(
                 self.position - np.array([curr_goal_pose["x"], curr_goal_pose["y"]])
             )
+            #  print("dist to goal: ", dist_to_goal)
             if dist_to_goal < self.tolerance_radius:
                 curr_goal_in = np.random.choice(
                     np.arange(self.n_states), p=self.trans_matrix[self.prev_goal_in, :]
@@ -190,7 +191,6 @@ class MarkovChain:
             self.p.pose.orientation.y = goal_pose["qy"]
             self.p.pose.orientation.z = goal_pose["qz"]
             self.p.pose.orientation.w = goal_pose["qw"]
-
 
 
 if __name__ == "__main__":

@@ -1,10 +1,7 @@
 import numpy as np
 import rospy
 import rospkg
-from geometry_msgs.msg import PointStamped, PoseStamped
-from mag_pf_pkg.msg import Particle, ParticleMean
 from scipy import stats
-from std_msgs.msg import Bool, Float32, Float32MultiArray
 
 from mml_network import deploy_mml
 
@@ -15,45 +12,37 @@ ANG_VEL = 0.0
 class ParticleFilter:
     def __init__(self, num_particles=10, prediction_method="NN"):
 
+        # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
-
         self.prediction_method = prediction_method
-        self.N_th = 10  # Number of time history particles
-        self.N = num_particles
-
-        # boundary of the lab [[x_min, y_min], [x_max, y_,max]]
-        self.AVL_dims = np.array([[-2, -1.5], [2, 1.8]])  # road network outline
-        # self.AVL_dims = np.array([[-1.5, -2.0], [1.8, 2]])  # road network outline  # before coord transform
+        # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
+        self.AVL_dims = np.array([[-2, -1.5], [2, 1.8]])
 
         if self.prediction_method == "NN":
+            self.N_th = 10  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             model_file = pkg_path + "/scripts/mml_network/models/current.pth"
-            training_data_filename = (
-                pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
-            )  # squarest_yaw.csv'
+            training_data_filename = pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
             self.training_data = np.loadtxt(
                 training_data_filename, delimiter=",", skiprows=1
-            )[
-                :, 1:
-            ]  # [500:4000, 1:] # Hardcoded samples
-            self.n_training_samples = (
-                self.training_data.shape[0] - 9
-            )  # TODO: Kyle change this to use N_th
+            )[:, 1:]
+            self.n_training_samples = self.training_data.shape[0] - self.N_th - 1
             self.motion_model = deploy_mml.Motion_Model(model_file)
+        else:
+            self.N_th = 2
 
         # PF
         self.N = num_particles
+        self.weights = np.ones(self.N) / self.N
+        self.prev_weights = np.copy(self.weights)
+        self.weighted_mean = np.array([0, 0, 0])
+        self.is_update = False
+        self.neff = self.nEff(self.weights)
         if self.prediction_method == "Velocity":
             self.Nx = 4  # number of states
             self.vmax = 0.7  # m/s
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
-        elif self.prediction_method == "NN":
-            self.Nx = 2
-        self.weights = np.ones(self.N) / self.N
-        self.prev_weights = np.copy(self.weights)
-        self.weighted_mean = np.array([0, 0, 0])
-        if self.prediction_method == "Unicycle":
             self.measurement_covariance = np.array(
                 [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
             )
@@ -64,7 +53,10 @@ class ParticleFilter:
                     [0.0, 0.0, 0.0001],
                 ]
             )
-        else:
+        elif self.prediction_method == "NN":
+            self.Nx = 2
+
+        if self.prediction_method != "Unicycle":
             self.measurement_covariance = np.array([[0.01, 0.0], [0.0, 0.01]])
             self.process_covariance = np.array(
                 [
@@ -72,11 +64,10 @@ class ParticleFilter:
                     [0.0, 0.001],
                 ]
             )
-
+        self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
             (self.N_th, self.measurement_covariance.shape[0])
         )
-        # Unformly sample particles
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles = np.array([
@@ -84,12 +75,8 @@ class ParticleFilter:
         #    np.array([1.3, -1.26, 0]), self.measurement_covariance, self.N
         #    )
         # ])
-        self.is_update = False
 
-        self.neff = self.nEff(self.weights)
-        self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
-
         self.var = np.array(
             [
                 self.process_covariance[0, 0],
@@ -98,46 +85,35 @@ class ParticleFilter:
             ]
         )  # initialization of variance of particles
 
-        # Particles to be resampled wheter we have measurements or not (in guidance.py)
+        # Particles to be resampled whether we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
-
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
 
-    def uniform_sample(self):
-        SAMPLE_ALONG_PATH = False
-        if SAMPLE_ALONG_PATH:
-            rng = np.random.default_rng()  # This is newly recommended method
-            indices = rng.integers(0, self.n_training_samples, self.N)
-            local_particles = np.empty((10, 0, 3))
-            for i in indices:
-                local_particles = np.concatenate(
-                    (
-                        local_particles,
-                        np.expand_dims(self.training_data[i : i + 10, :], 1),
-                    ),
-                    axis=1,
-                )
-
-        else:
-            if self.prediction_method == "Velocity":
-                local_particles = np.random.uniform(
-                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -self.vmax, -self.vmax],
-                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], self.vmax, self.vmax],
-                    (2, self.N, self.Nx),
-                )
-            elif self.prediction_method == "Unicycle":
-                local_particles = np.random.uniform(
-                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
-                    (2, self.N, self.Nx),
-                )
-            elif self.prediction_method == "NN":
-                local_particles = np.random.uniform(
-                    [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
-                    [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
-                    (self.N_th, self.N, self.Nx),
-                )
+    def uniform_sample(self) -> np.ndarray:
+        """Uniformly samples the particles between min and max values per state.
+        Positions are always sampled according to the lab dimensions.
+        Output:
+            local_particles: N_th sets (time histories) of N particles with Nx states
+        """
+        if self.prediction_method == "Velocity":
+            local_particles = np.random.uniform(
+                [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -self.vmax, -self.vmax],
+                [self.AVL_dims[1, 0], self.AVL_dims[1, 1], self.vmax, self.vmax],
+                (self.N_th, self.N, self.Nx),
+            )
+        elif self.prediction_method == "Unicycle":
+            local_particles = np.random.uniform(
+                [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
+                [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
+                (self.N_th, self.N, self.Nx),
+            )
+        elif self.prediction_method == "NN":
+            local_particles = np.random.uniform(
+                [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
+                [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
+                (self.N_th, self.N, self.Nx),
+            )
         return local_particles
 
     def pf_loop(
@@ -146,9 +122,8 @@ class ParticleFilter:
         ang_vel=np.array([ANG_VEL]),
         lin_vel=np.array([FWD_VEL]),
     ):
-        """Main function of the particle filter
-        where the predict, update, resample, estimate
-        and publish PF values for visualization if needed
+        """Main function of the particle filter where the predict,
+        update, resample and estimate steps are called.
         """
         t = rospy.get_time() - self.initial_time
 
@@ -179,7 +154,6 @@ class ParticleFilter:
                 self.weights,
                 self.last_time,
             )
-        # rospy.logwarn("Mean: %.3f, %.3f | Var: %.3f, %.3f || True: %.3f, %.3f"%(np.mean(self.particles[-1,:,0]), np.mean(self.particles[-1,:,1]), np.var(self.particles[-1,:,0]), np.var(self.particles[-1,:,1]), self.turtle_pose[0], self.turtle_pose[1]))
 
         # Update step
         if self.is_update:
@@ -192,19 +166,20 @@ class ParticleFilter:
         self.neff = self.nEff(self.weights)
         if self.neff < self.N * 0.9 or self.neff == np.inf:
             if self.neff < self.N * 0.3 or self.neff == np.inf and self.is_update:
+                # most particles are bad, resample from Gaussian around the measurement
                 if self.prediction_method == "Velocity":
                     self.particles[-1, :, :2] = np.random.multivariate_normal(
                         self.measurement_history[-1, :2],
                         self.measurement_covariance,
                         self.N,
                     )
+                    # backwards difference for velocities
                     self.particles[-1, :, 2:] = np.random.multivariate_normal(
                         estimate_velocity,
                         dt * self.measurement_covariance,
                         self.N,
                     )
                 else:
-                    # Use multivariate normal if you know the initial condition
                     noise = np.random.multivariate_normal(
                         np.zeros(self.measurement_history.shape[1]),
                         self.measurement_covariance,
@@ -226,10 +201,7 @@ class ParticleFilter:
         # print("PF time: ", rospy.get_time() - t - self.initial_time)
 
     def update(self, weights, particles, noisy_turtle_pose):
-        """Updates the belief in the system state.
-        In our case, the measurement model is the position and orientation of the
-        turtlebot with added noise from a gaussian distribution.
-        In MML the update step is the camera model.
+        """Updates the belief (weights) of the particle distribution.
         Input: Likelihood of the particles from measurement model and prior belief of the particles
         Output: Updated (posterior) weight of the particles
         """
@@ -267,9 +239,10 @@ class ParticleFilter:
         return like
 
     def predict_mml(self, particles):
-        """Propagtes the current particles through the motion model learned with the 
-        neural network. 
-        Input: N_th (number of time histories) sets of particles
+        """Propagates the current particles through the motion model learned with the
+        neural network.
+        Input: N_th (number of time histories) sets of particles up to time k-1
+        Output: N_th sets of propagated particles up to time k
         """
         particles[:, :, :2] = self.motion_model.predict(particles[:, :, :2])
         return particles
@@ -282,11 +255,12 @@ class ParticleFilter:
         linear_velocity=np.zeros(2),
         angular_velocity=np.zeros(1),
     ):
-        """Uses the process model to propagate the belief in the system state.
-        In our case, the process model is the motion of the turtlebot in 2D with added gaussian noise.
-        In MML the predict step is a forward pass on the NN.
-        Input: State of the particles
-        Output: Predicted (propagated) state of the particles
+        """Uses the unicycle model plus noise or the to propagate the belief in the system state.
+        The position and orientation of the particles are updated according to the linear
+        and angular velocity of the turtlebot.
+        In the Velocity method, the particles are propagated according to the velocity of each particle.
+        Input: State of the particles at time k-1
+        Output: Predicted (propagated) state of the particles up to time k
         """
         t = rospy.get_time() - self.initial_time
         dt = t - last_time
@@ -344,9 +318,9 @@ class ParticleFilter:
         return particles, last_time
 
     def resample(self):
-        """Uses the resampling algorithm to update the belief in the system state. In our case, the
-        resampling algorithm is the multinomial resampling, where the particles are copied randomly with
-        probability proportional to the weights plus some roughening from Crassidis and Junkins.
+        """Uses the multinomial resampling algorithm to update the belief in the system state.
+        The particles are copied randomly with probability proportional to the weights plus
+        some roughening based on the spread of the states.
         Inputs: Updated state of the particles
         Outputs: Resampled updated state of the particles
         """
@@ -380,9 +354,7 @@ class ParticleFilter:
     def estimate(self, particles, weights):
         """returns mean and variance of the weighted particles"""
         if np.sum(weights) > 0.0:
-            weighted_mean = np.average(
-                particles, weights=weights, axis=0
-            )
+            weighted_mean = np.average(particles, weights=weights, axis=0)
             # TODO: change in pf_viz to only use 2 covariance
             var = np.zeros_like(self.var)
             var[:2] = np.average(
@@ -398,9 +370,9 @@ class ParticleFilter:
                 )
             ## source: Differential Entropy for a Gaussian in Wikipedia
             ## https://en.wikipedia.org/wiki/Differential_entropy
-            #H_gauss = (
+            # H_gauss = (
             #    np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(var))) / 2
-            #)
+            # )
             return weighted_mean, var
 
     @staticmethod
