@@ -37,6 +37,7 @@ class ParticleFilter:
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
         self.is_update = False
+        self.is_occlusion = False
         self.neff = self.nEff(self.weights)
         if self.prediction_method == "Velocity":
             self.Nx = 4  # number of states
@@ -164,38 +165,39 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
-        if self.neff < self.N * 0.9 or self.neff == np.inf:
-            if self.neff < self.N * 0.3 or self.neff == np.inf and self.is_update:
-                # most particles are bad, resample from Gaussian around the measurement
-                if self.prediction_method == "Velocity":
-                    self.particles[-1, :, :2] = np.random.multivariate_normal(
-                        self.measurement_history[-1, :2],
-                        self.measurement_covariance,
-                        self.N,
-                    )
-                    # backwards difference for velocities
-                    self.particles[-1, :, 2:] = np.random.multivariate_normal(
-                        estimate_velocity,
-                        dt * self.measurement_covariance,
-                        self.N,
-                    )
-                else:
-                    noise = np.random.multivariate_normal(
-                        np.zeros(self.measurement_history.shape[1]),
-                        self.measurement_covariance,
-                        size=(self.N_th, self.N),
-                    )
-                    # repeat the measurement history to be the same size as the particles
-                    measurement_history_repeated = np.tile(
-                        self.measurement_history.reshape(self.N_th, 1, self.Nx),
-                        (1, self.N, 1),
-                    )
-                    self.particles = measurement_history_repeated + noise
+        if not self.is_occlusion:
+            if self.neff < self.N * 0.9 or self.neff == np.inf:
+                if (self.neff < self.N * 0.3 or self.neff == np.inf) and self.is_update:
+                    # most particles are bad, resample from Gaussian around the measurement
+                    if self.prediction_method == "Velocity":
+                        self.particles[-1, :, :2] = np.random.multivariate_normal(
+                            self.measurement_history[-1, :2],
+                            self.measurement_covariance,
+                            self.N,
+                        )
+                        # backwards difference for velocities
+                        self.particles[-1, :, 2:] = np.random.multivariate_normal(
+                            estimate_velocity,
+                            dt * self.measurement_covariance,
+                            self.N,
+                        )
+                    else:
+                        noise = np.random.multivariate_normal(
+                            np.zeros(self.measurement_history.shape[1]),
+                            self.measurement_covariance,
+                            size=(self.N_th, self.N),
+                        )
+                        # repeat the measurement history to be the same size as the particles
+                        measurement_history_repeated = np.tile(
+                            self.measurement_history.reshape(self.N_th, 1, self.Nx),
+                            (1, self.N, 1),
+                        )
+                        self.particles = measurement_history_repeated + noise
 
-                self.weights = np.ones(self.N) / self.N
-            else:
-                # some are good but some are bad, resample
-                self.resample()
+                    self.weights = np.ones(self.N) / self.N
+                else:
+                    # some are good but some are bad, resample
+                    self.resample()
 
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
         # print("PF time: ", rospy.get_time() - t - self.initial_time)

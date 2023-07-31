@@ -65,7 +65,7 @@ class Guidance:
         occ_width = 0.75
         occ_center = [-1.25, -1.05]
         rospy.set_param("/occlusions", [occ_center, occ_width])
-        self.occlusions = Occlusions([occ_center], [occ_width])
+        self.occlusions = Occlusions(occ_center, occ_width)
 
         # Lawnmower Method
         lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5)
@@ -196,7 +196,8 @@ class Guidance:
         z_hat = self.filter.add_noise(
             future_parts[-1, :, :2], self.filter.measurement_covariance
         )
-        likelihood = self.filter.likelihood(z_hat, future_parts[-1])
+        # p(z_{k+K} | x_{k+K})
+        likelihood = self.filter.likelihood(future_parts[-1], z_hat)
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
@@ -388,29 +389,34 @@ class Guidance:
             self.lawnmower_idx += self.increment
             return self.path[int(np.floor(self.lawnmower_idx)), :2]
 
-    def in_occlusion(self, pos) -> bool:
-        """Return true if the position measurement is in occlusion zones
+    def in_occlusion(self, pos):
+        """Return true if the position measurement is in occlusion zones for a single
+        position but if it is an array of positions, return an array of booleans for
+        particles inside occlusion
         Inputs: pos: position to check - numpy.array of shape (2,)
-        Output: true if it is in occlusion - bool
         """
-        for rect in range(len(self.occlusions.positions)):
-            if (
-                pos[0]
-                > self.occlusions.positions[rect][0] - self.occlusions.widths[rect] / 2
-                and pos[0]
-                < self.occlusions.positions[rect][0] + self.occlusions.widths[rect] / 2
-            ):
-                if (
-                    pos[1]
-                    > self.occlusions.positions[rect][1]
-                    - self.occlusions.widths[rect] / 2
-                    and pos[1]
-                    < self.occlusions.positions[rect][1]
-                    + self.occlusions.widths[rect] / 2
-                ):
-                    return True
-
-        return False
+        if pos.ndim == 1:
+            return np.all(
+                [
+                    pos[0] > self.occlusions.positions[0] - self.occlusions.widths / 2,
+                    pos[0] < self.occlusions.positions[0] + self.occlusions.widths / 2,
+                    pos[1] > self.occlusions.positions[1] - self.occlusions.widths / 2,
+                    pos[1] < self.occlusions.positions[1] + self.occlusions.widths / 2,
+                ]
+            )
+        else:
+            return np.logical_and.reduce(
+                [
+                    pos[:, 0]
+                    > self.occlusions.positions[0] - self.occlusions.widths / 2,
+                    pos[:, 0]
+                    < self.occlusions.positions[0] + self.occlusions.widths / 2,
+                    pos[:, 1]
+                    > self.occlusions.positions[1] - self.occlusions.widths / 2,
+                    pos[:, 1]
+                    < self.occlusions.positions[1] + self.occlusions.widths / 2,
+                ]
+            )
 
     def get_goal_position(self, event=None):
         """Get the goal position based on the guidance mode.
@@ -523,13 +529,17 @@ class Guidance:
                 # in hardware we assume the pose is already noisy
                 self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
 
-            if self.is_in_FOV(
-                self.noisy_turtle_pose, self.FOV
-            ) and not self.in_occlusion(self.noisy_turtle_pose):
-                # we get measurements if the turtle is in the FOV and not in occlusion
-                self.filter.is_update = True
-            else:
+            # Only update if the turtle is not in occlusion and in the FOV
+            if self.in_occlusion(self.noisy_turtle_pose):
+                self.filter.is_occlusion = True
                 self.filter.is_update = False  # no update
+            else:
+                self.filter.is_occlusion = False
+                if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
+                    # we get measurements if the turtle is in the FOV and not in occlusion
+                    self.filter.is_update = True
+                else:
+                    self.filter.is_update = False
 
     def turtle_hardware_odom_cb(self, msg):
         """Callback where we get the linear and angular velocities
@@ -677,19 +687,25 @@ class Guidance:
 
     def guidance_pf(self, event=None):
         """Runs the particle filter loop based on the estimation method"""
+
+        # Select to resample all particles if there is a measurement or select
+        # the particles in FOV and not in occlusion if there is no measurement (negative information)
+        if not self.filter.is_update:
+            self.filter.resample_index = np.where(
+                np.logical_and(
+                    self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                    ~self.in_occlusion(self.filter.particles[-1, :, :2]),
+                )
+            )[0]
+        else:
+            self.filter.resample_index = np.arange(self.N)
+
+        # Run the particle filter loop
         if self.prediction_method == "Unicycle":
             self.filter.pf_loop(
                 self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             )
         else:
-            # Select to resample all particles if there is a measurement or select
-            # the particles in FOV if there is no measurement (negative information)
-            if not self.filter.is_update:
-                self.filter.resample_index = np.where(
-                    self.is_in_FOV(self.filter.particles[-1], self.FOV)
-                )[0]
-            else:
-                self.filter.resample_index = np.arange(self.N)
             self.filter.pf_loop(self.noisy_turtle_pose)
 
     def shutdown(self, event=None):
