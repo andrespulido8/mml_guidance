@@ -53,7 +53,7 @@ class Guidance:
         self.N_s = 25  # Number of sampled particles
         self.K = 5  # Time steps to propagate in the future for EER
         self.Hp_t = 0.0  # partial entropy
-        self.IG_range = np.array([0, 0, 0])
+        self.EER_range = np.array([0, 0, 0])
         self.t_EER = 0.0
         self.eer_particle = 0  # initialize future particle to follow randomly (index 0)
         self.sampled_index = np.arange(self.N)
@@ -170,7 +170,7 @@ class Guidance:
         # Initialize variables
         future_weight = np.zeros((self.N_s, self.N_s))
         Hp_k = np.zeros(self.N_s)  # partial entropy
-        Ip = np.zeros(self.N_s)  # partial information gain
+        EER = np.zeros(self.N_s)  # Expected Entropy Reduction
         future_parts = np.copy(self.sampled_particles)
         last_future_time = np.copy(self.filter.last_time)
 
@@ -185,7 +185,7 @@ class Guidance:
                     angular_velocity=self.angular_velocity,
                     linear_velocity=self.linear_velocity,
                 )
-            elif self.prediction_method == "Unicycle":
+            elif self.prediction_method == "Velocity":
                 future_parts, last_future_time = self.filter.predict(
                     future_parts,
                     self.sampled_weights,
@@ -223,13 +223,12 @@ class Guidance:
                 )
 
             # Information Gain
-            Ip[jj] = self.Hp_t - Hp_k[jj]
+            EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]
 
         # EER = I.mean() # implemented when N_m is implemented
-        EER = likelihood * Ip
         action_index = np.argmax(EER)
-        self.IG_range = np.array([np.min(Ip), np.mean(Ip), np.max(Ip)])
-        # print("information gain: ", Ip)
+        self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
+        # print("EER: ", EER)
 
         self.t_EER = rospy.get_time() - self.initial_time - now
         # print("EER time: ", self.t_EER)
@@ -437,7 +436,7 @@ class Guidance:
                         angular_velocity=self.angular_velocity,
                         linear_velocity=self.linear_velocity,
                     )
-                elif self.prediction_method == "Unicycle":
+                elif self.prediction_method == "Velocity":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
                         self.filter.weights[self.eer_particle],
@@ -674,7 +673,7 @@ class Guidance:
         self.n_eff_pub.publish(neff_msg)
         # Info gain pub
         info_gain_msg = Float32()
-        info_gain_msg.data = self.IG_range[0]
+        info_gain_msg.data = self.EER_range[0]
         self.entropy_pub.publish(info_gain_msg)
         # EER time pub
         eer_time_msg = Float32()
