@@ -6,5 +6,6 @@
 	<!-- record the bag file. Change -o to -O for only prefix instead of full name with datetime -->
   	<node name="record" pkg="rosbag" type="record" args="-o $(arg bag_name) /xyTh_estimate
 	/odom /n_eff_particles /takahe/nwu/pose_stamped /rail/nwu/pose_stamped /entropy
-	/err_tracking /err_estimation /eer_time /desired_state /is_update /info_gain /camera/color/image_raw"/>
+	/err_tracking /err_estimation /eer_time /desired_state /is_update /info_gain /camera/color/image_raw
+	/fov_coord /des_fov_coord"/>
 </launch>

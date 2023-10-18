@@ -40,7 +40,7 @@ class Guidance:
         self.N = 800
         self.filter = ParticleFilter(self.N, self.prediction_method)
         # Camera Model
-        self.height = 1.5
+        self.height = 2.3  # height of the quadcopter in meters
         camera_angle = np.array(
             [deg2rad(69), deg2rad(42)]
         )  # camera angle in radians (horizontal, vertical)
