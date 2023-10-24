@@ -267,7 +267,7 @@ class ParticleFilter:
         t = rospy.get_time() - self.initial_time
         dt = t - last_time
 
-        particles[:-1, :, :] = particles[1:, :, :]
+        particles[:-1, :, :] = particles[1:, :, :]  # shift particles in time
         if self.prediction_method == "Unicycle":
             delta_theta = angular_velocity[0] * dt
             particles[-1, :, 2] = (
@@ -275,11 +275,13 @@ class ParticleFilter:
                 + delta_theta
                 + (delta_theta / (2 * np.pi))
                 * self.add_noise(
-                    np.zeros(self.N), self.process_covariance[2, 2], size=self.N
+                    np.zeros(particles.shape[1]),
+                    self.process_covariance[2, 2],
+                    size=particles.shape[1],
                 )
             )
 
-            for ii in range(self.N):
+            for ii in range(particles.shape[1]):
                 if np.abs(particles[-1, ii, 2]) > np.pi:
                     # Wraps angle
                     particles[-1, ii, 2] = (
@@ -294,7 +296,7 @@ class ParticleFilter:
             )
             norm_lin_vel = np.linalg.norm(linear_velocity)
             delta_distance = norm_lin_vel * dt + norm_lin_vel * dt * self.add_noise(
-                0, self.process_covariance[0, 0], size=self.N
+                0, self.process_covariance[0, 0], size=particles.shape[1]
             )
             particles[-1, :, :2] = (
                 particles[-2, :, :2]
@@ -309,7 +311,7 @@ class ParticleFilter:
             delta_distance = particles[-1, :, 2:] * dt + particles[
                 -1, :, 2:
             ] * dt * self.add_noise(
-                np.array([0, 0]), self.process_covariance, size=self.N
+                np.array([0, 0]), self.process_covariance, size=particles.shape[1]
             )
             particles[-1, :, :2] = (
                 particles[-2, :, :2] + delta_distance * particles[-1, :, :2]

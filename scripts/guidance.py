@@ -194,7 +194,8 @@ class Guidance:
         # Future possible measurements
         # TODO: implement N_m sampled measurements
         z_hat = self.filter.add_noise(
-            future_parts[-1, :, :2], self.filter.measurement_covariance
+            future_parts[-1, :, : self.filter.measurement_covariance.shape[0]],
+            self.filter.measurement_covariance,
         )
         # p(z_{k+K} | x_{k+K})
         likelihood = self.filter.likelihood(future_parts[-1], z_hat)
