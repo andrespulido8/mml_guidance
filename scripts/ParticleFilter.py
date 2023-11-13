@@ -16,7 +16,7 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.AVL_dims = np.array([[-2, -1.5], [2, 1.8]])
+        self.AVL_dims = np.array([[-1.2, -1.0], [1.5, 1.6]])
 
         if self.prediction_method == "NN":
             self.N_th = 10  # Number of time history particles
@@ -167,7 +167,7 @@ class ParticleFilter:
         self.neff = self.nEff(self.weights)
         if not self.is_occlusion:
             if self.neff < self.N * 0.9 or self.neff == np.inf:
-                if (self.neff < self.N * 0.3 or self.neff == np.inf) and self.is_update:
+                if (self.neff < self.N * 0.4 or self.neff == np.inf) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(

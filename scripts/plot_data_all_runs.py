@@ -30,15 +30,22 @@ def main():
         "xyTh estimate cov det": r"$\det({\Sigma_k})$  $[m^2]$",
     }
 
+    guidance_method = {
+        "Information": "MMLEER",
+        "Particles": "PFWM",
+        "Lawnmower": "LAWN",
+    }
+
     # empty dataframes to store the data for the bar plots
     error_df = pd.DataFrame()
-    entropy_df = pd.DataFrame()
     err_list = ["xyTh estimate cov det", "err estimation norm", "err tracking norm"]
 
     # empty dictionary to store the RMS values
     csv_dict = {}
 
-    for filename in os.listdir(folder_path + "/all_runs/"):
+    filenames = os.listdir(folder_path + "/all_runs/")
+    filenames[0], filenames[2] = filenames[2], filenames[0]  # swap order of files
+    for filename in filenames:
         if filename.endswith(".csv"):
             first_word = filename.split("_")[0]
             file_df = pd.read_csv(
@@ -51,16 +58,12 @@ def main():
 
                 row = pd.DataFrame(
                     {
-                        "Guidance Method": first_word,
-                        "hue": include_data[col],
-                        "Error [m]": values,
+                        "Error": include_data[col],
+                        "hue": guidance_method[first_word],
+                        "Guidance Method": values,
                     }
                 )
                 error_df = pd.concat([error_df, row], ignore_index=True)
-            # entropy
-            values = file_df["entropy data"]
-            row = pd.DataFrame({"Guidance Method": first_word, "Entropy": values})
-            entropy_df = pd.concat([entropy_df, row], ignore_index=True)
 
             # Collect data for RMS values csv
             csv_dict[first_word] = {}
@@ -87,10 +90,10 @@ def main():
     rms_estimator = lambda x: np.sqrt(np.mean(np.square(x)))
     dpi = 300
     # BAR
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 6.5))
     sns.barplot(
-        x="Guidance Method",
-        y="Error [m]",
+        y="Guidance Method",
+        x="Error",
         data=error_df,
         ax=ax,
         hue="hue",
@@ -99,28 +102,12 @@ def main():
         errorbar="sd",
     )
     handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles, labels, title="", fontsize=16, title_fontsize=20)
+    ax.legend(handles, labels, title="Guidance Methods", fontsize=16, title_fontsize=18)
     ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
-    ax.set_xlabel("Guidance Method", fontdict=font)
-    ax.set_ylabel("Error [m]", fontdict=font)
+    ax.set_ylabel("Error value", fontdict=font)
+    ax.set_xlabel("Error Type", fontdict=font)
     sns.despine(right=True)
-    plt.savefig(outdir_all + "bar_guidance" + ".png", dpi=dpi)
-    # plt.show()
-
-    # BAR entropy
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.barplot(
-        x="Guidance Method",
-        y="Entropy",
-        data=entropy_df,
-        ax=ax,
-        estimator=rms_estimator,
-        capsize=0.1,
-        errorbar="sd",
-    )
-    ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
-    sns.despine(right=True)
-    plt.savefig(outdir_all + "bar_entropy" + ".png", dpi=dpi)
+    plt.savefig(outdir_all + "bar_errors_fix" + ".png", dpi=dpi)
     # plt.show()
 
 

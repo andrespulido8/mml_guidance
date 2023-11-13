@@ -1,4 +1,3 @@
-<!-- launch file for MML demo -->
 <launch>
 	<arg name="prefix_name" default="hardware"/>
     <arg name="bag_name" default="$(find mml_guidance)/hardware_data/$(arg prefix_name)"/>

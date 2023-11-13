@@ -165,10 +165,11 @@ class MarkovChain:
         goal_pose = self.goal_list[curr_goal_in]
         if curr_goal_in != self.prev_goal_in:
             rospy.logwarn(
-                "New goal pose: x={}, y={} with index {}".format(
+                "New goal pose: x={:.2f}, y={:.2f} with index {}".format(
                     goal_pose["x"], goal_pose["y"], curr_goal_in
                 )
             )
+
         # Restart previous values
         self.prev_goal_in = np.copy(curr_goal_in)
         # Publish the goal pose
