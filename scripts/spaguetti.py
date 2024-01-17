@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+""" This node is used to propagate the particles in the future and publish them
+    to the topics future_parts1, future_parts2, future_parts3, future_parts4, future_parts5
+    This is done to be able to visualize the particles in the future as a spahetti plot
+"""
 import numpy as np
 import rospy
 from mag_pf_pkg.msg import Particle, ParticleMean
@@ -44,11 +49,7 @@ class Spaguetti:
             rospy.Publisher("future_parts2", ParticleMean, queue_size=1),
             rospy.Publisher("future_parts3", ParticleMean, queue_size=1),
             rospy.Publisher("future_parts4", ParticleMean, queue_size=1),
-            rospy.Publisher(
-                "future_partvideo of what the spaghetti plot looks likes5",
-                ParticleMean,
-                queue_size=1,
-            ),
+            rospy.Publisher("future_parts5", ParticleMean, queue_size=1),
         ]
         # publish an array of integers to the topic sampled_index
         self.sampled_index_pub = rospy.Publisher(

@@ -139,7 +139,6 @@ class ParticleFilter:
             self.measurement_history[-1, 2] = noisy_measurement[2]
             self.particles, self.last_time = self.predict(
                 self.particles,
-                self.weights,
                 self.last_time,
                 angular_velocity=ang_vel,
                 linear_velocity=lin_vel,
@@ -152,7 +151,6 @@ class ParticleFilter:
 
             self.particles, self.last_time = self.predict(
                 self.particles,
-                self.weights,
                 self.last_time,
             )
 
@@ -252,7 +250,6 @@ class ParticleFilter:
     def predict(
         self,
         particles,
-        wgts,
         last_time,
         linear_velocity=np.zeros(2),
         angular_velocity=np.zeros(1),
@@ -288,12 +285,6 @@ class ParticleFilter:
                         particles[-1, ii, 2] - np.sign(particles[-1, ii, 2]) * 2 * np.pi
                     )
 
-            # Component mean in the complex plane to prevent wrong average
-            # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
-            self.yaw_mean = np.arctan2(
-                np.sum(wgts * np.sin(particles[-1, :, 2])),
-                np.sum(wgts * np.cos(particles[-1, :, 2])),
-            )
             norm_lin_vel = np.linalg.norm(linear_velocity)
             delta_distance = norm_lin_vel * dt + norm_lin_vel * dt * self.add_noise(
                 0, self.process_covariance[0, 0], size=particles.shape[1]
@@ -367,6 +358,13 @@ class ParticleFilter:
                 axis=0,
             )
             if self.prediction_method == "Unicycle":
+                # Component mean in the complex plane to prevent wrong average
+                # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
+                self.yaw_mean = np.arctan2(
+                    np.sum(self.weights * np.sin(particles[-1, :, 2])),
+                    np.sum(self.weights * np.cos(particles[-1, :, 2])),
+                )
+                weighted_mean[2] = self.yaw_mean
                 var[2] = np.average(
                     (particles[:, 2] - weighted_mean[2]) ** 2,
                     weights=weights,

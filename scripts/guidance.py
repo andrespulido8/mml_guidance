@@ -180,7 +180,6 @@ class Guidance:
             elif self.prediction_method == "Unicycle":
                 future_parts, last_future_time = self.filter.predict(
                     future_parts,
-                    self.sampled_weights,
                     last_future_time + 0.3,
                     angular_velocity=self.angular_velocity,
                     linear_velocity=self.linear_velocity,
@@ -188,7 +187,6 @@ class Guidance:
             elif self.prediction_method == "Velocity":
                 future_parts, last_future_time = self.filter.predict(
                     future_parts,
-                    self.sampled_weights,
                     last_future_time + 0.3,
                 )
         # Future possible measurements
@@ -432,7 +430,6 @@ class Guidance:
                 elif self.prediction_method == "Unicycle":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
-                        self.filter.weights[self.eer_particle],
                         last_future_time + 0.3,
                         angular_velocity=self.angular_velocity,
                         linear_velocity=self.linear_velocity,
@@ -440,7 +437,6 @@ class Guidance:
                 elif self.prediction_method == "Velocity":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
-                        self.filter.weights[self.eer_particle],
                         last_future_time + 0.3,
                     )
             # print("part: ", self.filter.particles[-1, self.eer_particle, :2])
