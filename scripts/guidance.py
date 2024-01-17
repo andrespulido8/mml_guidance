@@ -40,9 +40,9 @@ class Guidance:
         self.N = 800
         self.filter = ParticleFilter(self.N, self.prediction_method)
         # Camera Model
-        self.height = 2.3  # height of the quadcopter in meters
+        self.height = 1.5  # height of the quadcopter in meters
         camera_angle = np.array(
-            [deg2rad(69), deg2rad(42)]
+            [deg2rad(60), deg2rad(44)]
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
         self.FOV = self.construct_FOV(self.quad_position)
@@ -51,7 +51,7 @@ class Guidance:
         # Number of future measurements per sampled particle to consider in EER
         # self.N_m = 1  # not implemented yet
         self.N_s = 25  # Number of sampled particles
-        self.K = 5  # Time steps to propagate in the future for EER
+        self.K = 2  # Time steps to propagate in the future for EER
         self.Hp_t = 0.0  # partial entropy
         self.EER_range = np.array([0, 0, 0])
         self.t_EER = 0.0
@@ -63,7 +63,7 @@ class Guidance:
 
         # Occlusions
         occ_width = 0.75
-        occ_center = [-1.25, -1.05]
+        occ_center = [-1.25, -0.55]
         rospy.set_param("/occlusions", [occ_center, occ_width])
         self.occlusions = Occlusions(occ_center, occ_width)
 
