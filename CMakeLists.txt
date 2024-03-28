@@ -13,7 +13,6 @@ find_package(catkin REQUIRED COMPONENTS
   reef_msgs
   roscpp
   rospy
-  mag_pf_pkg
 )
 
 ## System dependencies are found with CMake's conventions
@@ -55,6 +54,13 @@ find_package(catkin REQUIRED COMPONENTS
 #   Message1.msg
 #   Message2.msg
 # )
+add_message_files(
+    FILES
+    Particle.msg
+    ParticleMean.msg
+    ParticleArray.msg
+)
+
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -71,10 +77,10 @@ find_package(catkin REQUIRED COMPONENTS
 # )
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   std_msgs  # Or other packages containing msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  std_msgs  # Or other packages containing msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -110,6 +116,8 @@ catkin_package(
 #  LIBRARIES mml
 #  CATKIN_DEPENDS gazebo roscpp rospy
 #  DEPENDS system_lib
+  CATKIN_DEPENDS message_runtime
+
 )
 
 ###########

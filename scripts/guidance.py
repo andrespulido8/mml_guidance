@@ -4,7 +4,7 @@ import rospy
 import scipy.stats as stats
 from geometry_msgs.msg import PointStamped, PoseStamped
 from lawnmower import LawnmowerPath
-from mag_pf_pkg.msg import Particle, ParticleMean
+from mml_guidance.msg import Particle, ParticleMean, ParticleArray
 from nav_msgs.msg import Odometry
 from ParticleFilter import ParticleFilter
 
@@ -241,12 +241,12 @@ class Guidance:
                     particle_msg.y = future_parts[-1, ii, 1]
                     particle_msg.weight = self.filter.weights[ii]
                     mean_msg.all_particle.append(particle_msg)
-                pred_msg.particle_history.append(mean_msg)
+                pred_msg.particle_array.append(mean_msg)
 
         if self.is_viz:
-            if len(pred_msg.particle_history) > 5:
-                pred_msg.particle_history.pop(0)  #eliminate the oldest particle
-            self.particle_hist_pub.publish(pred_msg)  #publish the history
+            if len(pred_msg.particle_array) > 5:
+                pred_msg.particle_array.pop(0)  #eliminate the oldest particle
+            self.particle_pred_pub.publish(pred_msg)  #publish the history
             # publish the sampled index array
             self.sampled_index_pub.publish(data=self.sampled_index)
 

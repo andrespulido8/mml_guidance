@@ -6,7 +6,7 @@
 """
 import numpy as np
 import rospy
-from mag_pf_pkg.msg import Particle, ParticleMean
+from mml_guidance.msg import Particle, ParticleMean
 from ParticleFilter import ParticleFilter
 from std_msgs.msg import Float32MultiArray
 
@@ -51,7 +51,6 @@ class Spaguetti:
             rospy.Publisher("future_parts4", ParticleMean, queue_size=1),
             rospy.Publisher("future_parts5", ParticleMean, queue_size=1),
         ]
-        # publish an array of integers to the topic sampled_index
         self.sampled_index_pub = rospy.Publisher(
             "sampled_index", Float32MultiArray, queue_size=1
         )
