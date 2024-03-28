@@ -335,8 +335,8 @@ class ParticleFilter:
             G = 0.2
             E = np.zeros(self.Nx)
             for ii in range(self.Nx):
-                E[ii] = np.max(self.particles[-1, self.resample_index, ii]) - np.min(
-                    self.particles[-1, self.resample_index, ii]
+                E[ii] = np.max(self.particles[-1, :, ii]) - np.min(
+                    self.particles[-1, :, ii]
                 )
             cov = (G * E * N_r ** (-1 / 3)) ** 2
             P_sigmas = np.diag(cov)
