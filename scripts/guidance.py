@@ -39,10 +39,11 @@ class Guidance:
         # number of particles
         self.N = 800
         self.filter = ParticleFilter(self.N, self.prediction_method)
+        self.filter.AVL_dims = self.filter.AVL_dims  if not self.is_sim else np.array([[-2, -3], [2, 3]])
         # Camera Model
-        self.height = 1.5  # height of the quadcopter in meters
+        self.height = 1.2  # height of the quadcopter in meters
         camera_angle = np.array(
-            [deg2rad(60), deg2rad(44)]
+            [deg2rad(35), deg2rad(35)]  
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
         self.FOV = self.construct_FOV(self.quad_position)
@@ -672,7 +673,7 @@ class Guidance:
             mean_msg.mean.x = self.filter.weighted_mean[0]
             mean_msg.mean.y = self.filter.weighted_mean[1]
             mean_msg.mean.yaw = np.linalg.norm(self.filter.weighted_mean[2:4])
-            for ii in range(self.N):
+            for ii in range(self.N-500):
                 particle_msg = Particle()
                 particle_msg.x = self.filter.particles[-1, ii, 0]
                 particle_msg.y = self.filter.particles[-1, ii, 1]
