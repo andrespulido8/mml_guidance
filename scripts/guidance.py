@@ -149,6 +149,12 @@ class Guidance:
             self.filter.particles[:, self.sampled_index, :]
         )
         self.sampled_weights = np.copy(self.filter.weights[self.sampled_index])
+        # Normalize weights
+        self.sampled_weights = (
+            self.sampled_weights / np.sum(self.sampled_weights)
+            if np.sum(self.sampled_weights) > 0
+            else self.sampled_weights
+        )
         sampled_prev_weights = np.copy(self.filter.prev_weights[self.sampled_index])
         if self.filter.is_update:
             self.Hp_t = self.entropy_particle(
