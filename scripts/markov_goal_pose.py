@@ -70,9 +70,9 @@ class MarkovChain:
                 "qx": qx,
                 "qy": qy,
                 "qz": 0.707,
-                "qw": -0.707,
+                "qw": 0.707,
             }
-        )  # 90 degrees orientation
+        )  # -90 degrees orientation
         self.goal_list.append(
             {
                 "curr_goal": 2,
@@ -84,7 +84,7 @@ class MarkovChain:
                 "qz": 0,
                 "qw": 1,
             }
-        )
+        )  # 0 degrees orientation
         self.goal_list.append(
             {
                 "curr_goal": 3,
@@ -94,12 +94,24 @@ class MarkovChain:
                 "qx": qx,
                 "qy": qy,
                 "qz": 0.707,
-                "qw": 0.707,
+                "qw": -0.707,
             }
-        )
+        )  # 90 degrees orientation
         self.goal_list.append(
             {
                 "curr_goal": 4,
+                "x": x_offset + 1 * k,
+                "y": y_offset + 2 * k,
+                "z": z,
+                "qx": qx,
+                "qy": qy,
+                "qz": 1,
+                "qw": 0,
+            }
+        )  # 180 degrees orientation
+        self.goal_list.append(
+            {
+                "curr_goal": 5,
                 "x": x_offset + 0 * k,
                 "y": y_offset + 1 * k,
                 "z": z,
@@ -117,11 +129,12 @@ class MarkovChain:
         # row and j is the column
         self.trans_matrix = np.array(
             [
-                [0.0, 1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.5, 0.5, 0.0],
-                [0.0, 0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 1.0],
-                [0.0, 1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.3, 0.7, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0, 0.6, 0.4],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
             ]
         )
 
