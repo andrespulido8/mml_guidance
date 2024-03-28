@@ -49,15 +49,15 @@ class ParticleFilter:
             )
             self.process_covariance = np.array(
                 [
-                    [0.001, 0.0, 0.0],
-                    [0.0, 0.001, 0.0],
-                    [0.0, 0.0, 0.0001],
+                    [0.01, 0.0, 0.0],
+                    [0.0, 0.01, 0.0],
+                    [0.0, 0.0, 0.001],
                 ]
             )
         elif self.prediction_method == "NN":
             self.Nx = 2
 
-        if self.prediction_method != "Unicycle":
+        if self.prediction_method != "Unicycle":  # NN and Velocity
             self.measurement_covariance = np.array([[0.01, 0.0], [0.0, 0.01]])
             self.process_covariance = np.array(
                 [
@@ -361,8 +361,8 @@ class ParticleFilter:
                 # Component mean in the complex plane to prevent wrong average
                 # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
                 self.yaw_mean = np.arctan2(
-                    np.sum(self.weights * np.sin(particles[-1, :, 2])),
-                    np.sum(self.weights * np.cos(particles[-1, :, 2])),
+                    np.sum(self.weights * np.sin(particles[:, 2])),
+                    np.sum(self.weights * np.cos(particles[:, 2])),
                 )
                 weighted_mean[2] = self.yaw_mean
                 var[2] = np.average(

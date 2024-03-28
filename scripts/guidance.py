@@ -62,10 +62,10 @@ class Guidance:
         self.position_following = False
 
         # Occlusions
-        occ_width = 0.75
-        occ_center = [-1.25, -0.55]
-        rospy.set_param("/occlusions", [occ_center, occ_width])
-        self.occlusions = Occlusions(occ_center, occ_width)
+        occ_widths = [1, 1]
+        occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
+        rospy.set_param("/occlusions", [occ_centers, occ_widths])
+        self.occlusions = [Occlusions(occ_centers[i], occ_widths[i]) for i in range(len(occ_widths))]
 
         # Lawnmower Method
         lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5)
@@ -111,11 +111,15 @@ class Guidance:
             self.err_estimation_pub = rospy.Publisher(
                 "err_estimation", PointStamped, queue_size=1
             )
+            self.meas_pub = rospy.Publisher(
+                "noisy_measurement", PointStamped, queue_size=1
+            )
             self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
             self.info_gain_pub = rospy.Publisher("info_gain", Float32, queue_size=1)
             self.eer_time_pub = rospy.Publisher("eer_time", Float32, queue_size=1)
             self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
             self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
+            self.occ_pub = rospy.Publisher("is_occlusion", Bool, queue_size=1)
             self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
             self.des_fov_pub = rospy.Publisher(
                 "des_fov_coord", Float32MultiArray, queue_size=1
@@ -394,27 +398,35 @@ class Guidance:
         Inputs: pos: position to check - numpy.array of shape (2,)
         """
         if pos.ndim == 1:
-            return np.all(
-                [
-                    pos[0] > self.occlusions.positions[0] - self.occlusions.widths / 2,
-                    pos[0] < self.occlusions.positions[0] + self.occlusions.widths / 2,
-                    pos[1] > self.occlusions.positions[1] - self.occlusions.widths / 2,
-                    pos[1] < self.occlusions.positions[1] + self.occlusions.widths / 2,
-                ]
-            )
+            in_occ = False 
+            for occlusion in self.occlusions:
+                if np.all(
+                    [
+                        pos[0] > occlusion.positions[0] - occlusion.widths / 2,
+                        pos[0] < occlusion.positions[0] + occlusion.widths / 2,
+                        pos[1] > occlusion.positions[1] - occlusion.widths / 2,
+                        pos[1] < occlusion.positions[1] + occlusion.widths / 2,
+                    ]
+                ):
+                    in_occ = True
+            return in_occ
         else:
-            return np.logical_and.reduce(
-                [
-                    pos[:, 0]
-                    > self.occlusions.positions[0] - self.occlusions.widths / 2,
-                    pos[:, 0]
-                    < self.occlusions.positions[0] + self.occlusions.widths / 2,
-                    pos[:, 1]
-                    > self.occlusions.positions[1] - self.occlusions.widths / 2,
-                    pos[:, 1]
-                    < self.occlusions.positions[1] + self.occlusions.widths / 2,
-                ]
-            )
+            # array of false values of size pos
+            prev_check = np.zeros(pos.shape[0], dtype=bool)  
+            for occlusion in self.occlusions:
+                prev_check = np.logical_or(prev_check, np.logical_and.reduce(
+                    [
+                        pos[:, 0]
+                        > occlusion.positions[0] - occlusion.widths / 2,
+                        pos[:, 0]
+                        < occlusion.positions[0] + occlusion.widths / 2,
+                        pos[:, 1]
+                        > occlusion.positions[1] - occlusion.widths / 2,
+                        pos[:, 1]
+                        < occlusion.positions[1] + occlusion.widths / 2,
+                    ]
+                ))
+            return prev_check
 
     def get_goal_position(self, event=None):
         """Get the goal position based on the guidance mode.
@@ -643,43 +655,53 @@ class Guidance:
                 update_msg = Bool()
                 update_msg.data = self.filter.is_update
                 self.update_pub.publish(update_msg)
+                # Measurement pub
+                meas_msg = PointStamped()
+                meas_msg.point.x = self.noisy_turtle_pose[0]
+                meas_msg.point.y = self.noisy_turtle_pose[1]
+                self.meas_pub.publish(meas_msg)
+                # Is occlusion pub
+                occ_msg = Bool()
+                occ_msg.data = self.filter.is_occlusion
+                self.occ_pub.publish(occ_msg)
 
     def pub_pf(self, event=None):
         """Publishes the particles and the mean of the particle filter"""
-        mean_msg = ParticleMean()
-        mean_msg.mean.x = self.filter.weighted_mean[0]
-        mean_msg.mean.y = self.filter.weighted_mean[1]
-        mean_msg.mean.yaw = np.linalg.norm(self.filter.weighted_mean[2:4])
-        for ii in range(self.N):
-            particle_msg = Particle()
-            particle_msg.x = self.filter.particles[-1, ii, 0]
-            particle_msg.y = self.filter.particles[-1, ii, 1]
-            particle_msg.yaw = np.linalg.norm(self.filter.particles[-1, ii, 2:4])
-            particle_msg.weight = self.filter.weights[ii]
-            mean_msg.all_particle.append(particle_msg)
-        mean_msg.cov = np.diag(self.filter.var).flatten("C")
-        self.particle_pub.publish(mean_msg)
-        # Error pub
-        err_msg = PointStamped()
-        err_msg.point.x = self.filter.weighted_mean[0] - self.actual_turtle_pose[0]
-        err_msg.point.y = self.filter.weighted_mean[1] - self.actual_turtle_pose[1]
-        self.err_estimation_pub.publish(err_msg)
-        # Number of effective particles pub
-        neff_msg = Float32()
-        neff_msg.data = self.filter.neff
-        self.n_eff_pub.publish(neff_msg)
-        # Info gain pub
-        info_gain_msg = Float32()
-        info_gain_msg.data = self.EER_range[0]
-        self.entropy_pub.publish(info_gain_msg)
-        # EER time pub
-        eer_time_msg = Float32()
-        eer_time_msg.data = self.t_EER
-        self.eer_time_pub.publish(eer_time_msg)
-        # Entropy pub
-        entropy_msg = Float32()
-        entropy_msg.data = self.Hp_t
-        self.entropy_pub.publish(entropy_msg)
+        if self.init_finished:
+            mean_msg = ParticleMean()
+            mean_msg.mean.x = self.filter.weighted_mean[0]
+            mean_msg.mean.y = self.filter.weighted_mean[1]
+            mean_msg.mean.yaw = np.linalg.norm(self.filter.weighted_mean[2:4])
+            for ii in range(self.N):
+                particle_msg = Particle()
+                particle_msg.x = self.filter.particles[-1, ii, 0]
+                particle_msg.y = self.filter.particles[-1, ii, 1]
+                particle_msg.yaw = np.linalg.norm(self.filter.particles[-1, ii, 2:4])
+                particle_msg.weight = self.filter.weights[ii]
+                mean_msg.all_particle.append(particle_msg)
+            mean_msg.cov = np.diag(self.filter.var).flatten("C")
+            self.particle_pub.publish(mean_msg)
+            # Error pub
+            err_msg = PointStamped()
+            err_msg.point.x = self.filter.weighted_mean[0] - self.actual_turtle_pose[0]
+            err_msg.point.y = self.filter.weighted_mean[1] - self.actual_turtle_pose[1]
+            self.err_estimation_pub.publish(err_msg)
+            # Number of effective particles pub
+            neff_msg = Float32()
+            neff_msg.data = self.filter.neff
+            self.n_eff_pub.publish(neff_msg)
+            # Info gain pub
+            info_gain_msg = Float32()
+            info_gain_msg.data = self.EER_range[0]
+            self.entropy_pub.publish(info_gain_msg)
+            # EER time pub
+            eer_time_msg = Float32()
+            eer_time_msg.data = self.t_EER
+            self.eer_time_pub.publish(eer_time_msg)
+            # Entropy pub
+            entropy_msg = Float32()
+            entropy_msg.data = self.Hp_t
+            self.entropy_pub.publish(entropy_msg)
 
     def guidance_pf(self, event=None):
         """Runs the particle filter loop based on the estimation method"""
