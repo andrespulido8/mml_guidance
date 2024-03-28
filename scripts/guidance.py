@@ -110,6 +110,12 @@ class Guidance:
             self.particle_pub = rospy.Publisher(
                 "xyTh_estimate", ParticleMean, queue_size=1
             )
+            self.particle_pred_pub = rospy.Publisher(
+                "xyTh_predictions", ParticleArray, queue_size=1
+            )
+            self.sampled_index_pub = rospy.Publisher(
+                "sampled_index", Float32MultiArray, queue_size=1
+            )
             self.err_estimation_pub = rospy.Publisher(
                 "err_estimation", PointStamped, queue_size=1
             )
@@ -209,6 +215,7 @@ class Guidance:
         future_parts = np.copy(self.sampled_particles)
         last_future_time = np.copy(self.filter.last_time)
 
+        pred_msg = ParticleArray()
         for k in range(self.K):  # propagate k steps in the future
             if self.prediction_method == "NN":
                 future_parts = self.filter.predict_mml(future_parts)
@@ -224,6 +231,25 @@ class Guidance:
                     future_parts,
                     last_future_time + 0.3,
                 )
+
+            if self.is_viz:
+                assert future_parts.shape == (self.filter.N_th, self.N_s, self.filter.Nx)
+                mean_msg = ParticleMean()
+                for ii in range(self.N_s):
+                    particle_msg = Particle()
+                    particle_msg.x = future_parts[-1, ii, 0]
+                    particle_msg.y = future_parts[-1, ii, 1]
+                    particle_msg.weight = self.filter.weights[ii]
+                    mean_msg.all_particle.append(particle_msg)
+                pred_msg.particle_history.append(mean_msg)
+
+        if self.is_viz:
+            if len(pred_msg.particle_history) > 5:
+                pred_msg.particle_history.pop(0)  #eliminate the oldest particle
+            self.particle_hist_pub.publish(pred_msg)  #publish the history
+            # publish the sampled index array
+            self.sampled_index_pub.publish(data=self.sampled_index)
+
         # Future possible measurements
         # TODO: implement N_m sampled measurements
         z_hat = self.filter.add_noise(
