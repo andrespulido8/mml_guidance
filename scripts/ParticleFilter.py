@@ -10,13 +10,16 @@ ANG_VEL = 0.0
 
 
 class ParticleFilter:
-    def __init__(self, num_particles=10, prediction_method="NN"):
+    def __init__(self, num_particles=10, prediction_method="NN", is_sim=False):
 
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
         self.AVL_dims = np.array([[-1.2, -1.0], [1.5, 1.6]])
+        self.AVL_dims = (
+            self.AVL_dims if not is_sim else np.array([[-2, -1.5], [1.0, 2.5]])
+        )
 
         if self.prediction_method == "NN":
             self.N_th = 10  # Number of time history particles
@@ -71,10 +74,10 @@ class ParticleFilter:
         )
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
-        # self.particles = np.array([
-        #    np.random.multivariate_normal(
-        #    np.array([1.3, -1.26, 0]), self.measurement_covariance, self.N
-        #    )
+        # self.particles[-1,:, :2] = np.array([
+        #   np.random.multivariate_normal(
+        #   np.array([1.3, -1.26]), self.measurement_covariance, self.N
+        #   )
         # ])
 
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
@@ -163,9 +166,16 @@ class ParticleFilter:
 
         # Resampling step
         self.neff = self.nEff(self.weights)
+        self.particles = (
+            self.uniform_sample()
+            if self.outside_bounds(self.particles[-1]) > self.N * 0.3
+            else self.particles
+        )
         if not self.is_occlusion:
-            if self.neff < self.N * 0.9 or self.neff == np.inf:
-                if (self.neff < self.N * 0.4 or self.neff == np.inf) and self.is_update:
+            if (
+                self.neff < self.N * 0.9
+            ):  # nEff is only infinity when something went wrong
+                if self.neff < self.N * 0.4 and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
@@ -376,6 +386,15 @@ class ParticleFilter:
             #    np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(var))) / 2
             # )
             return weighted_mean, var
+
+    def outside_bounds(self, particles):
+        """returns the number of particles outside of the lab boundaries"""
+        return np.sum(
+            (particles[:, 0] < self.AVL_dims[0, 0])
+            | (particles[:, 0] > self.AVL_dims[1, 0])
+            | (particles[:, 1] < self.AVL_dims[0, 1])
+            | (particles[:, 1] > self.AVL_dims[1, 1])
+        )
 
     @staticmethod
     def add_noise(mean, covariance, size=1):

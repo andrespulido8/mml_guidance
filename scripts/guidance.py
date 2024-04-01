@@ -21,7 +21,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Estimator"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
 
@@ -38,12 +38,11 @@ class Guidance:
         ## PARTICLE FILTER  ##
         # number of particles
         self.N = 800
-        self.filter = ParticleFilter(self.N, self.prediction_method)
-        self.filter.AVL_dims = self.filter.AVL_dims  if not self.is_sim else np.array([[-2, -3], [2, 3]])
+        self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
         self.height = 1.2  # height of the quadcopter in meters
         camera_angle = np.array(
-            [deg2rad(35), deg2rad(35)]  
+            [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
         self.FOV = self.construct_FOV(self.quad_position)
@@ -67,7 +66,9 @@ class Guidance:
         occ_widths = [1, 1]
         occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
         rospy.set_param("/occlusions", [occ_centers, occ_widths])
-        self.occlusions = [Occlusions(occ_centers[i], occ_widths[i]) for i in range(len(occ_widths))]
+        self.occlusions = [
+            Occlusions(occ_centers[i], occ_widths[i]) for i in range(len(occ_widths))
+        ]
 
         # Lawnmower Method
         lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5)
@@ -144,7 +145,7 @@ class Guidance:
         Output: Hp_t (float) - entropy of the current distribution"""
         t = rospy.get_time() - self.initial_time
 
-        # update entropy history 
+        # update entropy history
         self.prev_Hp = np.roll(self.prev_Hp, -1, axis=0)
         self.prev_Hp[-1, :2] = self.Hp_t
 
@@ -178,7 +179,7 @@ class Guidance:
                 ),  # current weights are the (t-1) weights because no update
                 self.sampled_particles[-1],
             )
-        
+
         self.Hp_t = (
             self.reject_spikes(
                 self.prev_Hp,
@@ -186,14 +187,11 @@ class Guidance:
                 threshold_factor=3,
             )
             if self.prev_Hp.any() and self.Hp_t is not None
-            else self.Hp_t   # first time we don't have previous values
+            else self.Hp_t  # first time we don't have previous values
         )
         self.Hp_t = (
-            prev_Hp 
-            if not np.isfinite(self.Hp_t)
-            else self.Hp_t
+            prev_Hp if not np.isfinite(self.Hp_t) else self.Hp_t
         )  # if really bad value, keep the previous one
-
 
         entropy_time = rospy.get_time() - t - self.initial_time
         # print("Entropy time: ", entropy_time)
@@ -233,7 +231,11 @@ class Guidance:
                 )
 
             if self.is_viz:
-                assert future_parts.shape == (self.filter.N_th, self.N_s, self.filter.Nx)
+                assert future_parts.shape == (
+                    self.filter.N_th,
+                    self.N_s,
+                    self.filter.Nx,
+                )
                 mean_msg = ParticleMean()
                 for ii in range(self.N_s):
                     particle_msg = Particle()
@@ -245,8 +247,8 @@ class Guidance:
 
         if self.is_viz:
             if len(pred_msg.particle_array) > 5:
-                pred_msg.particle_array.pop(0)  #eliminate the oldest particle
-            self.particle_pred_pub.publish(pred_msg)  #publish the history
+                pred_msg.particle_array.pop(0)  # eliminate the oldest particle
+            self.particle_pred_pub.publish(pred_msg)  # publish the history
             # publish the sampled index array
             self.sampled_index_pub.publish(data=self.sampled_index)
 
@@ -329,7 +331,7 @@ class Guidance:
                     mean=particles[ii, :2],
                     cov=self.filter.process_covariance[:2, :2],
                 )
-                process_part_like[ii] = np.sum(like_particle*prev_wgts[ii])
+                process_part_like[ii] = np.sum(like_particle * prev_wgts[ii])
 
             # Numerical stability
             cutoff = 1e-4
@@ -343,7 +345,7 @@ class Guidance:
             notnans[notnans < cutoff * 0.01] = np.nan
             product[~np.isnan(product)] = notnans
             first_term = np.log(np.nansum(product))
-            #first_term = first_term if np.isfinite(first_term) else 0.0
+            # first_term = first_term if np.isfinite(first_term) else 0.0
             # second_term = np.nansum(np.log(prev_wgts)*weights)
             # third_term = np.nansum(weights*np.log(like_meas))
             # fourth_term = np.nansum(weights*np.log(process_part_like))
@@ -389,8 +391,8 @@ class Guidance:
 
             entropy = -np.nansum(prev_wgts * np.log(process_part_like))
 
-        #return np.clip(entropy, -100, 1000)
-        return entropy 
+        # return np.clip(entropy, -100, 1000)
+        return entropy
 
     @staticmethod
     def reject_spikes(prev_values, current_value, threshold_factor=3):
@@ -412,7 +414,9 @@ class Guidance:
         Raises:
             None
         """
-        values = np.concatenate((prev_values, [current_value]))
+        # join array of values prev_values and current_value
+        values = np.append(prev_values, current_value)
+        # print("values: ", values)
         median = np.median(values)
         std = np.std(values)
         threshold = median + threshold_factor * std
@@ -420,7 +424,6 @@ class Guidance:
             return median
         else:
             return current_value
-
 
     @staticmethod
     def is_in_FOV(sparticles, fov):
@@ -486,7 +489,7 @@ class Guidance:
         Inputs: pos: position to check - numpy.array of shape (2,)
         """
         if pos.ndim == 1:
-            in_occ = False 
+            in_occ = False
             for occlusion in self.occlusions:
                 if np.all(
                     [
@@ -500,20 +503,19 @@ class Guidance:
             return in_occ
         else:
             # array of false values of size pos
-            prev_check = np.zeros(pos.shape[0], dtype=bool)  
+            prev_check = np.zeros(pos.shape[0], dtype=bool)
             for occlusion in self.occlusions:
-                prev_check = np.logical_or(prev_check, np.logical_and.reduce(
-                    [
-                        pos[:, 0]
-                        > occlusion.positions[0] - occlusion.widths / 2,
-                        pos[:, 0]
-                        < occlusion.positions[0] + occlusion.widths / 2,
-                        pos[:, 1]
-                        > occlusion.positions[1] - occlusion.widths / 2,
-                        pos[:, 1]
-                        < occlusion.positions[1] + occlusion.widths / 2,
-                    ]
-                ))
+                prev_check = np.logical_or(
+                    prev_check,
+                    np.logical_and.reduce(
+                        [
+                            pos[:, 0] > occlusion.positions[0] - occlusion.widths / 2,
+                            pos[:, 0] < occlusion.positions[0] + occlusion.widths / 2,
+                            pos[:, 1] > occlusion.positions[1] - occlusion.widths / 2,
+                            pos[:, 1] < occlusion.positions[1] + occlusion.widths / 2,
+                        ]
+                    ),
+                )
             return prev_check
 
     def get_goal_position(self, event=None):
@@ -744,10 +746,11 @@ class Guidance:
                 update_msg.data = self.filter.is_update
                 self.update_pub.publish(update_msg)
                 # Measurement pub
-                meas_msg = PointStamped()
-                meas_msg.point.x = self.noisy_turtle_pose[0]
-                meas_msg.point.y = self.noisy_turtle_pose[1]
-                self.meas_pub.publish(meas_msg)
+                if self.filter.is_update:
+                    meas_msg = PointStamped()
+                    meas_msg.point.x = self.noisy_turtle_pose[0]
+                    meas_msg.point.y = self.noisy_turtle_pose[1]
+                    self.meas_pub.publish(meas_msg)
                 # Is occlusion pub
                 occ_msg = Bool()
                 occ_msg.data = self.filter.is_occlusion
@@ -760,7 +763,7 @@ class Guidance:
             mean_msg.mean.x = self.filter.weighted_mean[0]
             mean_msg.mean.y = self.filter.weighted_mean[1]
             mean_msg.mean.yaw = np.linalg.norm(self.filter.weighted_mean[2:4])
-            for ii in range(self.N-500):
+            for ii in range(self.N - 500):
                 particle_msg = Particle()
                 particle_msg.x = self.filter.particles[-1, ii, 0]
                 particle_msg.y = self.filter.particles[-1, ii, 1]
