@@ -4,7 +4,7 @@
 		<arg name="is_visualization" value="true"/>
 	</include>
 
-	<node pkg="mag_pf_visualization" type="mag_pf_visualization_node.py" name="mag_pf_visualization" output="screen">
+	<node pkg="mml_guidance" type="mml_pf_visualization.py" name="mml_pf_visualization" output="screen">
 		<remap from="odom" to="/robot0/odom"/>
 	</node>
 </launch>

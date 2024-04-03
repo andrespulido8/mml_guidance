@@ -21,7 +21,7 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Estimator"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
 
@@ -37,7 +37,7 @@ class Guidance:
 
         ## PARTICLE FILTER  ##
         # number of particles
-        self.N = 800
+        self.N = 500
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
         self.height = 1.2  # height of the quadcopter in meters
@@ -51,7 +51,9 @@ class Guidance:
         # Number of future measurements per sampled particle to consider in EER
         # self.N_m = 1  # not implemented yet
         self.N_s = 25  # Number of sampled particles
-        self.K = 2  # Time steps to propagate in the future for EER
+        rospy.set_param("/num_sampled_particles", self.N_s)
+        self.K = 5  # Time steps to propagate in the future for EER
+        rospy.set_param("/predict_window", self.K)
         self.Hp_t = 0.0  # partial entropy
         self.prev_Hp = np.zeros((5, 1))
         self.EER_range = np.array([0, 0, 0])
@@ -763,7 +765,7 @@ class Guidance:
             mean_msg.mean.x = self.filter.weighted_mean[0]
             mean_msg.mean.y = self.filter.weighted_mean[1]
             mean_msg.mean.yaw = np.linalg.norm(self.filter.weighted_mean[2:4])
-            for ii in range(self.N - 500):
+            for ii in range(self.N):
                 particle_msg = Particle()
                 particle_msg.x = self.filter.particles[-1, ii, 0]
                 particle_msg.y = self.filter.particles[-1, ii, 1]
