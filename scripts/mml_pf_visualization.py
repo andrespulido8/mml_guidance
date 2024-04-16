@@ -118,6 +118,7 @@ class MML_PF_Visualization:
 
         # initializa matlplotlib figure ui
         fig = plt.figure()
+        fig2 = plt.figure()
         # define 6 plot holder
         gs = gridspec.GridSpec(ncols=3, nrows=3)
 
@@ -125,15 +126,15 @@ class MML_PF_Visualization:
         move_figure(fig, 0, 0)
 
         # initialize subplot in the matplotlib figure
-        self.fig_ax1 = fig.add_subplot(gs[:, 0])
+        self.fig_ax1 = fig.add_subplot(gs[:, :])
         self.fig_ax1.set_title("Map")
-        self.fig_ax2 = fig.add_subplot(gs[0, 1])
+        self.fig_ax2 = fig2.add_subplot(gs[0, 1])
         self.fig_ax2.set_title("Est x vs Real x")
-        self.fig_ax3 = fig.add_subplot(gs[1, 1])
+        self.fig_ax3 = fig2.add_subplot(gs[1, 1])
         self.fig_ax3.set_title("Est y vs Real y")
-        self.fig_ax4 = fig.add_subplot(gs[2, 1])
+        self.fig_ax4 = fig2.add_subplot(gs[2, 1])
         self.fig_ax4.set_title("Est y vs Real y")
-        self.fig_ax5 = fig.add_subplot(gs[:, 2])
+        self.fig_ax5 = fig2.add_subplot(gs[:, 2])
         self.fig_ax5.set_title("Entropy")
 
         # set the map image boundaries and resize it to respect aspect ratio
@@ -166,8 +167,6 @@ class MML_PF_Visualization:
         self.particles = np.zeros((1, 2))
         self.K = rospy.get_param("/predict_window", 5)
         self.N_s = rospy.get_param("/num_sampled_particles", 25)
-        print("K: ", self.K)
-        print("N_s: ", self.N_s)
         self.future_parts = np.zeros((self.K, self.N_s, 2))
         self.plot_prediction = False
         self.sampled_index = np.arange(self.N_s)
@@ -381,7 +380,7 @@ class MML_PF_Visualization:
                             self.future_parts[k, :, 1],
                             marker=".",
                             color="b",
-                            alpha=0.7 - slope * k,
+                            alpha=0.5 - slope * k,
                         )
                         counter = 0
                         for ii in self.sampled_index:
@@ -440,7 +439,7 @@ class MML_PF_Visualization:
                         color="m",
                         label="True position ",
                     )
-                # plot the fov
+                # plot the desired fov
                 self.fig_ax1.plot(
                     self.des_fov[:, 0],
                     self.des_fov[:, 1],
@@ -456,7 +455,7 @@ class MML_PF_Visualization:
                     0, 1
                 ]
                 self.fig_ax1.scatter(
-                    act_x, act_y, marker=".", color="b", label="Action chosen"
+                    act_x, act_y, marker="+", color="b", label="Action chosen"
                 )
                 # plot the fov
                 self.fig_ax1.plot(
@@ -470,7 +469,7 @@ class MML_PF_Visualization:
                 quad_x = (self.fov[2, 0] - self.fov[0, 0]) / 2.0 + self.fov[0, 0]
                 quad_y = (self.fov[1, 1] - self.fov[0, 1]) / 2.0 + self.fov[0, 1]
                 self.fig_ax1.scatter(
-                    quad_x, quad_y, marker=".", color="r", label="Quad position "
+                    quad_x, quad_y, marker="+", color="r", label="Quad position "
                 )
                 # plot the occlusion
                 occlusions = rospy.get_param("/occlusions", None)

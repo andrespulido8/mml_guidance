@@ -2,8 +2,10 @@ import numpy as np
 import rospy
 import rospkg
 from scipy import stats
+import torch
 
 from mml_network import deploy_mml
+from mml_network import simple_dnn
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
@@ -24,13 +26,25 @@ class ParticleFilter:
         if self.prediction_method == "NN":
             self.N_th = 10  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
-            model_file = pkg_path + "/scripts/mml_network/models/current.pth"
+            # model_file = pkg_path + "/scripts/mml_network/models/current.pth"
+            model_file = pkg_path + "/scripts/mml_network/models/simple_dnn_best.pth"
             training_data_filename = pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
             self.training_data = np.loadtxt(
                 training_data_filename, delimiter=",", skiprows=1
             )[:, 1:]
             self.n_training_samples = self.training_data.shape[0] - self.N_th - 1
-            self.motion_model = deploy_mml.Motion_Model(model_file)
+            # self.motion_model = deploy_mml.Motion_Model(model_file)
+            self.motion_model = simple_dnn.SimpleDNN(
+                input_size=20,
+                num_layers=2,
+                nodes_per_layer=80,
+                output_size=2,
+                activation_fn="relu",
+            )
+            # load weights
+            self.motion_model.load_state_dict(
+                torch.load(model_file, map_location="cpu")
+            )
         else:
             self.N_th = 2
 
@@ -254,7 +268,13 @@ class ParticleFilter:
         Input: N_th (number of time histories) sets of particles up to time k-1
         Output: N_th sets of propagated particles up to time k
         """
-        particles[:, :, :2] = self.motion_model.predict(particles[:, :, :2])
+        #print("particles: ", particles.shape)
+        next_parts = self.motion_model.predict(np.transpose(particles[:, :, :2], (1,0,2)).reshape(particles.shape[1], self.N_th*self.Nx))
+        #print("next_parts: ", next_parts)
+        particles = np.concatenate((particles[1:, :, :2], next_parts.reshape(1, next_parts.shape[0], next_parts.shape[1])), axis=0)
+        particles[-1, :, :] = self.add_noise(
+            particles[-1, :, :], self.process_covariance
+        )
         return particles
 
     def predict(

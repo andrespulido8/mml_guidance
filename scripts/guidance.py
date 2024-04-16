@@ -45,12 +45,13 @@ class Guidance:
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
+        self.FOV_dims = np.array([4.0, 4.0])
         self.FOV = self.construct_FOV(self.quad_position)
 
         ## INFO-DRIVEN GUIDANCE ##
         # Number of future measurements per sampled particle to consider in EER
         # self.N_m = 1  # not implemented yet
-        self.N_s = 25  # Number of sampled particles
+        self.N_s = 20  # Number of sampled particles
         rospy.set_param("/num_sampled_particles", self.N_s)
         self.K = 5  # Time steps to propagate in the future for EER
         rospy.set_param("/predict_window", self.K)
@@ -256,48 +257,49 @@ class Guidance:
 
         # Future possible measurements
         # TODO: implement N_m sampled measurements
-        z_hat = self.filter.add_noise(
-            future_parts[-1, :, : self.filter.measurement_covariance.shape[0]],
-            self.filter.measurement_covariance,
-        )
-        # p(z_{k+K} | x_{k+K})
-        likelihood = self.filter.likelihood(future_parts[-1], z_hat)
-        # TODO: implement N_m sampled measurements (double loop)
-        for jj in range(self.N_s):
-            k_fov = self.construct_FOV(z_hat[jj])
-            # checking for measurement outside of fov or in occlusion
-            if self.is_in_FOV(z_hat[jj], k_fov) and not self.in_occlusion(z_hat[jj]):
-                future_weight[:, jj] = self.filter.update(
-                    self.sampled_weights, future_parts, z_hat[jj]
-                )
+        # z_hat = self.filter.add_noise(
+        #    future_parts[-1, :, : self.filter.measurement_covariance.shape[0]],
+        #    self.filter.measurement_covariance,
+        # )
+        ## p(z_{k+K} | x_{k+K})
+        # likelihood = self.filter.likelihood(future_parts[-1], z_hat)
+        ## TODO: implement N_m sampled measurements (double loop)
+        # for jj in range(self.N_s):
+        #    k_fov = self.construct_FOV(z_hat[jj])
+        #    # checking for measurement outside of fov or in occlusion
+        #    if self.is_in_FOV(z_hat[jj], k_fov) and not self.in_occlusion(z_hat[jj]):
+        #        future_weight[:, jj] = self.filter.update(
+        #            self.sampled_weights, future_parts, z_hat[jj]
+        #        )
 
-                # H (x_{k+K} | \hat{z}_{k+K})
-                Hp_k[jj] = self.entropy_particle(
-                    future_parts[-2],
-                    np.copy(self.sampled_weights),
-                    future_parts[-1],
-                    future_weight[:, jj],
-                    z_hat[jj],
-                )
-            else:
-                Hp_k[jj] = self.entropy_particle(
-                    future_parts[-2],
-                    np.copy(self.sampled_weights),
-                    future_parts[-1],
-                )
+        #        # H (x_{k+K} | \hat{z}_{k+K})
+        #        Hp_k[jj] = self.entropy_particle(
+        #            future_parts[-2],
+        #            np.copy(self.sampled_weights),
+        #            future_parts[-1],
+        #            future_weight[:, jj],
+        #            z_hat[jj],
+        #        )
+        #    else:
+        #        Hp_k[jj] = self.entropy_particle(
+        #            future_parts[-2],
+        #            np.copy(self.sampled_weights),
+        #            future_parts[-1],
+        #        )
 
-            # Information Gain
-            EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]
+        #    # Information Gain
+        #    EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]
 
-        # EER = I.mean() # implemented when N_m is implemented
-        action_index = np.argmax(EER)
-        self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
-        # print("EER: ", EER)
+        ## EER = I.mean() # implemented when N_m is implemented
+        # action_index = np.argmax(EER)
+        # self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
+        ## print("EER: ", EER)
 
-        self.t_EER = rospy.get_time() - self.initial_time - now
-        # print("EER time: ", self.t_EER)
+        # self.t_EER = rospy.get_time() - self.initial_time - now
+        ## print("EER time: ", self.t_EER)
 
-        self.eer_particle = self.sampled_index[action_index]
+        # self.eer_particle = self.sampled_index[action_index]
+        self.eer_particle = 0  # for now we just follow the first particle
 
     def entropy_particle(
         self,
@@ -529,9 +531,12 @@ class Guidance:
             ).reshape((self.filter.N_th, 1, self.filter.Nx))
             last_future_time = np.copy(self.filter.last_time)
             for k in range(self.K):
-                if self.prediction_method == "NN":
-                    future_part = self.filter.predict_mml(future_part)
-                elif self.prediction_method == "Unicycle":
+                # if self.prediction_method == "NN":
+                #    future_part = self.filter.predict_mml(future_part)
+                if (
+                    self.prediction_method == "Unicycle"
+                    or self.prediction_method == "NN"
+                ):
                     future_part, last_future_time = self.filter.predict(
                         future_part,
                         last_future_time + 0.3,
@@ -543,9 +548,7 @@ class Guidance:
                         future_part,
                         last_future_time + 0.3,
                     )
-            # print("part: ", self.filter.particles[-1, self.eer_particle, :2])
-            # print("future_part: ", future_part[-1, 0, :2])
-            self.goal_position = future_part[-1, 0, :2]
+            self.goal_position = future_part[-1, self.eer_particle, :2]
         elif self.guidance_mode == "Particles":
             self.goal_position = self.filter.weighted_mean
         elif self.guidance_mode == "Lawnmower":
@@ -632,14 +635,14 @@ class Guidance:
             # Only update if the turtle is not in occlusion and in the FOV
             if self.in_occlusion(self.noisy_turtle_pose):
                 self.filter.is_occlusion = True
-                self.filter.is_update = False  # no update
+                self.filter.is_update = True  # no update
             else:
                 self.filter.is_occlusion = False
                 if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
                     # we get measurements if the turtle is in the FOV and not in occlusion
                     self.filter.is_update = True
                 else:
-                    self.filter.is_update = False
+                    self.filter.is_update = True
 
     def turtle_hardware_odom_cb(self, msg):
         """Callback where we get the linear and angular velocities
