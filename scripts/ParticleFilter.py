@@ -27,7 +27,7 @@ class ParticleFilter:
             self.N_th = 10  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             # model_file = pkg_path + "/scripts/mml_network/models/current.pth"
-            model_file = pkg_path + "/scripts/mml_network/models/simple_dnn_best.pth"
+            model_file = pkg_path + "/scripts/mml_network/models/noisy_dnn_best.pth"
             training_data_filename = pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
             self.training_data = np.loadtxt(
                 training_data_filename, delimiter=",", skiprows=1
@@ -61,27 +61,21 @@ class ParticleFilter:
             self.vmax = 0.7  # m/s
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
-            self.measurement_covariance = np.array(
-                [[0.01, 0.0, 0.0], [0.0, 0.01, 0.0], [0.0, 0.0, deg2rad(5)]]
-            )
-            self.process_covariance = np.array(
-                [
-                    [0.01, 0.0, 0.0],
-                    [0.0, 0.01, 0.0],
-                    [0.0, 0.0, 0.001],
-                ]
-            )
+            self.measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
+            self.process_covariance = np.diag([0.01, 0.01, 0.001])
+        elif self.prediction_method == "KF":
+            self.Nx = 2
+            self.measurement_covariance = np.diag([0.01, 0.01])
+            self.process_covariance = np.diag([0.01, 0.01, 0.001, 0.001])
         elif self.prediction_method == "NN":
             self.Nx = 2
 
-        if self.prediction_method != "Unicycle":  # NN and Velocity
-            self.measurement_covariance = np.array([[0.01, 0.0], [0.0, 0.01]])
-            self.process_covariance = np.array(
-                [
-                    [0.001, 0.0],
-                    [0.0, 0.001],
-                ]
-            )
+        if (
+            self.prediction_method != "Unicycle" and self.prediction_method != "KF"
+        ):  # NN and Velocity
+            self.measurement_covariance = np.diag([0.01, 0.01])
+            self.process_covariance = np.diag([0.001, 0.001])
+
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
             (self.N_th, self.measurement_covariance.shape[0])
@@ -126,7 +120,7 @@ class ParticleFilter:
                 [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
                 (self.N_th, self.N, self.Nx),
             )
-        elif self.prediction_method == "NN":
+        elif self.prediction_method == "NN" or self.prediction_method == "KF":
             local_particles = np.random.uniform(
                 [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
                 [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
@@ -268,10 +262,20 @@ class ParticleFilter:
         Input: N_th (number of time histories) sets of particles up to time k-1
         Output: N_th sets of propagated particles up to time k
         """
-        #print("particles: ", particles.shape)
-        next_parts = self.motion_model.predict(np.transpose(particles[:, :, :2], (1,0,2)).reshape(particles.shape[1], self.N_th*self.Nx))
-        #print("next_parts: ", next_parts)
-        particles = np.concatenate((particles[1:, :, :2], next_parts.reshape(1, next_parts.shape[0], next_parts.shape[1])), axis=0)
+        # print("particles: ", particles.shape)
+        next_parts = self.motion_model.predict(
+            np.transpose(particles[:, :, :2], (1, 0, 2)).reshape(
+                particles.shape[1], self.N_th * self.Nx
+            )
+        )
+        # print("next_parts: ", next_parts)
+        particles = np.concatenate(
+            (
+                particles[1:, :, :2],
+                next_parts.reshape(1, next_parts.shape[0], next_parts.shape[1]),
+            ),
+            axis=0,
+        )
         particles[-1, :, :] = self.add_noise(
             particles[-1, :, :], self.process_covariance
         )

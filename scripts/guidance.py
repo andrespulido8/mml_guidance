@@ -8,6 +8,7 @@ from lawnmower import LawnmowerPath
 from mml_guidance.msg import Particle, ParticleMean, ParticleArray
 from nav_msgs.msg import Odometry
 from ParticleFilter import ParticleFilter
+from kf import KalmanFilter
 
 # from geometry_msgs.msg import Pose
 from reef_msgs.msg import DesiredState
@@ -22,9 +23,9 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Particles"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
-        self.prediction_method = "NN"  # 'NN', 'Velocity' or 'Unicycle'
+        self.prediction_method = "KF"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -72,11 +73,20 @@ class Guidance:
             Occlusions(occ_centers[i], occ_widths[i]) for i in range(len(occ_widths))
         ]
 
-        # Lawnmower Method
-        lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5)
-        self.path = lawnmower.trajectory()
-        self.lawnmower_idx = 0
-        self.increment = 1
+        if self.guidance_mode == "Lawnmower":
+            # Lawnmower Method
+            lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5, is_sim=self.is_sim)
+            self.path = lawnmower.trajectory()
+            self.lawnmower_idx = 0
+            self.increment = 1
+        if self.prediction_method == "KF":
+            # Kalman Filter
+            H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])
+            self.kf = KalmanFilter(
+                R=self.filter.measurement_covariance,
+                Q=self.filter.process_covariance,
+                H=H,
+            )
 
         # ROS stuff
         rospy.loginfo(
@@ -796,7 +806,7 @@ class Guidance:
             self.entropy_pub.publish(entropy_msg)
 
     def guidance_pf(self, event=None):
-        """Runs the particle filter loop based on the estimation method"""
+        """Runs the particle (or Kalman) filter loop based on the estimation method"""
 
         # Select to resample all particles if there is a measurement or select
         # the particles in FOV and not in occlusion if there is no measurement (negative information)
@@ -815,8 +825,17 @@ class Guidance:
             self.filter.pf_loop(
                 self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             )
-        else:
+        elif self.prediction_method == "Velocity" or self.prediction_method == "NN":
             self.filter.pf_loop(self.noisy_turtle_pose)
+        elif self.prediction_method == "KF":
+            self.kf.X[:2] = (
+                self.actual_turtle_pose[:2] if not self.init_finished else self.kf.X[:2]
+            )
+            self.kf.predict(dt=0.333)
+            self.kf.update(
+                self.noisy_turtle_pose[:2]
+            ) if self.filter.is_update else None
+            self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
 
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
@@ -825,6 +844,7 @@ class Guidance:
         # rospy.signal_shutdown("Timer signal shutdown")
         # os.system("rosnode kill other_node")
         os.system("rosnode kill drone_guidance mml_pf_visualization")
+        # os.system("rosservice call /gazebo/reset_world")
 
 
 class Occlusions:
