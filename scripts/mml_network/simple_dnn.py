@@ -36,11 +36,7 @@ class SimpleDNN(nn.Module):
         return self.layers[-1](x)
 
     def predict(self, x):
-        return (
-            self.forward(torch.from_numpy(x.astype(np.float32)))
-            .detach()
-            .numpy()
-        )
+        return self.forward(torch.from_numpy(x.astype(np.float32))).detach().numpy()
 
 
 def train(model, criterion, optimizer, X_train, y_train, epochs=100):
@@ -67,15 +63,12 @@ def evaluate(model, criterion, X_test, y_test):
 def main():
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/hardware_data/")
     # print the files in the directory
-    df = pd.read_csv(path + "converted_training_data.csv")
+    df = pd.read_csv(path + "converted_occlusion_training_data.csv")
     X = df.iloc[:, :-2].values
     y = df.iloc[:, -2:].values
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
-    scaler = StandardScaler()
-    # X_train = scaler.fit_transform(X_train)
-    # X_test = scaler.transform(X_test)
     X_train = torch.from_numpy(X_train.astype(np.float32))
     X_test = torch.from_numpy(X_test.astype(np.float32))
     y_train = torch.from_numpy(y_train.astype(np.float32))
@@ -141,7 +134,6 @@ def main():
             y_pred[i, 0] - X_test[i, -2],
             y_pred[i, 1] - X_test[i, -1],
             color="red",
-            label="Predicted",
         )
         plt.arrow(
             X_test[i, -2],
@@ -149,15 +141,41 @@ def main():
             y_test[i, 0] - X_test[i, -2],
             y_test[i, 1] - X_test[i, -1],
             color="blue",
-            label="Actual",
+        )
+    plt.arrow(
+        X_test[0, -2],
+        X_test[0, -1],
+        y_pred[0, 0] - X_test[i, -2],
+        y_pred[0, 1] - X_test[i, -1],
+        color="red",
+        label="Predicted",
+    )
+    plt.arrow(
+        X_test[0, -2],
+        X_test[0, -1],
+        y_test[0, 0] - X_test[i, -2],
+        y_test[0, 1] - X_test[i, -1],
+        color="blue",
+        label="Actual",
+    )
+    occlusions = np.array(
+        [[-1.75, -0.75, -1.1, -0.1], [-0.15, 0.85, -0.3, 0.7]]
+    )  # [x_min, x_max, y_min, y_max]
+    # plot the squares representing occlusions
+    for occlusion in occlusions:
+        plt.plot(
+            [occlusion[0], occlusion[1], occlusion[1], occlusion[0], occlusion[0]],
+            [occlusion[2], occlusion[2], occlusion[3], occlusion[3], occlusion[2]],
+            color="black",
         )
 
-    # min and max x and y values 
-    plt.xlim([-2, 1.])
+    # min and max x and y values
+    plt.xlim([-2, 1.0])
     plt.ylim([-1.5, 2])
     plt.legend()
     plt.show()
     return 0
+
 
 if __name__ == "__main__":
     main()

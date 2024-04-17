@@ -8,14 +8,28 @@ def create_dataset():
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/hardware_data/")
     # print the files in the directory
     df = pd.read_csv(
-        path + "training_data_2024-03-28-00-01-46__slash_robot0_slash_odom.csv"
+        path + "training_data_2024-03-28-00-01-46__slash_noisy_measurement.csv"
     )
 
     # Select every 10th row from the 11th and 12th columns
-    reduced_df = df.iloc[::10, 11:13]
-    # select every 10th row from the columns named x and y
-    # reduced_df = df.iloc[::10, df.columns.get_indexer(['x', 'y'])]
+    reduced_df = df.iloc[:, 8:10]
     print("first ten rows: ", reduced_df.head(10))
+    print("length of reduced_df before occlusions: ", len(reduced_df))
+
+    occlusions = np.array(
+        [[-1.75, -0.75, -1.1, -0.1], [-0.15, 0.85, -0.3, 0.7]]
+    )  # [x_min, x_max, y_min, y_max]
+    # remove rows from reduced_df where the x and y values are within the occlusion range
+    for occ in occlusions:
+        reduced_df = reduced_df[
+            ~(
+                (reduced_df.iloc[:, 0] >= occ[0])
+                & (reduced_df.iloc[:, 0] <= occ[1])
+                & (reduced_df.iloc[:, 1] >= occ[2])
+                & (reduced_df.iloc[:, 1] <= occ[3])
+            )
+        ]
+    print("length of reduced_df: ", len(reduced_df))
 
     # Create a new DataFrame to hold the final dataset
     final_df = pd.DataFrame()
@@ -35,7 +49,7 @@ def create_dataset():
         )
 
     # Save the final DataFrame to a new CSV file
-    out_name = "converted_training_data.csv"
+    out_name = "converted_occlusion_training_data.csv"
     final_df.to_csv(path + out_name, index=False)
     print("Converted dataset saved to : ", path + out_name)
 
