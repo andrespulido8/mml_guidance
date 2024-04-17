@@ -10,7 +10,7 @@ class LawnmowerPath:
 
     # enter sp1 as [x,y]
     # enter sp2 as [x,y]
-    def __init__(self, sp1=[0, 0], sp2=[170, 80], dy=40, is_plot=False):
+    def __init__(self, sp1=[0, 0], sp2=[170, 80], dy=40, is_plot=False, is_sim=False):
         self.sp1 = sp1
         self.sp2 = np.transpose(sp2)
         self.sp = [sp1, sp2]
@@ -18,6 +18,7 @@ class LawnmowerPath:
         self.deltax = 1
         self.is_plot = is_plot
         self.dr = 6
+        self.is_sim = is_sim
 
     def path(self, s0=np.array([0, 0])):
         """TBased on two initial setpoints, creates the remaining two points
@@ -136,15 +137,19 @@ class LawnmowerPath:
         self.Y = np.concatenate(Y_list)
         self.X = self.X.reshape(self.X.size)
         self.Y = self.Y.reshape(self.Y.size)
-        plt.axis("equal") if self.is_plot else None
+        # plt.axis("equal") if self.is_plot else None
 
-        plt.show() if self.is_plot else None
+        # plt.show() if self.is_plot else None
         # TODO: set axis name with dimensions
 
         # TODO: CHANGE quick fix offset for hardware
-        path = np.array([self.X + s0[0] - 1.2, self.Y + s0[1] - 1.5])
-        # rotation matrix to rotate the path by the specified degrees
-        angle = np.deg2rad(-90)
+        if self.is_sim:
+            path = np.array([self.X + s0[0] - 1.4, self.Y + s0[1] - 1.3])
+            # rotation matrix to rotate the path by the specified degrees
+            angle = np.deg2rad(0)
+        else:
+            path = np.array([self.X + s0[0] - 1.2, self.Y + s0[1] - 1.5])
+            angle = np.deg2rad(-90)
         tf = [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
         return np.matmul(tf, path)
 
@@ -203,7 +208,7 @@ class LawnmowerPath:
 
 def main():
     sp1 = [0, 0]
-    sp2 = [3, 2]
+    sp2 = [3.5, 3.5]
     dy = 1.5
     is_plot = True
     planning = LawnmowerPath(sp1, sp2, dy, is_plot)

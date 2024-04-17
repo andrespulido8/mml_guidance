@@ -14,7 +14,7 @@ class MarkovChain:
         self.tolerance_radius = 0.2  # meters
 
         self.init_time = np.array(rospy.get_time())
-        self.prev_goal_in = 0
+        self.prev_goal_in = 1  # Start at the second state
         self.prev_mult = 0
         self.position = np.array([0, 0])
 

@@ -165,7 +165,7 @@ class MML_PF_Visualization:
         self.fov = np.zeros((5, 2))
         self.des_fov = np.zeros((5, 2))
         self.particles = np.zeros((1, 2))
-        self.K = rospy.get_param("/predict_window", 5)
+        self.K = rospy.get_param("/predict_window", 4)
         self.N_s = rospy.get_param("/num_sampled_particles", 25)
         self.future_parts = np.zeros((self.K, self.N_s, 2))
         self.plot_prediction = False
@@ -603,11 +603,11 @@ class MML_PF_Visualization:
                     self.fig_ax4.plot(timestamplist, (yaw_sigmaList), color="r")
                     self.fig_ax4.plot(timestamplist, (-yaw_sigmaList), color="r")
 
-                if len(self.timestamplist) == len(self.entropyList) and len(
-                    entropyList
-                ) == len(timestamplist):
-                    # self.fig_ax5.set_ylim(0,1)
-                    self.fig_ax5.plot(timestamplist, entropyList)
+                # if len(self.timestamplist) == len(self.entropyList) and len(
+                #    entropyList
+                # ) == len(timestamplist):
+                # self.fig_ax5.set_ylim(0,1)
+                self.fig_ax5.plot(timestamplist, entropyList[: len(timestamplist)])
 
                 self.plot_flag = False
 

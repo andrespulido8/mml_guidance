@@ -2,6 +2,7 @@
 import numpy as np
 import rospy
 import scipy.stats as stats
+import os
 from geometry_msgs.msg import PointStamped, PoseStamped
 from lawnmower import LawnmowerPath
 from mml_guidance.msg import Particle, ParticleMean, ParticleArray
@@ -36,8 +37,7 @@ class Guidance:
         self.initial_time = rospy.get_time()
 
         ## PARTICLE FILTER  ##
-        # number of particles
-        self.N = 500
+        self.N = 500  # Number of particles
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
         self.height = 1.2  # height of the quadcopter in meters
@@ -45,21 +45,20 @@ class Guidance:
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
-        self.FOV_dims = np.array([4.0, 4.0])
         self.FOV = self.construct_FOV(self.quad_position)
 
         ## INFO-DRIVEN GUIDANCE ##
         # Number of future measurements per sampled particle to consider in EER
         # self.N_m = 1  # not implemented yet
-        self.N_s = 20  # Number of sampled particles
+        self.N_s = 25  # Number of sampled particles
         rospy.set_param("/num_sampled_particles", self.N_s)
-        self.K = 5  # Time steps to propagate in the future for EER
+        self.K = 4  # Time steps to propagate in the future for EER
         rospy.set_param("/predict_window", self.K)
-        self.Hp_t = 0.0  # partial entropy
-        self.prev_Hp = np.zeros((5, 1))
+        self.Hp_t = 1.0  # partial entropy
+        self.prev_Hp = np.ones((5, 1))
         self.EER_range = np.array([0, 0, 0])
         self.t_EER = 0.0
-        self.eer_particle = 0  # initialize future particle to follow randomly (index 0)
+        self.eer_particle = 0  # initialize future particle to follow
         self.sampled_index = np.arange(self.N)
         self.sampled_particles = self.filter.particles[:, : self.N_s, :]
         self.sampled_weights = np.ones(self.N_s) / self.N_s
@@ -148,10 +147,6 @@ class Guidance:
         Output: Hp_t (float) - entropy of the current distribution"""
         t = rospy.get_time() - self.initial_time
 
-        # update entropy history
-        self.prev_Hp = np.roll(self.prev_Hp, -1, axis=0)
-        self.prev_Hp[-1, :2] = self.Hp_t
-
         prev_Hp = np.copy(self.Hp_t)
 
         self.sampled_index = np.random.choice(a=self.N, size=self.N_s)
@@ -167,7 +162,7 @@ class Guidance:
         )
         sampled_prev_weights = np.copy(self.filter.prev_weights[self.sampled_index])
         if self.filter.is_update:
-            self.Hp_t = self.entropy_particle(
+            Hp_t = self.entropy_particle(
                 self.sampled_particles[-2],
                 np.copy(sampled_prev_weights),
                 self.sampled_particles[-1],
@@ -175,7 +170,7 @@ class Guidance:
                 self.noisy_turtle_pose,
             )
         else:
-            self.Hp_t = self.entropy_particle(
+            Hp_t = self.entropy_particle(
                 self.sampled_particles[-2],
                 np.copy(
                     self.sampled_weights
@@ -183,18 +178,19 @@ class Guidance:
                 self.sampled_particles[-1],
             )
 
-        self.Hp_t = (
-            self.reject_spikes(
+        Hp_t = (
+            prev_Hp if not np.isfinite(Hp_t) else Hp_t
+        )  # if really bad value, keep the previous one
+        if not np.array_equal(self.prev_Hp, np.ones((5, 1))):
+            self.Hp_t = self.reject_spikes(
                 self.prev_Hp,
-                self.Hp_t,
+                Hp_t,
                 threshold_factor=3,
             )
-            if self.prev_Hp.any() and self.Hp_t is not None
-            else self.Hp_t  # first time we don't have previous values
-        )
-        self.Hp_t = (
-            prev_Hp if not np.isfinite(self.Hp_t) else self.Hp_t
-        )  # if really bad value, keep the previous one
+
+        # update entropy history
+        self.prev_Hp = np.roll(self.prev_Hp, -1, axis=0)
+        self.prev_Hp[-1, :2] = Hp_t
 
         entropy_time = rospy.get_time() - t - self.initial_time
         # print("Entropy time: ", entropy_time)
@@ -256,50 +252,49 @@ class Guidance:
             self.sampled_index_pub.publish(data=self.sampled_index)
 
         # Future possible measurements
-        # TODO: implement N_m sampled measurements
-        # z_hat = self.filter.add_noise(
-        #    future_parts[-1, :, : self.filter.measurement_covariance.shape[0]],
-        #    self.filter.measurement_covariance,
-        # )
-        ## p(z_{k+K} | x_{k+K})
-        # likelihood = self.filter.likelihood(future_parts[-1], z_hat)
-        ## TODO: implement N_m sampled measurements (double loop)
-        # for jj in range(self.N_s):
-        #    k_fov = self.construct_FOV(z_hat[jj])
-        #    # checking for measurement outside of fov or in occlusion
-        #    if self.is_in_FOV(z_hat[jj], k_fov) and not self.in_occlusion(z_hat[jj]):
-        #        future_weight[:, jj] = self.filter.update(
-        #            self.sampled_weights, future_parts, z_hat[jj]
-        #        )
+        # TODO: implement N_m sampled measurements (assumption: N_m = 1)
+        z_hat = self.filter.add_noise(
+            future_parts[-1, :, : self.filter.measurement_covariance.shape[0]],
+            self.filter.measurement_covariance,
+        )
+        # p(z_{k+K} | x_{k+K})
+        likelihood = self.filter.likelihood(future_parts[-1], z_hat)
+        # TODO: implement N_m sampled measurements (double loop)
+        for jj in range(self.N_s):
+            k_fov = self.construct_FOV(z_hat[jj])
+            # checking for measurement outside of fov or in occlusion
+            if self.is_in_FOV(z_hat[jj], k_fov) and not self.in_occlusion(z_hat[jj]):
+                future_weight[:, jj] = self.filter.update(
+                    self.sampled_weights, future_parts, z_hat[jj]
+                )
 
-        #        # H (x_{k+K} | \hat{z}_{k+K})
-        #        Hp_k[jj] = self.entropy_particle(
-        #            future_parts[-2],
-        #            np.copy(self.sampled_weights),
-        #            future_parts[-1],
-        #            future_weight[:, jj],
-        #            z_hat[jj],
-        #        )
-        #    else:
-        #        Hp_k[jj] = self.entropy_particle(
-        #            future_parts[-2],
-        #            np.copy(self.sampled_weights),
-        #            future_parts[-1],
-        #        )
+                # H (x_{k+K} | \hat{z}_{k+K})
+                Hp_k[jj] = self.entropy_particle(
+                    future_parts[-2],
+                    np.copy(self.sampled_weights),
+                    future_parts[-1],
+                    future_weight[:, jj],
+                    z_hat[jj],
+                )
+            else:
+                Hp_k[jj] = self.entropy_particle(
+                    future_parts[-2],
+                    np.copy(self.sampled_weights),
+                    future_parts[-1],
+                )
 
-        #    # Information Gain
-        #    EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]
+            # Information Gain
+            EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]
 
-        ## EER = I.mean() # implemented when N_m is implemented
-        # action_index = np.argmax(EER)
-        # self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
-        ## print("EER: ", EER)
+        # EER = I.mean() # implemented when N_m is implemented
+        action_index = np.argmax(EER)
+        self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
+        # print("EER: ", EER)
 
-        # self.t_EER = rospy.get_time() - self.initial_time - now
-        ## print("EER time: ", self.t_EER)
+        self.t_EER = rospy.get_time() - self.initial_time - now
+        # print("EER time: ", self.t_EER)
 
-        # self.eer_particle = self.sampled_index[action_index]
-        self.eer_particle = 0  # for now we just follow the first particle
+        self.eer_particle = self.sampled_index[action_index]
 
     def entropy_particle(
         self,
@@ -531,8 +526,8 @@ class Guidance:
             ).reshape((self.filter.N_th, 1, self.filter.Nx))
             last_future_time = np.copy(self.filter.last_time)
             for k in range(self.K):
-                # if self.prediction_method == "NN":
-                #    future_part = self.filter.predict_mml(future_part)
+                if self.prediction_method == "NN":
+                    future_part = self.filter.predict_mml(future_part)
                 if (
                     self.prediction_method == "Unicycle"
                     or self.prediction_method == "NN"
@@ -548,7 +543,7 @@ class Guidance:
                         future_part,
                         last_future_time + 0.3,
                     )
-            self.goal_position = future_part[-1, self.eer_particle, :2]
+            self.goal_position = future_part[-1][0]
         elif self.guidance_mode == "Particles":
             self.goal_position = self.filter.weighted_mean
         elif self.guidance_mode == "Lawnmower":
@@ -629,20 +624,21 @@ class Guidance:
                 # self.noisy_turtle_pose = np.array(
                 #    [msg.pose.position.x, msg.pose.position.y, theta_z]
                 # )
+
                 # in hardware we assume the pose is already noisy
                 self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
 
             # Only update if the turtle is not in occlusion and in the FOV
-            if self.in_occlusion(self.noisy_turtle_pose):
+            if self.in_occlusion(self.actual_turtle_pose[:2]):
                 self.filter.is_occlusion = True
-                self.filter.is_update = True  # no update
+                self.filter.is_update = False  # no update
             else:
                 self.filter.is_occlusion = False
-                if self.is_in_FOV(self.noisy_turtle_pose, self.FOV):
+                if self.is_in_FOV(self.actual_turtle_pose[:2], self.FOV):
                     # we get measurements if the turtle is in the FOV and not in occlusion
                     self.filter.is_update = True
                 else:
-                    self.filter.is_update = True
+                    self.filter.is_update = False
 
     def turtle_hardware_odom_cb(self, msg):
         """Callback where we get the linear and angular velocities
@@ -826,8 +822,9 @@ class Guidance:
         # Stop the node when shutdown is called
         rospy.logfatal("Timer expired or user terminated. Stopping the node...")
         rospy.sleep(0.1)
-        rospy.signal_shutdown("Timer signal shutdown")
+        # rospy.signal_shutdown("Timer signal shutdown")
         # os.system("rosnode kill other_node")
+        os.system("rosnode kill drone_guidance mml_pf_visualization")
 
 
 class Occlusions:
@@ -843,7 +840,7 @@ if __name__ == "__main__":
     rospy.init_node("guidance", anonymous=True)
     guidance = Guidance()
 
-    time_to_shutdown = 2000
+    time_to_shutdown = 90
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
 
