@@ -36,11 +36,7 @@ class SimpleDNN(nn.Module):
         return self.layers[-1](x)
 
     def predict(self, x):
-        return (
-            self.forward(torch.from_numpy(x.astype(np.float32)))
-            .detach()
-            .numpy()
-        )
+        return self.forward(torch.from_numpy(x.astype(np.float32))).detach().numpy()
 
 
 def train(model, criterion, optimizer, X_train, y_train, epochs=100):
@@ -65,11 +61,14 @@ def evaluate(model, criterion, X_test, y_test):
 
 
 def main():
+    is_velocities = True
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/hardware_data/")
     # print the files in the directory
+    if is_velocities:
+        df_vel = pd.read_csv(path + "converted_velocities_training_data.csv")
     df = pd.read_csv(path + "converted_training_data.csv")
-    X = df.iloc[:, :-2].values
-    y = df.iloc[:, -2:].values
+    X = df.iloc[:, :-2].values if not is_velocities else df_vel.iloc[:, :-2].values
+    y = df.iloc[:, -2:].values if not is_velocities else df_vel.iloc[:, -2:].values
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
@@ -109,7 +108,7 @@ def main():
         if test_loss < best_loss:
             best_loss = test_loss
             best_params = params
-            torch.save(model.state_dict(), "simple_dnn_best.pth")
+            torch.save(model.state_dict(), "vel_dnn_best.pth")
         plt.plot(
             losses,
             label=f"num_layers={params['num_layers']}, nodes_per_layer={params['nodes_per_layer']}, lr={params['lr']}",
@@ -128,36 +127,58 @@ def main():
         output_size=2,
         activation_fn="relu",
     )
-    model.load_state_dict(torch.load("simple_dnn_best.pth"))
+    model.load_state_dict(torch.load("vel_dnn_best.pth"))
     model.eval()
     y_pred = model(X_test).detach().numpy()
     # figure with legends
     plt.figure()
     # plot an arrow from the last point of X_test to the predicted point and the actual point
-    for i in range(X_test.shape[0]):
-        plt.arrow(
-            X_test[i, -2],
-            X_test[i, -1],
-            y_pred[i, 0] - X_test[i, -2],
-            y_pred[i, 1] - X_test[i, -1],
-            color="red",
-            label="Predicted",
+    if not is_velocities:
+        for i in range(X_test.shape[0]):
+            plt.arrow(
+                X_test[i, -2],
+                X_test[i, -1],
+                y_pred[i, 0] - X_test[i, -2],
+                y_pred[i, 1] - X_test[i, -1],
+                color="red",
+                label="Predicted",
+            )
+            plt.arrow(
+                X_test[i, -2],
+                X_test[i, -1],
+                y_test[i, 0] - X_test[i, -2],
+                y_test[i, 1] - X_test[i, -1],
+                color="blue",
+                label="Actual",
+            )
+    else:
+        # plot the predicted and actual velocities as arrows from the positions defined in df
+        _, Xpos_test, _, ypos_test = train_test_split(
+            df.iloc[:, :-2].values, df.iloc[:, -2:], test_size=0.2, random_state=42
         )
-        plt.arrow(
-            X_test[i, -2],
-            X_test[i, -1],
-            y_test[i, 0] - X_test[i, -2],
-            y_test[i, 1] - X_test[i, -1],
-            color="blue",
-            label="Actual",
-        )
+        for i in range(Xpos_test.shape[0] - 1):
+            plt.arrow(
+                Xpos_test[i, -2],
+                Xpos_test[i, -1],
+                y_pred[i, -2],
+                y_pred[i, -1],
+                color="red",
+            )
+            plt.arrow(
+                Xpos_test[i, -2],
+                Xpos_test[i, -1],
+                y_test[i, 0],
+                y_test[i, 1],
+                color="blue",
+            )
 
-    # min and max x and y values 
-    plt.xlim([-2, 1.])
+    # min and max x and y values
+    plt.xlim([-2, 1.0])
     plt.ylim([-1.5, 2])
     plt.legend()
     plt.show()
     return 0
+
 
 if __name__ == "__main__":
     main()
