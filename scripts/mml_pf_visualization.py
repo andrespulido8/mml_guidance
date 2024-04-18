@@ -545,8 +545,8 @@ class MML_PF_Visualization:
                         self.measurement_msg.point.y,
                         marker="+",
                         markersize=10.0,
-                        color="y",
-                        label="Measurements",
+                        color="orange",
+                        label="Noisy Measurements",
                     )
 
                 # plot particles covariances

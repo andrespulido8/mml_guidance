@@ -18,16 +18,16 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.AVL_dims = np.array([[-1.2, -1.0], [1.5, 1.6]])
+        self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])
         self.AVL_dims = (
-            self.AVL_dims if not is_sim else np.array([[-2, -1.5], [1.0, 2.5]])
+            self.AVL_dims if not is_sim else np.array([[-2.0, -1.2], [1.0, 2.0]])
         )
 
         if self.prediction_method == "NN":
             self.N_th = 10  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             # model_file = pkg_path + "/scripts/mml_network/models/current.pth"
-            model_file = pkg_path + "/scripts/mml_network/models/noisy_dnn_best.pth"
+            model_file = pkg_path + "/scripts/mml_network/models/transformer.pth"
             training_data_filename = pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
             self.training_data = np.loadtxt(
                 training_data_filename, delimiter=",", skiprows=1
@@ -126,6 +126,7 @@ class ParticleFilter:
                 [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
                 (self.N_th, self.N, self.Nx),
             )
+            print("first 10 local_particles: ", local_particles[:10])
         return local_particles
 
     def pf_loop(
@@ -173,17 +174,22 @@ class ParticleFilter:
             )
 
         # Resampling step
+        outbounds = self.outside_bounds(self.particles[-1])
+        print("outside bounds: ", outbounds)
         self.neff = self.nEff(self.weights)
-        self.particles = (
-            self.uniform_sample()
-            if self.outside_bounds(self.particles[-1]) > self.N * 0.3
-            else self.particles
-        )
-        if not self.is_occlusion:
+        if outbounds > self.N * 0.5:
+            # Resample if fraction of particles are outside the lab boundaries
+            rospy.logwarn(
+                f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
+            )
+            self.particles = self.uniform_sample()
+        if (
+            not self.is_occlusion
+        ):  # agent can only tell if it is occluded, not the shape of occlusion
             if (
-                self.neff < self.N * 0.9
+                self.neff < self.N * 0.99
             ):  # nEff is only infinity when something went wrong
-                if self.neff < self.N * 0.4 and self.is_update:
+                if (self.neff < self.N * 0.4 or self.neff == self.N) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
@@ -277,7 +283,7 @@ class ParticleFilter:
             axis=0,
         )
         particles[-1, :, :] = self.add_noise(
-            particles[-1, :, :], self.process_covariance
+            particles[-1, :, :], 2 * self.process_covariance
         )
         return particles
 
