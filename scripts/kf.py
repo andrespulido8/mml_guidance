@@ -4,7 +4,7 @@ import numpy as np
 class KalmanFilter:
     """Multivariante Kalman Filter implementation."""
 
-    def __init__(self, H, Q, R, X=np.array([0, 0, 0.5, 0.5])):
+    def __init__(self, H, Q, R, X=np.array([0, 0, -0.02, -0.01])):
         """Initialize the Kalman Filter.
         Parameters
         :param H: Measurement matrix

@@ -23,9 +23,9 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Particles"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
-        self.prediction_method = "KF"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
+        self.prediction_method = "NN"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -225,7 +225,7 @@ class Guidance:
         pred_msg = ParticleArray()
         for k in range(self.K):  # propagate k steps in the future
             if self.prediction_method == "NN":
-                future_parts = self.filter.predict_mml(future_parts)
+                future_parts = self.filter.predict_mml(np.copy(future_parts))
             elif self.prediction_method == "Unicycle":
                 future_parts, last_future_time = self.filter.predict(
                     future_parts,
@@ -255,7 +255,7 @@ class Guidance:
                 pred_msg.particle_array.append(mean_msg)
 
         if self.is_viz:
-            if len(pred_msg.particle_array) > 5:
+            if len(pred_msg.particle_array) > self.K:
                 pred_msg.particle_array.pop(0)  # eliminate the oldest particle
             self.particle_pred_pub.publish(pred_msg)  # publish the history
             # publish the sampled index array
@@ -538,10 +538,7 @@ class Guidance:
             for k in range(self.K):
                 if self.prediction_method == "NN":
                     future_part = self.filter.predict_mml(future_part)
-                if (
-                    self.prediction_method == "Unicycle"
-                    or self.prediction_method == "NN"
-                ):
+                if self.prediction_method == "Unicycle":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
                         last_future_time + 0.3,
@@ -714,8 +711,8 @@ class Guidance:
                 ds.pose.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]
             )
             ds.pose.y = np.clip(
-                ds.pose.y, self.filter.AVL_dims[0][1], self.filter.AVL_dims[1][1]
-            )
+                ds.pose.y, -self.filter.AVL_dims[1][1], -self.filter.AVL_dims[0][1]
+            )  # remember y is negative for the quad
             self.pose_pub.publish(ds)
             # tracking err pub
             self.FOV_err = self.quad_position - self.actual_turtle_pose[:2]
@@ -817,6 +814,10 @@ class Guidance:
                     ~self.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
+            # set weights of samples close to zero
+            self.filter.weights[self.filter.resample_index] = 1e-10
+            # normalize weights
+            self.filter.weights = self.filter.weights / np.sum(self.filter.weights)
         else:
             self.filter.resample_index = np.arange(self.N)
 

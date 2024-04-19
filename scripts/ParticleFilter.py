@@ -6,6 +6,7 @@ import torch
 
 from mml_network import deploy_mml
 from mml_network import simple_dnn
+from mml_network import transformer
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
@@ -18,9 +19,9 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.AVL_dims = np.array([[-1.2, -1.0], [1.5, 1.6]])
+        self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])
         self.AVL_dims = (
-            self.AVL_dims if not is_sim else np.array([[-2, -1.5], [1.0, 2.5]])
+            self.AVL_dims if not is_sim else np.array([[-3.0, -1.2], [1.0, 2.0]])
         )
 
         if self.prediction_method == "NN":
@@ -28,14 +29,19 @@ class ParticleFilter:
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             # model_file = pkg_path + "/scripts/mml_network/models/current.pth"
             model_file = pkg_path + "/scripts/mml_network/models/noisy_dnn_best.pth"
-            training_data_filename = pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
-            self.training_data = np.loadtxt(
-                training_data_filename, delimiter=",", skiprows=1
-            )[:, 1:]
-            self.n_training_samples = self.training_data.shape[0] - self.N_th - 1
+            self.is_velocity = False
+            # training_data_filename = pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
+            # self.training_data = np.loadtxt(
+            #    training_data_filename, delimiter=",", skiprows=1
+            # [:, 1:]
+            # self.n_training_samples = self.training_data.shape[0] - self.N_th - 1
             # self.motion_model = deploy_mml.Motion_Model(model_file)
+            self.nn_input_size = (
+                self.N_th * 2 - 2 if self.is_velocity else self.N_th * 2
+            )
+            # self.motion_model = transformer.TransformerModel(d_model=16, dim_feedforward=10, nhead=1, num_layers=2)
             self.motion_model = simple_dnn.SimpleDNN(
-                input_size=20,
+                input_size=self.nn_input_size,
                 num_layers=2,
                 nodes_per_layer=80,
                 output_size=2,
@@ -145,7 +151,7 @@ class ParticleFilter:
 
         # Prediction step
         if self.prediction_method == "NN":
-            self.particles = self.predict_mml(self.particles)
+            self.particles = self.predict_mml(np.copy(self.particles))
         elif self.prediction_method == "Unicycle":
             self.measurement_history[-1, 2] = noisy_measurement[2]
             self.particles, self.last_time = self.predict(
@@ -173,17 +179,22 @@ class ParticleFilter:
             )
 
         # Resampling step
+        outbounds = self.outside_bounds(self.particles[-1])
+        print("outside bounds: ", outbounds)
         self.neff = self.nEff(self.weights)
-        self.particles = (
-            self.uniform_sample()
-            if self.outside_bounds(self.particles[-1]) > self.N * 0.3
-            else self.particles
-        )
-        if not self.is_occlusion:
+        if outbounds > self.N * 0.5:
+            # Resample if fraction of particles are outside the lab boundaries
+            rospy.logwarn(
+                f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
+            )
+            self.particles = self.uniform_sample()
+        if (
+            not self.is_occlusion
+        ):  # agent can only tell if it is occluded, not the shape of occlusion
             if (
-                self.neff < self.N * 0.9
+                self.neff < self.N * 0.99
             ):  # nEff is only infinity when something went wrong
-                if self.neff < self.N * 0.4 and self.is_update:
+                if (self.neff < self.N * 0.4 or self.neff == self.N) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
@@ -263,12 +274,22 @@ class ParticleFilter:
         Output: N_th sets of propagated particles up to time k
         """
         # print("particles: ", particles.shape)
+        if self.is_velocity:
+            current_parts = np.copy(particles[:, :, :2])
+            particles = (particles[1:, :, :2] - particles[:-1, :, :2]) / 0.333  # 3 Hz
+
         next_parts = self.motion_model.predict(
             np.transpose(particles[:, :, :2], (1, 0, 2)).reshape(
-                particles.shape[1], self.N_th * self.Nx
+                particles.shape[1], self.nn_input_size
             )
         )
         # print("next_parts: ", next_parts)
+        if self.is_velocity:
+            next_parts = (
+                current_parts[-1] + next_parts * 0.333
+            )  # x(t+1) = x(t) + v(t) * dt
+            particles = current_parts
+
         particles = np.concatenate(
             (
                 particles[1:, :, :2],
@@ -277,7 +298,7 @@ class ParticleFilter:
             axis=0,
         )
         particles[-1, :, :] = self.add_noise(
-            particles[-1, :, :], self.process_covariance
+            particles[-1, :, :], 2 * self.process_covariance
         )
         return particles
 
