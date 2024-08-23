@@ -1,8 +1,5 @@
 <!-- launch file for MML demo in simulation with realtime matplotlib visualizations -->
 <launch>
-    <include file="$(find mml_guidance)/launch/mml_sim_estimator.launch" >
-		<arg name="is_visualization" value="true"/>
-	</include>
 
 	<node pkg="mml_guidance" type="mml_pf_visualization.py" name="mml_pf_visualization" output="screen">
 		<remap from="odom" to="/robot0/odom"/>

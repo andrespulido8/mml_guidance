@@ -10,7 +10,7 @@ import seaborn as sns
 # Set the name of the input CSV file
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/csv/joined/"
+folder_path = package_dir + "/hardware_data/RAL_csv/joined/"
 
 is_plot = False
 print_rms = False
@@ -33,7 +33,7 @@ cropped_plot = {
 
 # font sizes for the plot labels
 font = {"family": "serif", "weight": "normal", "size": 20}
-sns.set()
+sns.set_theme()
 sns.set_style("white")
 sns.set_context("paper", font_scale=2)
 
@@ -55,10 +55,10 @@ def main():
             df = pd.read_csv(csv_file, low_memory=False)
 
             # Begin and end percentage of the time to plot
-            beg_end = np.array([0.0, 0.99])
+            beg_end = np.array([0.0, 0.9])
             beg_end = (
-                np.array([0.0, 0.90])
-                if filename == "Information_2023-07-06-16-46-55_joined.csv"
+                np.array([0.0, 0.75])
+                if filename == "Information2_2024-04-19-16-11-40_joined.csv"
                 else beg_end
             )
             # Get min and max time from topic with most data
@@ -73,7 +73,7 @@ def main():
                 if col_name.endswith("rosbagTimestamp"):
                     x_label = col_name
                     df[col_name] = df[col_name] / 10e8 - min_time
-                    # print('df[x_label].max(): ', df[x_label].max(), x_label)
+                    print("df[x_label].max(): ", df[x_label].max(), x_label)
                     min_max_indx = [
                         df.index[df[x_label] >= crop_time[0]].tolist()[0],
                         df.index[df[x_label] >= crop_time[1]].tolist()[0],
@@ -112,29 +112,10 @@ def main():
             # Indices where 'is update data' is false
             indx_not_upd = np.where(
                 df["is update data"].dropna().astype(bool).to_numpy() == False
-            )[
-                0
-            ]  #
+            )[0]
             indx_occ = np.where(
-                (
-                    df["rail nwu pose stamped position x"].dropna().to_numpy()
-                    > occ_center[0] - occ_width / 2
-                )
-                & (
-                    df["rail nwu pose stamped position x"].dropna().to_numpy()
-                    < occ_center[0] + occ_width / 2
-                )
-                & (
-                    df["rail nwu pose stamped position y"].dropna().to_numpy()
-                    > occ_center[1] - occ_width / 2
-                )
-                & (
-                    df["rail nwu pose stamped position y"].dropna().to_numpy()
-                    < occ_center[1] + occ_width / 2
-                )
-            )[
-                0
-            ]  # print("Number of occlusions: ", len(indx_occ))
+                df["is occlusion data"].dropna().astype(bool).to_numpy() == True
+            )[0]
 
             x_label = ""
             for col_name in df.columns:
@@ -146,7 +127,9 @@ def main():
                     # Set the y axis label to the full column name
                     col_name = col_name
 
-                    outdir = folder_path + "/figures/" + filename + "/"
+                    # get first word from filename
+                    first_word = filename.split("_")[0]
+                    outdir = folder_path + "figures/" + first_word + "/"
                     if not os.path.exists(outdir):
                         os.mkdir(outdir)
 
@@ -173,27 +156,32 @@ def main():
                         label=r"$\mathbf{x}_T \in \mathcal{S}$",
                     )
                     # vertical line when there is occulsion (every 6th occulsion to avoid clutter)
-                    for xi_o in df["rail nwu pose stamped rosbagTimestamp"][
-                        indx_occ[::6]
-                    ]:
+                    if indx_occ.size > 0:
+                        for xi_o in df["rail nwu pose stamped rosbagTimestamp"][
+                            indx_occ[::6]
+                        ]:
+                            plt.axvline(
+                                x=xi_o,
+                                alpha=0.1,
+                                color="r",
+                                linestyle="-",
+                                linewidth=0.8,
+                            )
+
                         plt.axvline(
-                            x=xi_o, alpha=0.1, color="r", linestyle="-", linewidth=0.8
+                            x=df["rail nwu pose stamped rosbagTimestamp"][indx_occ[0]],
+                            alpha=0.1,
+                            color="r",
+                            linestyle="-",
+                            linewidth=0.8,
+                            label=r"$\mathbf{x}_T \in \mathcal{O}$",
                         )
-                    plt.axvline(
-                        x=df["rail nwu pose stamped rosbagTimestamp"][indx_occ[0]],
-                        alpha=0.1,
-                        color="r",
-                        linestyle="-",
-                        linewidth=0.8,
-                        label=r"$\mathbf{x}_T \in \mathcal{O}$",
-                    )
 
                     # Add the legend and axis labels
                     plt.xlabel("Time [s]", fontdict=font)
                     plt.ylabel(include_data[col_name], fontdict=font)
                     plt.ylim(0, 2.5) if col_name == "err estimation norm" else None
                     plt.legend(loc="upper right", fontsize=20)
-                    first_word = filename.split("_")[0]
                     plt.title(first_word, fontdict=font)
                     plt.tight_layout()
                     plt.savefig(

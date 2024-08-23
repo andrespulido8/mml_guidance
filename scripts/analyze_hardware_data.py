@@ -11,7 +11,7 @@ import numpy as np
 
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/csv"
+folder_path = package_dir + "/hardware_data/RAL_csv"
 
 is_multiple_runs = True
 
@@ -76,21 +76,37 @@ for filename in os.listdir(folder_path):
             df.drop(columns_to_drop, axis=1, inplace=True)
             # add the determinant of the covariance matrix (for uncorrelated variables)
             df["cov det"] = df["cov"].apply(lambda x: np.prod(x))
+            # remove rows with cov det higher than 5. This is done to omit unusually large covariances
+            # that are higher than what a uniform distribution would give in the current workspace
+            df = df[df["cov det"] < 5]
         elif (
             last_words == "rail_nwu_pose_stamped"
+            or last_words == "robot0_odom"
             or last_words == "takahe_nwu_pose_stamped"
+            or last_words == "truth_NWU"
         ):
             df = process_pose_stamped(df)
-        elif last_words == "odom":
+            if last_words == "robot0_odom":
+                last_words = "rail_nwu_pose_stamped"
+            elif last_words == "truth_NWU":
+                last_words = "takahe_nwu_pose_stamped"
+        elif last_words in {
+            "xyTh_predictions",
+            "noisy_measurement",
+            "fov_coord",
+            "des_fov_coord",
+        }:  # odom
+            print("ignoring file: ", filename)
             continue
         elif last_words == "desired_state":
             df = df[["rosbagTimestamp", "x", "y", "z", "yaw"]]
             # Transform from NED to NWU
             df["y"] = df["y"] * -1
-
         elif last_words == "err_estimation" or last_words == "err_tracking":
             df = df[["rosbagTimestamp", "x", "y"]]
             df["norm"] = (df["x"] ** 2 + df["y"] ** 2) ** 0.5
+        elif last_words == "xyTh_estimate_cov_det":
+            df = df[df["data"] < 5]
 
         df.rename(
             columns={

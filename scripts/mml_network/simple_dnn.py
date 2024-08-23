@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import ParameterGrid
 import matplotlib.pyplot as plt
+import seaborn as sns
 import os
 
 
@@ -101,36 +102,57 @@ def parameter_search(
 
 
 def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
+    # font sizes for the plot labels
+    font = {"family": "serif", "weight": "normal", "size": 40}
+    sns.set_theme()
+    sns.set_style("white")
+    sns.set_context("paper", font_scale=3)
+
     # figure with legends
-    plt.figure()
+    fig, ax = plt.subplots()
 
     occlusions = np.array(
         [[-1.75, -0.75, -1.1, -0.1], [-0.15, 0.85, -0.3, 0.7]]
     )  # [x_min, x_max, y_min, y_max]
     # plot the squares representing occlusions
-    for occlusion in occlusions:
-        plt.plot(
-            [occlusion[0], occlusion[1], occlusion[1], occlusion[0], occlusion[0]],
-            [occlusion[2], occlusion[2], occlusion[3], occlusion[3], occlusion[2]],
-            color="black",
-        )
+    # for occlusion in occlusions:
+    #    plt.plot(
+    #        [occlusion[0], occlusion[1], occlusion[1], occlusion[0], occlusion[0]],
+    #        [occlusion[2], occlusion[2], occlusion[3], occlusion[3], occlusion[2]],
+    #        color="black",
+    #    )
     # plot an arrow from the last point of X_test to the predicted point and the actual point
+
     if not is_velocities:
-        for i in range(X_test.shape[0]):
-            plt.arrow(
-                X_test[i, -2],
-                X_test[i, -1],
-                y_pred[i, 0] - X_test[i, -2],
-                y_pred[i, 1] - X_test[i, -1],
-                color="red",
-            )
-            plt.arrow(
-                X_test[i, -2],
-                X_test[i, -1],
-                y_test[i, 0] - X_test[i, -2],
-                y_test[i, 1] - X_test[i, -1],
-                color="blue",
-            )
+        # Calculate arrow directions for predictions and actual values
+        pred_dx = y_pred[:, 0] - X_test[:, -2]
+        pred_dy = y_pred[:, 1] - X_test[:, -1]
+        actual_dx = y_test[:, 0] - X_test[:, -2]
+        actual_dy = y_test[:, 1] - X_test[:, -1]
+
+        # Plot path
+        # ax.plot(X_test[:, 0], X_test[:, 1], color="black", linestyle="--", label="Path", alpha=0.5)
+
+        # Plot predicted arrows
+        plt.quiver(
+            X_test[:, -2],
+            X_test[:, -1],
+            2 * pred_dx,
+            2 * pred_dy,
+            color="red",
+            label="Predicted",
+        )
+
+        # Plot actual arrows
+        plt.quiver(
+            X_test[:, -2],
+            X_test[:, -1],
+            2 * actual_dx,
+            2 * actual_dy,
+            color="blue",
+            label="Actual",
+        )
+
     else:
         # plot the predicted and actual velocities as arrows from the positions defined in df
         _, Xpos_test, _, _ = train_test_split(
@@ -152,20 +174,25 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
                 color="blue",
             )
 
+    # axis labels
+    plt.xlabel("$x_g$ [m]")
+    plt.ylabel("$y_g$ [m]")
     # min and max x and y values
     plt.xlim([-2, 1.0])
     plt.ylim([-1.5, 2])
+    # equal aspect ratio
+    plt.gca().set_aspect("equal", adjustable="box")
     plt.legend()
     plt.show()
 
 
 def main():
-    is_velocities = True
-    path = os.path.expanduser("~/mml_ws/src/mml_guidance/hardware_data/")
+    is_velocities = False
+    path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
     # print the files in the directory
     if is_velocities:
-        df_vel = pd.read_csv(path + "converted_occlusion_velocities_training_data.csv")
-    df = pd.read_csv(path + "converted_occlusion_training_data.csv")
+        df_vel = pd.read_csv(path + "converted_training_data.csv")
+    df = pd.read_csv(path + "converted_noisy_training_data.csv")
     X = df.iloc[:, :-2].values if not is_velocities else df_vel.iloc[:, :-2].values
     y = df.iloc[:, -2:].values if not is_velocities else df_vel.iloc[:, -2:].values
     X_train, X_test, y_train, y_test = train_test_split(
@@ -177,38 +204,40 @@ def main():
     y_test = torch.from_numpy(y_test.astype(np.float32))
 
     # Define the hyperparameters to tune
-    param_grid = {
-        "input_size": [X_train.shape[1]],
-        "num_layers": [2, 4, 8],
-        "nodes_per_layer": [20, 40, 80],
-    }
+    # param_grid = {
+    #    "input_size": [X_train.shape[1]],
+    #    "num_layers": [2, 4, 8],
+    #    "nodes_per_layer": [20, 40, 80],
+    # }
 
-    ModelClass = SimpleDNN
+    # ModelClass = SimpleDNN
 
-    epochs = 100
-
-    best_params = parameter_search(
-        ModelClass,
-        param_grid,
-        X_train,
-        y_train,
-        X_test,
-        y_test,
-        epochs,
-        weights_filename="occlusion_vel_dnn_best.pth",
-    )
+    # epochs = 100
+    # best_params = parameter_search(
+    #    ModelClass,
+    #    param_grid,
+    #    X_train,
+    #    y_train,
+    #    X_test,
+    #    y_test,
+    #    epochs,
+    #    weights_filename="occlusion_vel_dnn_best.pth",
+    # )
 
     # second figure showing the predicted direction of motion and the actual direction of motion
     model = SimpleDNN(
         input_size=X_train.shape[1],
-        num_layers=best_params["num_layers"],
-        nodes_per_layer=best_params["nodes_per_layer"],
+        num_layers=2,
+        nodes_per_layer=80,
         output_size=2,
         activation_fn="relu",
     )
-    model.load_state_dict(torch.load("occlusion_vel_dnn_best.pth"))
+    model.load_state_dict(
+        torch.load(path + "/../../scripts/mml_network/models/" + "perfect_dnn_best.pth")
+    )
     model.eval()
     y_pred = model(X_test).detach().numpy()
+    X_test = X_test.detach().numpy()
 
     plot_NN_output(X_test, y_pred, y_test, is_velocities, df)
     return 0

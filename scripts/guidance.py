@@ -138,6 +138,9 @@ class Guidance:
             self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
             self.info_gain_pub = rospy.Publisher("info_gain", Float32, queue_size=1)
             self.eer_time_pub = rospy.Publisher("eer_time", Float32, queue_size=1)
+            self.det_cov = rospy.Publisher(
+                "xyTh_estimate_cov_det", Float32, queue_size=1
+            )
             self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
             self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
             self.occ_pub = rospy.Publisher("is_occlusion", Bool, queue_size=1)
@@ -801,6 +804,12 @@ class Guidance:
             entropy_msg = Float32()
             entropy_msg.data = self.Hp_t
             self.entropy_pub.publish(entropy_msg)
+            if self.prediction_method == "KF":
+                # Determinant of the covariance of the estimate
+                det_msg = Float32()
+                det_msg.data = np.linalg.det(self.kf.P[:2, :2])
+                # print("det: ", det_msg.data)
+                self.det_cov.publish(det_msg)
 
     def guidance_pf(self, event=None):
         """Runs the particle (or Kalman) filter loop based on the estimation method"""

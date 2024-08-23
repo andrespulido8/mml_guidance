@@ -61,7 +61,7 @@ class MML_PF_Visualization:
     def __init__(self):
         self.initialization_finished = False
 
-        self.is_sim = rospy.get_param("/is_sim", False)
+        self.is_sim = rospy.get_param("/is_sim", True)
 
         # self.img_cam = mpimg.imread(visualization_path + "/resources/cam.png")
 
@@ -353,6 +353,17 @@ class MML_PF_Visualization:
 
                 # plot the particles
                 # TODO: change from only sampled to all particles
+                # check the particle is not outside of the map, if it is, remove that sampled index
+                self.sampled_index = np.array(
+                    [
+                        i
+                        for i in self.sampled_index
+                        if self.particles[i, 0] < 5.5
+                        and self.particles[i, 0] > -5.5
+                        and self.particles[i, 1] < 7
+                        and self.particles[i, 1] > -7
+                    ]
+                )
                 self.fig_ax1.scatter(
                     self.particles[self.sampled_index, 0],
                     self.particles[self.sampled_index, 1],
@@ -372,6 +383,8 @@ class MML_PF_Visualization:
 
                 # plot spaguetti plots and scatter using the future particles and the sampled index
                 # TODO: change from blue to black
+                self.fig_ax1.axis("equal")
+                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                 if self.plot_prediction:
                     slope = (0.5 - 0.05) / (self.K - 1)
                     for k in range(self.K):
@@ -411,6 +424,8 @@ class MML_PF_Visualization:
                                     alpha=0.2,
                                 )
                             counter += 1
+                            self.fig_ax1.axis("equal")
+                            self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                     self.fig_ax1.scatter(
                         self.fov[0, 0],
                         self.fov[0, 1],
@@ -420,6 +435,8 @@ class MML_PF_Visualization:
                         label="Propagated Particles",
                     )  # fake for legend
 
+                self.fig_ax1.axis("equal")
+                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                 # plot the real position
                 if self.is_sim:
                     self.fig_ax1.plot(

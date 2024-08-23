@@ -10,6 +10,6 @@
     <node name="record" pkg="rosbag" type="record" args="-o $(arg bag_name) /xyTh_estimate
         /n_eff_particles /robot0/odom multirotor/truth/NWU /entropy /err_tracking /err_estimation
 	/eer_time /desired_state /is_update /info_gain /camera/color/image_raw /fov_coord
-	/is_occlusion /noisy_measurement /des_fov_coord /xyTh_predictions"/>
+	/is_occlusion /noisy_measurement /des_fov_coord /xyTh_predictions /xyTh_estimate_cov_det"/>
 
 </launch>
