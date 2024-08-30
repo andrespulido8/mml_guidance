@@ -8,6 +8,7 @@ import torch.nn.functional as F
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=10):
         super().__init__()
+        assert d_model % 2 == 0, "d_model must be even"
         self.dropout = nn.Dropout(p=dropout)
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
@@ -119,6 +120,7 @@ class ScratchTransformer(nn.Module):
         # each token directly reads off the logits for the next token from a lookup table
         self.embed = nn.Linear(input_dim, n_embed).to(device)
         self.position_embedding_table = nn.Embedding(block_size, n_embed).to(device)
+        # self.position_embedding_table  = PositionalEncoding(n_embed, 0.2, max_len=10)
         self.blocks = nn.Sequential(
             *[Block(n_embed, n_head=n_head).to(device) for _ in range(n_layer)]
         )
@@ -143,9 +145,10 @@ class ScratchTransformer(nn.Module):
 
         # src and targets are both (B,T,C) tensors
         src = self.embed(src)
-        B, T, C = src.shape
+        B, T, C = src.shape  # B: batch size, T: time steps, C: embed dimension
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))  # (T,C)
         x = src + pos_emb  # (B,T,C)
+        # x = self.position_embedding_table(src)
         x = self.blocks(x)  # (B,T,C)
         x = self.ln_f(x)  # (B,T,C)
         output = self.lm_head(x)  # (B,T,C)

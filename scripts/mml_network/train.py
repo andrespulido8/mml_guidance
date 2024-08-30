@@ -11,7 +11,6 @@ import seaborn as sns
 import os
 
 from simple_dnn import SimpleDNN
-from simple_transformer import TransformerModel
 from transformer_functions import TransAm
 from scratch_transformer import ScratchTransformer
 
@@ -149,7 +148,7 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
         _, Xpos_test, _, _ = train_test_split(
             df.iloc[:, :-2].values, df.iloc[:, -2:], test_size=0.2, random_state=42
         )
-        arrow_length = 0.33
+        arrow_length = 0.1
         for i in range(Xpos_test.shape[0] - 1):
             plt.arrow(
                 Xpos_test[i, -2],
@@ -187,14 +186,12 @@ def select_model(model_name, input_size):
             output_size=2,
             activation_fn="relu",
         )
-    elif model_name == "TransformerModel":
-        model = TransformerModel(d_model=2, nhead=1, num_layers=2)
     elif model_name == "TransAm":
         print("input size: ", input_size)
-        model = TransAm(in_dim=2, feature_size=10, num_layers=1, dropout=0.01)
+        model = TransAm(in_dim=2, n_embed=10, num_layers=1, n_head=1, dropout=0.01)
     elif model_name == "ScratchTransformer":
         model = ScratchTransformer(
-            input_dim=2, block_size=10, n_embed=5, n_head=1, n_layer=4
+            input_dim=2, block_size=10, n_embed=6, n_head=2, n_layer=2
         )
     else:
         raise ValueError("Invalid model name")
@@ -214,17 +211,17 @@ def select_parameters(model_name, input_size):
             "num_layers": [2, 4, 8],
             "nodes_per_layer": [20, 40, 80],
         }
-    elif model_name == "TransformerModel":
-        param_grid = {
-            "d_model": [2],
-            "nhead": [1, 2, 4],
-            "num_layers": [1, 2, 3],
-        }
     elif model_name == "ScratchTransformer":
         param_grid = {
             "n_embed": [2, 5, 10],
             "n_head": [2, 4],
             "n_layer": [2, 3],
+        }
+    elif model_name == "TransAm":
+        param_grid = {
+            "n_embed": [2, 5, 10],
+            "num_layers": [1, 2],
+            "n_head": [1, 2],
         }
     else:
         raise ValueError("Invalid model name")
@@ -234,8 +231,8 @@ def select_parameters(model_name, input_size):
 
 def main():
     is_velocities = False
-    is_parameter_search = True
-    model_name = "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "TransformerModel"  # "SimpleDNN"
+    is_parameter_search = False
+    model_name = "TransAm"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
     prefix_name = "noisy_"
 
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
@@ -276,7 +273,7 @@ def main():
             + ".pth"
         )
 
-        epochs = 150
+        epochs = 200
         best_params = parameter_search(
             ModelClass,
             param_grid,
@@ -291,7 +288,7 @@ def main():
         model.load_state_dict(torch.load(weights_filename))
     else:
         optimizer = optim.Adam(model.parameters(), lr=4e-3)
-        losslist = train(model, criterion, optimizer, X_train, y_train, epochs=150)
+        losslist = train(model, criterion, optimizer, X_train, y_train, epochs=200)
 
         # plot the loss
         plt.plot(losslist)
