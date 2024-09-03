@@ -6,6 +6,8 @@ import torch.nn.functional as F
 
 
 class PositionalEncoding(nn.Module):
+    """NOT USED currently"""
+
     def __init__(self, d_model, dropout=0.1, max_len=10):
         super().__init__()
         assert d_model % 2 == 0, "d_model must be even"
@@ -25,15 +27,22 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-# hyperparameters
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# ------------
 
 torch.manual_seed(1337)
 
 
 class Head(nn.Module):
-    """one head of self-attention"""
+    """one head of self-attention
+    This module computes the self-attention mechanism on a single head.
+    The self-attention mechanism is a weighted sum of the values, where the
+    weights are computed by a compatibility function of the keys and queries.
+    The compatibility function is the dot product of the keys and queries.
+    The weights are then normalized by a softmax function.
+
+    We apply a trilled mask to the attention scores to prevent the model from
+    attending to the future tokens.
+    """
 
     def __init__(self, head_size, input_dim=2, block_size=10, dropout=0.2):
         super().__init__()
@@ -81,7 +90,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class FeedFoward(nn.Module):
-    """a simple linear layer followed by a non-linearity"""
+    """a simple linear layer followed by a ReLU non-linearity"""
 
     def __init__(self, input_dim, dropout=0.2):
         super().__init__()
@@ -97,7 +106,12 @@ class FeedFoward(nn.Module):
 
 
 class Block(nn.Module):
-    """Transformer block: communication followed by computation"""
+    """Transformer block: communication followed by computation
+
+    The block applies a multi-head self-attention mechanism to its input,
+    followed by a feed-forward neural network. Both the attention and the
+    feed-forward network have residual connections around them.
+    """
 
     def __init__(self, input_dim, n_head):
         # input_dim: embedding dimension, n_head: the number of heads we'd like
@@ -116,6 +130,19 @@ class Block(nn.Module):
 
 class ScratchTransformer(nn.Module):
     def __init__(self, input_dim=2, block_size=10, n_embed=2, n_head=1, n_layer=1):
+        """A simple transformer for time series forecasting.
+        The transformer consists of a stack of blocks, each containing a multi-head self-attention
+        mechanism and a simple feed-forward neural network at the end.
+
+
+        Args:
+            input_dim: number of features in the input
+            block_size: number of time steps in the input
+            n_embed: embedding dimension
+            n_head: number of heads in the multi-head attention
+            n_layer: number of transformer blocks
+
+        """
         super().__init__()
         # each token directly reads off the logits for the next token from a lookup table
         self.embed = nn.Linear(input_dim, n_embed).to(device)
@@ -155,3 +182,12 @@ class ScratchTransformer(nn.Module):
 
         output = output[:, -1, :]  # only return the last time step
         return output
+
+    def predict(self, x):
+        with torch.no_grad():
+            return (
+                self.forward(torch.from_numpy(x.astype(np.float32)).to(device))
+                .cpu()
+                .detach()
+                .numpy()
+            )

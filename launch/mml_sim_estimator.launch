@@ -36,6 +36,12 @@
 	<param name="is_sim" value="$(arg is_simulation)"/>
 	<node pkg="mml_guidance" name="drone_guidance" type="guidance.py" output="screen"/>
 
+	<if value="$(arg is_visualization)">
+        <node pkg="mml_guidance" type="mml_pf_visualization.py" name="mml_pf_visualization" output="screen">
+            <remap from="odom" to="/robot0/odom"/>
+        </node>
+    </if>
+
 	<group ns="robot0">
 		<!-- Launches the turtlebot controller -->
 		<!--<node pkg="turtlebot_pid" name="turtlebot_pid_node" type="turtlebot_pid_node" output="screen"> (Pauls PID)-->

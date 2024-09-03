@@ -1,12 +1,8 @@
-import math
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import pandas as pd
-from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
-import os
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class SimpleDNN(nn.Module):
@@ -40,25 +36,10 @@ class SimpleDNN(nn.Module):
         return self.layers[-1](x)
 
     def predict(self, x):
-        return self.forward(torch.from_numpy(x.astype(np.float32))).detach().numpy()
-
-
-def main():
-    path = os.path.expanduser("~/mml_ws/src/mml_guidance/hardware_data/")
-    # print the files in the directory
-    df = pd.read_csv(path + "converted_occlusion_training_data.csv")
-    X = df.iloc[:, :-2].values
-    y = df.iloc[:, -2:].values
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
-    X_train = torch.from_numpy(X_train.astype(np.float32))
-    X_test = torch.from_numpy(X_test.astype(np.float32))
-    y_train = torch.from_numpy(y_train.astype(np.float32))
-    y_test = torch.from_numpy(y_test.astype(np.float32))
-
-    return 0
-
-
-if __name__ == "__main__":
-    main()
+        with torch.no_grad():
+            return (
+                self.forward(torch.from_numpy(x.astype(np.float32)).to(device))
+                .cpu()
+                .detach()
+                .numpy()
+            )

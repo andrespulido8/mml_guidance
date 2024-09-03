@@ -1,12 +1,10 @@
 import numpy as np
 import rospy
 import rospkg
-from scipy import stats
 import torch
 
-from mml_network import deploy_mml
-from mml_network import simple_dnn
-from mml_network import transformer
+from mml_network.simple_dnn import SimpleDNN
+from mml_network.scratch_transformer import ScratchTransformer
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
@@ -24,32 +22,35 @@ class ParticleFilter:
             self.AVL_dims if not is_sim else np.array([[-3.0, -1.2], [1.0, 2.0]])
         )
 
-        if self.prediction_method == "NN":
+        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
             self.N_th = 10  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
-            # model_file = pkg_path + "/scripts/mml_network/models/current.pth"
-            model_file = pkg_path + "/scripts/mml_network/models/noisy_dnn_best.pth"
             self.is_velocity = False
-            # training_data_filename = pkg_path + "/scripts/mml_network/no_quad_3hz.csv"
-            # self.training_data = np.loadtxt(
-            #    training_data_filename, delimiter=",", skiprows=1
-            # [:, 1:]
-            # self.n_training_samples = self.training_data.shape[0] - self.N_th - 1
-            # self.motion_model = deploy_mml.Motion_Model(model_file)
             self.nn_input_size = (
                 self.N_th * 2 - 2 if self.is_velocity else self.N_th * 2
             )
-            # self.motion_model = transformer.TransformerModel(d_model=16, dim_feedforward=10, nhead=1, num_layers=2)
-            self.motion_model = simple_dnn.SimpleDNN(
-                input_size=self.nn_input_size,
-                num_layers=2,
-                nodes_per_layer=80,
-                output_size=2,
-                activation_fn="relu",
-            )
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if self.prediction_method == "NN":
+                model_file = pkg_path + "/scripts/mml_network/models/noisy_dnn_best.pth"
+                self.motion_model = SimpleDNN(
+                    input_size=self.nn_input_size,
+                    num_layers=2,
+                    nodes_per_layer=80,
+                    output_size=2,
+                    activation_fn="relu",
+                )
+            elif self.prediction_method == "Transformer":
+                model_file = (
+                    pkg_path
+                    + "/scripts/mml_network/models/best_noisy_ScratchTransformer.pth"
+                )
+                self.motion_model = ScratchTransformer(
+                    input_dim=2, block_size=10, n_embed=5, n_head=4, n_layer=2
+                )
+
             # load weights
             self.motion_model.load_state_dict(
-                torch.load(model_file, map_location="cpu")
+                torch.load(model_file, map_location=device)
             )
         else:
             self.N_th = 2
@@ -73,7 +74,7 @@ class ParticleFilter:
             self.Nx = 2
             self.measurement_covariance = np.diag([0.01, 0.01])
             self.process_covariance = np.diag([0.01, 0.01, 0.001, 0.001])
-        elif self.prediction_method == "NN":
+        elif self.prediction_method == "NN" or self.prediction_method == "Transformer":
             self.Nx = 2
 
         if (
@@ -126,7 +127,11 @@ class ParticleFilter:
                 [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
                 (self.N_th, self.N, self.Nx),
             )
-        elif self.prediction_method == "NN" or self.prediction_method == "KF":
+        elif (
+            self.prediction_method == "NN"
+            or self.prediction_method == "KF"
+            or self.prediction_method == "Transformer"
+        ):
             local_particles = np.random.uniform(
                 [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
                 [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
@@ -150,7 +155,7 @@ class ParticleFilter:
         self.measurement_history[-1, :2] = noisy_measurement[:2]
 
         # Prediction step
-        if self.prediction_method == "NN":
+        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
             self.particles = self.predict_mml(np.copy(self.particles))
         elif self.prediction_method == "Unicycle":
             self.measurement_history[-1, 2] = noisy_measurement[2]
@@ -180,7 +185,6 @@ class ParticleFilter:
 
         # Resampling step
         outbounds = self.outside_bounds(self.particles[-1])
-        print("outside bounds: ", outbounds)
         self.neff = self.nEff(self.weights)
         if outbounds > self.N * 0.5:
             # Resample if fraction of particles are outside the lab boundaries

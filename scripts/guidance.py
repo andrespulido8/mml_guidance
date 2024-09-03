@@ -25,7 +25,7 @@ class Guidance:
         self.guidance_mode = (
             "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
-        self.prediction_method = "NN"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
+        self.prediction_method = "Transformer"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -227,7 +227,10 @@ class Guidance:
 
         pred_msg = ParticleArray()
         for k in range(self.K):  # propagate k steps in the future
-            if self.prediction_method == "NN":
+            if (
+                self.prediction_method == "NN"
+                or self.prediction_method == "Transformer"
+            ):
                 future_parts = self.filter.predict_mml(np.copy(future_parts))
             elif self.prediction_method == "Unicycle":
                 future_parts, last_future_time = self.filter.predict(
@@ -539,7 +542,10 @@ class Guidance:
             ).reshape((self.filter.N_th, 1, self.filter.Nx))
             last_future_time = np.copy(self.filter.last_time)
             for k in range(self.K):
-                if self.prediction_method == "NN":
+                if (
+                    self.prediction_method == "NN"
+                    or self.prediction_method == "Transformer"
+                ):
                     future_part = self.filter.predict_mml(future_part)
                 if self.prediction_method == "Unicycle":
                     future_part, last_future_time = self.filter.predict(
@@ -835,7 +841,11 @@ class Guidance:
             self.filter.pf_loop(
                 self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             )
-        elif self.prediction_method == "Velocity" or self.prediction_method == "NN":
+        elif (
+            self.prediction_method == "Velocity"
+            or self.prediction_method == "NN"
+            or self.prediction_method == "Transformer"
+        ):
             self.filter.pf_loop(self.noisy_turtle_pose)
         elif self.prediction_method == "KF":
             self.kf.X[:2] = (

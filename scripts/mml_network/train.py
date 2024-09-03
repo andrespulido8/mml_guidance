@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import math
 import numpy as np
 import torch
@@ -191,7 +192,7 @@ def select_model(model_name, input_size):
         model = TransAm(in_dim=2, n_embed=10, num_layers=1, n_head=1, dropout=0.01)
     elif model_name == "ScratchTransformer":
         model = ScratchTransformer(
-            input_dim=2, block_size=10, n_embed=6, n_head=2, n_layer=2
+            input_dim=2, block_size=10, n_embed=5, n_head=4, n_layer=2
         )
     else:
         raise ValueError("Invalid model name")
@@ -232,7 +233,9 @@ def select_parameters(model_name, input_size):
 def main():
     is_velocities = False
     is_parameter_search = False
-    model_name = "TransAm"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
+    model_name = (
+        "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
+    )
     prefix_name = "noisy_"
 
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
