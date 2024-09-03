@@ -1,5 +1,6 @@
 import numpy as np
-import rospy
+import rclpy
+from rclpy.node import Node
 import rospkg
 import torch
 
@@ -106,7 +107,7 @@ class ParticleFilter:
 
         # Particles to be resampled whether we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
-        self.initial_time = rospy.get_time()
+        self.initial_time = self.get_clock().now().seconds_nanoseconds()[0]
         self.last_time = 0.0
 
     def uniform_sample(self) -> np.ndarray:
@@ -148,7 +149,7 @@ class ParticleFilter:
         """Main function of the particle filter where the predict,
         update, resample and estimate steps are called.
         """
-        t = rospy.get_time() - self.initial_time
+        t = self.get_clock().now().seconds_nanoseconds()[0] - self.initial_time
 
         # update measurement history with noisy_measurement
         self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
@@ -187,8 +188,7 @@ class ParticleFilter:
         outbounds = self.outside_bounds(self.particles[-1])
         self.neff = self.nEff(self.weights)
         if outbounds > self.N * 0.5:
-            # Resample if fraction of particles are outside the lab boundaries
-            rospy.logwarn(
+            self.get_logger().warn(
                 f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
             )
             self.particles = self.uniform_sample()
@@ -320,7 +320,7 @@ class ParticleFilter:
         Input: State of the particles at time k-1
         Output: Predicted (propagated) state of the particles up to time k
         """
-        t = rospy.get_time() - self.initial_time
+        t = self.get_clock().now().seconds_nanoseconds()[0] - self.initial_time
         dt = t - last_time
 
         particles[:-1, :, :] = particles[1:, :, :]  # shift particles in time

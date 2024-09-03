@@ -1,47 +1,59 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import numpy as np
-import rospy
+import rclpy
+from rclpy.node import Node
 from geometry_msgs.msg import Pose, PoseStamped
 from nav_msgs.msg import Odometry
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 
-class MarkovChain:
+class MarkovChain(Node):
     def __init__(self):
+        super().__init__("goal_pose_node")
+
         self.is_time_mode = (
             False  # Change this to False if you want to use distance mode
         )
-
         self.tolerance_radius = 0.2  # meters
 
-        self.init_time = np.array(rospy.get_time())
+        self.init_time = self.get_clock().now().nanoseconds / 1e9
         self.prev_goal_in = 1  # Start at the second state
         self.prev_mult = 0
         self.position = np.array([0, 0])
 
-        # ROS stuff
-        self.is_sim = rospy.get_param("/is_sim", False)
-        rospy.loginfo(
-            "Initializing markov_goal_pose node with parameter is_sim: {}".format(
-                self.is_sim
-            )
+        # ROS parameters
+        self.declare_parameter("is_sim", False)
+        self.is_sim = self.get_parameter("is_sim").get_parameter_value().bool_value
+        self.get_logger().info(
+            f"Initializing markov_goal_pose node with parameter is_sim: {self.is_sim}"
         )
+
+        # QoS profile for better performance
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
         if self.is_sim:
-            self.pose_pub = rospy.Publisher("goal_pose", Pose, queue_size=2)
+            self.pose_pub = self.create_publisher(Pose, "goal_pose", 2)
             self.p = Pose()
-            self.turtle_odom_sub = rospy.Subscriber(
-                "/robot0/odom", Odometry, self.odom_cb, queue_size=1
+            self.turtle_odom_sub = self.create_subscription(
+                Odometry, "/robot0/odom", self.odom_cb, qos_profile
             )
         else:
-            self.pose_pub = rospy.Publisher("goal_pose", PoseStamped, queue_size=2)
+            self.pose_pub = self.create_publisher(PoseStamped, "goal_pose", 2)
             self.p = PoseStamped()
-            self.turtle_odom_sub = rospy.Subscriber(
-                "agent_pose", PoseStamped, self.odom_cb, queue_size=1
+            self.turtle_odom_sub = self.create_subscription(
+                PoseStamped, "agent_pose", self.odom_cb, qos_profile
             )
 
         self.goal_pose_square()
+        node_freq = 10  # Hz
+        self.timer = self.create_timer(1 / node_freq, self.pub_goal_pose)  # 10 Hz
 
     def goal_pose_square(self):
-        """Generates an square of sides 2*k"""
+        """Generates a square of sides 2*k"""
         self.goal_list = []
 
         z = 0  # turtlebot on the ground
@@ -152,7 +164,7 @@ class MarkovChain:
         curr_goal_pose = self.goal_list[self.prev_goal_in]
         if self.is_time_mode:
             time_step = 10  # amount of seconds until next goal pose change if desired
-            now = rospy.get_time() - self.init_time
+            now = self.get_clock().now().nanoseconds / 1e9 - self.init_time
             mult = np.floor(now / time_step)
             # change goal pose if time is greater than time_step
             change = True if mult > self.prev_mult else False
@@ -177,18 +189,16 @@ class MarkovChain:
 
         goal_pose = self.goal_list[curr_goal_in]
         if curr_goal_in != self.prev_goal_in:
-            rospy.logwarn(
-                "New goal pose: x={:.2f}, y={:.2f} with index {}".format(
-                    goal_pose["x"], goal_pose["y"], curr_goal_in
-                )
+            self.get_logger().warn(
+                f"New goal pose: x={goal_pose['x']:.2f}, y={goal_pose['y']:.2f} with index {curr_goal_in}"
             )
 
         # Restart previous values
         self.prev_goal_in = np.copy(curr_goal_in)
         # Publish the goal pose
-        self.create_pose_msg(goal_pose)
+        self.create_pose_msg_and_publish(goal_pose)
 
-    def create_pose_msg(self, goal_pose):
+    def create_pose_msg_and_publish(self, goal_pose):
         if self.is_sim:
             self.p.position.x = goal_pose["x"]
             self.p.position.y = goal_pose["y"]
@@ -205,13 +215,16 @@ class MarkovChain:
             self.p.pose.orientation.y = goal_pose["qy"]
             self.p.pose.orientation.z = goal_pose["qz"]
             self.p.pose.orientation.w = goal_pose["qw"]
+        self.pose_pub.publish(self.p)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    markov_chain = MarkovChain()
+    rclpy.spin(markov_chain)
+    markov_chain.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == "__main__":
-    rospy.init_node("goal_pose_node", anonymous=True)
-    rate = rospy.Rate(10)  # Hz
-    square_chain = MarkovChain()
-    while not rospy.is_shutdown():
-        square_chain.pub_goal_pose()
-        square_chain.pose_pub.publish(square_chain.p)
-        rate.sleep()
+    main()

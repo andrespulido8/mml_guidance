@@ -77,43 +77,43 @@ class MML_PF_Visualization:
 
         # message container
         self.temp_msg = None
-        self.mml_pf_subscriber = rospy.Subscriber(
-            "xyTh_estimate", ParticleMean, self.mml_pf_callback
+        self.mml_pf_subscriber = node.create_subscription(
+            ParticleMean, "xyTh_estimate", self.mml_pf_callback
         )
-        self.sampled_index_subscriber = rospy.Subscriber(
-            "sampled_index", Float32MultiArray, self.si_cb, queue_size=100
+        self.sampled_index_subscriber = node.create_subscription(
+            Float32MultiArray, "sampled_index", self.si_cb, queue_size=100
         )
-        self.mml_pred_pf_subscriber = rospy.Subscriber(
-            "xyTh_predictions", ParticleArray, self.mml_pred_pf_callback
+        self.mml_pred_pf_subscriber = node.create_subscription(
+            ParticleArray, "xyTh_predictions", self.mml_pred_pf_callback
         )
-        self.mml_errEstimate_subscriber = rospy.Subscriber(
-            "err_estimation", geometry_msgs.msg.PointStamped, self.mml_err_callback
+        self.mml_errEstimate_subscriber = node.create_subscription(
+            geometry_msgs.msg.PointStamped, "err_estimation", self.mml_err_callback
         )
-        self.mml_entropy_subscriber = rospy.Subscriber(
-            "entropy", Float32, self.entropy_callback
+        self.mml_entropy_subscriber = node.create_subscription(
+            Float32, "entropy", self.entropy_callback
         )
         if self.is_sim:
-            self.true_position_subscriber = rospy.Subscriber(
-                "odom", Odometry, self.odom_callback
+            self.true_position_subscriber = node.create_subscription(
+                Odometry, "odom", self.odom_callback
             )
             self.mocap_msg = Odometry()
         else:
-            self.true_position_subscriber = rospy.Subscriber(
-                "odom", PoseStamped, self.odom_callback
+            self.true_position_subscriber = node.create_subscription(
+                PoseStamped, "odom", self.odom_callback
             )
             self.mocap_msg = PoseStamped()
-        # self.joy_subscriber = rospy.Subscriber("joy", Joy, self.joy_callback,queue_size=100)
-        self.noisy_measurements_subscriber = rospy.Subscriber(
-            "/noisy_measurement", PointStamped, self.measurement_callback
+        # self.joy_subscriber = node.create_subscription(Joy, "joy", self.joy_callback,queue_size=100)
+        self.noisy_measurements_subscriber = node.create_subscription(
+            PointStamped, "/noisy_measurement", self.measurement_callback
         )
-        self.update_subscriber = rospy.Subscriber(
-            "is_update", Bool, self.upd_callback, queue_size=100
+        self.update_subscriber = node.create_subscription(
+            Bool, "is_update", self.upd_callback, queue_size=100
         )
-        self.fov_subscriber = rospy.Subscriber(
-            "fov_coord", Float32MultiArray, self.fov_callback, queue_size=100
+        self.fov_subscriber = node.create_subscription(
+            Float32MultiArray, "fov_coord", self.fov_callback, queue_size=100
         )
-        self.des_fov_subscriber = rospy.Subscriber(
-            "des_fov_coord", Float32MultiArray, self.des_fov_callback, queue_size=100
+        self.des_fov_subscriber = node.create_subscription(
+            Float32MultiArray, "des_fov_coord", self.des_fov_callback, queue_size=100
         )
 
         # initializa matlplotlib figure ui
@@ -642,7 +642,8 @@ class MML_PF_Visualization:
 
 
 if __name__ == "__main__":
-    rospy.init_node("mml_pf_visualization", anonymous=False)
+    rclpy.init()
+    node = rclpy.create_node("mml_pf_visualization", anonymous=False)
     mml_pf_visualization = MML_PF_Visualization()
 
     while not rospy.is_shutdown():

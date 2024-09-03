@@ -40,20 +40,18 @@ class Spaguetti:
             f"Initializing spaguetti node with parameter in prediction method: {self.prediction_method}"
         )
 
-        self.mag_pg_subscriber = rospy.Subscriber(
-            "xyTh_estimate", ParticleMean, self.pf_cb
+        self.mag_pg_subscriber = node.create_subscription(ParticleMean,
+            "xyTh_estimate", self.pf_cb
         )
 
         self.particle_pub = [
-            rospy.Publisher("future_parts1", ParticleMean, queue_size=1),
-            rospy.Publisher("future_parts2", ParticleMean, queue_size=1),
-            rospy.Publisher("future_parts3", ParticleMean, queue_size=1),
-            rospy.Publisher("future_parts4", ParticleMean, queue_size=1),
-            rospy.Publisher("future_parts5", ParticleMean, queue_size=1),
+            node.create_publisher(ParticleMean, 1, "future_parts1"),
+            node.create_publisher(ParticleMean, 1, "future_parts2"),
+            node.create_publisher(ParticleMean, 1, "future_parts3"),
+            node.create_publisher(ParticleMean, 1, "future_parts4"),
+            node.create_publisher(ParticleMean, 1, "future_parts5"),
         ]
-        self.sampled_index_pub = rospy.Publisher(
-            "sampled_index", Float32MultiArray, queue_size=1
-        )
+        self.sampled_index_pub = node.create_publisher(Float32MultiArray, 1, "sampled_index")
 
         rospy.loginfo("Number of particles for the Bayes Filter: %d", self.N)
         rospy.sleep(0.1)
@@ -130,7 +128,8 @@ class Spaguetti:
 
 
 if __name__ == "__main__":
-    rospy.init_node("spaguetti", anonymous=True)
+    rclpy.init()
+    node = rclpy.create_node("spaguetti", anonymous=True)
     guidance = Spaguetti()
 
     time_to_shutdown = 2000

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import numpy as np
-import rospy
+import rclpy
+from rclpy.node import Node
+import time
 import scipy.stats as stats
 import os
 from geometry_msgs.msg import PointStamped, PoseStamped
@@ -16,11 +18,16 @@ from rosflight_msgs.msg import RCRaw
 from std_msgs.msg import Bool, Float32, Float32MultiArray
 
 
-class Guidance:
+class Guidance(Node):
     def __init__(self):
+        super().__init__("guidance")
         self.init_finished = False
-        self.is_sim = rospy.get_param("/is_sim", False)
-        self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
+        self.is_sim = (
+            self.declare_parameter("is_sim", False).get_parameter_value().bool_value
+        )
+        self.is_viz = (
+            self.declare_parameter("is_viz", False).get_parameter_value().bool_value
+        )  # true to visualize plots
 
         self.guidance_mode = (
             "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
@@ -35,7 +42,7 @@ class Guidance:
         self.linear_velocity = np.array([0.0, 0.0])
         self.angular_velocity = np.array([0.0])
         deg2rad = lambda deg: np.pi * deg / 180
-        self.initial_time = rospy.get_time()
+        self.initial_time = self.get_clock().now().seconds_nanoseconds()[0]
 
         ## PARTICLE FILTER  ##
         self.N = 500  # Number of particles
@@ -52,9 +59,9 @@ class Guidance:
         # Number of future measurements per sampled particle to consider in EER
         # self.N_m = 1  # not implemented yet
         self.N_s = 25  # Number of sampled particles
-        rospy.set_param("/num_sampled_particles", self.N_s)
+        self.declare_parameter("num_sampled_particles", self.N_s)
         self.K = 4  # Time steps to propagate in the future for EER
-        rospy.set_param("/predict_window", self.K)
+        self.declare_parameter("predict_window", self.K)
         self.Hp_t = 1.0  # partial entropy
         self.prev_Hp = np.ones((5, 1))
         self.EER_range = np.array([0, 0, 0])
@@ -68,7 +75,7 @@ class Guidance:
         # Occlusions
         occ_widths = [1, 1]
         occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
-        rospy.set_param("/occlusions", [occ_centers, occ_widths])
+        self.declare_parameter("occlusions", [occ_centers, occ_widths])
         self.occlusions = [
             Occlusions(occ_centers[i], occ_widths[i]) for i in range(len(occ_widths))
         ]
@@ -89,68 +96,64 @@ class Guidance:
             )
 
         # ROS stuff
-        rospy.loginfo(
+        self.get_logger().info(
             f"Initializing guidance node with parameter is_sim: {self.is_sim}"
         )
-        rospy.loginfo(f"...and parameter is_viz: {self.is_viz}")
-        rospy.loginfo(f"Quadcopter in guidance mode: {self.guidance_mode}")
-        rospy.loginfo(f"... and in prediction method: {self.prediction_method}")
-        self.pose_pub = rospy.Publisher("desired_state", DesiredState, queue_size=1)
-        self.err_tracking_pub = rospy.Publisher(
-            "err_tracking", PointStamped, queue_size=1
+        self.get_logger().info(f"...and parameter is_viz: {self.is_viz}")
+        self.get_logger().info(f"Quadcopter in guidance mode: {self.guidance_mode}")
+        self.get_logger().info(
+            f"... and in prediction method: {self.prediction_method}"
         )
 
+        self.pose_pub = self.create_publisher(DesiredState, "desired_state", 1)
+        self.err_tracking_pub = self.create_publisher(PointStamped, "err_tracking", 1)
+
         if self.is_sim:
-            self.turtle_odom_sub = rospy.Subscriber(
-                "/robot0/odom", Odometry, self.turtle_odom_cb, queue_size=1
+            self.turtle_odom_sub = self.create_subscription(
+                Odometry, "/robot0/odom", self.turtle_odom_cb, 1
             )
-            self.quad_odom_sub = rospy.Subscriber(
-                "/pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
+            self.quad_odom_sub = self.create_subscription(
+                PoseStamped, "/pose_stamped", self.quad_odom_cb, 1
             )
         else:
-            self.quad_odom_sub = rospy.Subscriber(
-                "/quad_pose_stamped", PoseStamped, self.quad_odom_cb, queue_size=1
+            self.quad_odom_sub = self.create_subscription(
+                PoseStamped, "/quad_pose_stamped", self.quad_odom_cb, 1
             )
-            self.turtle_odom_sub = rospy.Subscriber(
-                "/turtle_pose_stamped", PoseStamped, self.turtle_odom_cb, queue_size=1
+            self.turtle_odom_sub = self.create_subscription(
+                PoseStamped, "/turtle_pose_stamped", self.turtle_odom_cb, 1
             )
-            self.turtle_odom_sub = rospy.Subscriber(
-                "/odom", Odometry, self.turtle_hardware_odom_cb, queue_size=1
+            self.turtle_odom_sub = self.create_subscription(
+                Odometry, "/odom", self.turtle_hardware_odom_cb, 1
             )
-            self.rc_sub = rospy.Subscriber("rc_raw", RCRaw, self.rc_cb, queue_size=1)
+            self.rc_sub = self.create_subscription(RCRaw, "rc_raw", self.rc_cb, 1)
 
         if self.is_viz:
-            self.particle_pub = rospy.Publisher(
-                "xyTh_estimate", ParticleMean, queue_size=1
+            self.particle_pub = self.create_publisher(ParticleMean, "xyTh_estimate", 1)
+            self.particle_pred_pub = self.create_publisher(
+                ParticleArray, "xyTh_predictions", 1
             )
-            self.particle_pred_pub = rospy.Publisher(
-                "xyTh_predictions", ParticleArray, queue_size=1
+            self.sampled_index_pub = self.create_publisher(
+                Float32MultiArray, "sampled_index", 1
             )
-            self.sampled_index_pub = rospy.Publisher(
-                "sampled_index", Float32MultiArray, queue_size=1
+            self.err_estimation_pub = self.create_publisher(
+                PointStamped, "err_estimation", 1
             )
-            self.err_estimation_pub = rospy.Publisher(
-                "err_estimation", PointStamped, queue_size=1
+            self.meas_pub = self.create_publisher(PointStamped, "noisy_measurement", 1)
+            self.entropy_pub = self.create_publisher(Float32, "entropy", 1)
+            self.info_gain_pub = self.create_publisher(Float32, "info_gain", 1)
+            self.eer_time_pub = self.create_publisher(Float32, "eer_time", 1)
+            self.det_cov_pub = self.create_publisher(
+                Float32, "xyTh_estimate_cov_det", 1
             )
-            self.meas_pub = rospy.Publisher(
-                "noisy_measurement", PointStamped, queue_size=1
-            )
-            self.entropy_pub = rospy.Publisher("entropy", Float32, queue_size=1)
-            self.info_gain_pub = rospy.Publisher("info_gain", Float32, queue_size=1)
-            self.eer_time_pub = rospy.Publisher("eer_time", Float32, queue_size=1)
-            self.det_cov = rospy.Publisher(
-                "xyTh_estimate_cov_det", Float32, queue_size=1
-            )
-            self.n_eff_pub = rospy.Publisher("n_eff_particles", Float32, queue_size=1)
-            self.update_pub = rospy.Publisher("is_update", Bool, queue_size=1)
-            self.occ_pub = rospy.Publisher("is_occlusion", Bool, queue_size=1)
-            self.fov_pub = rospy.Publisher("fov_coord", Float32MultiArray, queue_size=1)
-            self.des_fov_pub = rospy.Publisher(
-                "des_fov_coord", Float32MultiArray, queue_size=1
+            self.n_eff_pub = self.create_publisher(Float32, "n_eff_particles", 1)
+            self.update_pub = self.create_publisher(Bool, "is_update", 1)
+            self.occ_pub = self.create_publisher(Bool, "is_occlusion", 1)
+            self.fov_pub = self.create_publisher(Float32MultiArray, "fov_coord", 1)
+            self.des_fov_pub = self.create_publisher(
+                Float32MultiArray, "des_fov_coord", 1
             )
 
-        rospy.loginfo("Number of particles for the Bayes Filter: %d", self.N)
-        rospy.sleep(0.1)
+        self.get_logger().info("Number of particles for the Bayes Filter: %d" % self.N)
         self.init_finished = True
 
     def current_entropy(self, event=None) -> None:
@@ -158,7 +161,7 @@ class Guidance:
         Equation changes if there is a measurement available. See paper for reference
         We sample the particle distribution to reduce computation time.
         Output: Hp_t (float) - entropy of the current distribution"""
-        t = rospy.get_time() - self.initial_time
+        t = self.get_clock().now().seconds_nanoseconds()[0] - self.initial_time
 
         prev_Hp = np.copy(self.Hp_t)
 
@@ -205,7 +208,9 @@ class Guidance:
         self.prev_Hp = np.roll(self.prev_Hp, -1, axis=0)
         self.prev_Hp[-1, :2] = Hp_t
 
-        entropy_time = rospy.get_time() - t - self.initial_time
+        entropy_time = (
+            self.get_clock().now().seconds_nanoseconds()[0] - t - self.initial_time
+        )
         # print("Entropy time: ", entropy_time)
 
     def information_driven_guidance(self, event=None):
@@ -217,7 +222,7 @@ class Guidance:
         eer_particle: the index of the particle that maximizes the EER which
         we propagate to choose the goal position
         """
-        now = rospy.get_time() - self.initial_time
+        now = self.get_clock().now().seconds_nanoseconds()[0] - self.initial_time
         # Initialize variables
         future_weight = np.zeros((self.N_s, self.N_s))
         Hp_k = np.zeros(self.N_s)  # partial entropy
@@ -307,7 +312,9 @@ class Guidance:
         self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
         # print("EER: ", EER)
 
-        self.t_EER = rospy.get_time() - self.initial_time - now
+        self.t_EER = (
+            self.get_clock().now().seconds_nanoseconds()[0] - self.initial_time - now
+        )
         # print("EER time: ", self.t_EER)
 
         self.eer_particle = self.sampled_index[action_index]
@@ -384,7 +391,7 @@ class Guidance:
                 # print('like_meas std: ', like_meas.std())
 
                 if np.isinf(np.log(np.nansum(like_meas * prev_wgts))):
-                    rospy.logwarn(
+                    self.get_logger().warn(
                         "first term of entropy is -inf. Likelihood is very small"
                     )
         else:
@@ -857,14 +864,15 @@ class Guidance:
             ) if self.filter.is_update else None
             self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
 
-    def shutdown(self, event=None):
+    def shutdown(self):
         # Stop the node when shutdown is called
-        rospy.logfatal("Timer expired or user terminated. Stopping the node...")
-        rospy.sleep(0.1)
-        # rospy.signal_shutdown("Timer signal shutdown")
-        # os.system("rosnode kill other_node")
-        os.system("rosnode kill drone_guidance mml_pf_visualization")
-        # os.system("rosservice call /gazebo/reset_world")
+        self.get_logger().fatal(
+            "Timer expired or user terminated. Stopping the node..."
+        )
+        time.sleep(0.1)
+        # Use ROS2 service to kill nodes
+        os.system("ros2 lifecycle set /drone_guidance shutdown")
+        os.system("ros2 lifecycle set /mml_pf_visualization shutdown")
 
 
 class Occlusions:
@@ -876,24 +884,37 @@ class Occlusions:
         self.widths = widths
 
 
-if __name__ == "__main__":
-    rospy.init_node("guidance", anonymous=True)
+def main(args=None):
+    rclpy.init(args=args)
     guidance = Guidance()
 
-    time_to_shutdown = 90
-    rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
-    rospy.on_shutdown(guidance.shutdown)
+    time_to_shutdown = 90  # in seconds
+    guidance.create_timer(time_to_shutdown, guidance.shutdown, oneshot=True)
+    rclpy.on_shutdown(guidance.shutdown)
 
     # Running functions at a certain rate
-    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.guidance_pf)
-    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
+    guidance.create_timer(1.0 / 3.0, guidance.guidance_pf)
+    guidance.create_timer(1.0 / 3.0, guidance.current_entropy)
+
     if guidance.guidance_mode == "Information":
-        rospy.Timer(rospy.Duration(1.0 / 2.5), guidance.information_driven_guidance)
+        guidance.create_timer(1.0 / 2.5, guidance.information_driven_guidance)
 
     # Publish topics
-    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.get_goal_position)
-    if guidance.is_viz:
-        rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_pf)
-    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_desired_state)
+    guidance.create_timer(1.0 / 3.0, guidance.get_goal_position)
 
-    rospy.spin()
+    if guidance.is_viz:
+        guidance.create_timer(1.0 / 3.0, guidance.pub_pf)
+
+    guidance.create_timer(1.0 / 3.0, guidance.pub_desired_state)
+
+    try:
+        rclpy.spin(guidance)
+    except KeyboardInterrupt:
+        guidance.shutdown()
+    finally:
+        guidance.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.5)
 project(mml_guidance)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
@@ -7,17 +7,18 @@ project(mml_guidance)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS
-  geometry_msgs
-  nav_msgs
-  reef_msgs
-  roscpp
-  rospy
-)
+
+find_package(rosidl_default_generators REQUIRED)
+find_package(ament_cmake REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(reef_msgs REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclpy REQUIRED)
+set(CMAKE_CXX_STANDARD 1 4)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -54,13 +55,15 @@ find_package(catkin REQUIRED COMPONENTS
 #   Message1.msg
 #   Message2.msg
 # )
-add_message_files(
-    FILES
-    Particle.msg
-    ParticleMean.msg
-    ParticleArray.msg
-)
 
+rosidl_generate_interfaces(
+    ${PROJECT_NAME}
+        msg/ParticleArray.msg
+        msg/Particle.msg
+        msg/ParticleMean.msg
+    DEPENDENCIES
+
+)
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -77,10 +80,6 @@ add_message_files(
 # )
 
 ## Generate added messages and services with any dependencies listed here
-generate_messages(
-  DEPENDENCIES
-  std_msgs  # Or other packages containing msgs
-)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -111,14 +110,6 @@ generate_messages(
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES mml
-#  CATKIN_DEPENDS gazebo roscpp rospy
-#  DEPENDS system_lib
-  CATKIN_DEPENDS message_runtime
-
-)
 
 ###########
 ## Build ##
@@ -128,7 +119,7 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
-  ${catkin_INCLUDE_DIRS}
+
 )
 
 ## Declare a C++ library
@@ -215,3 +206,4 @@ include_directories(
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+ament_package()
