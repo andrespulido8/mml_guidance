@@ -1,15 +1,16 @@
 import numpy as np
-import rclpy
 from rclpy.node import Node
-import rospkg
+from rclpy.clock import Clock, ClockType
+from ament_index_python.packages import get_package_share_directory
 import torch
 
-from mml_network.simple_dnn import SimpleDNN
-from mml_network.scratch_transformer import ScratchTransformer
+from .mml_network.simple_dnn import SimpleDNN
+from .mml_network.scratch_transformer import ScratchTransformer
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
 
+clock = Clock(clock_type=ClockType.ROS_TIME)
 
 class ParticleFilter:
     def __init__(self, num_particles=10, prediction_method="NN", is_sim=False):
@@ -22,17 +23,16 @@ class ParticleFilter:
         self.AVL_dims = (
             self.AVL_dims if not is_sim else np.array([[-3.0, -1.2], [1.0, 2.0]])
         )
-
-        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
+        if self.prediction_method == "NN" or self.prediction_method == "Transformer": 
             self.N_th = 10  # Number of time history particles
-            pkg_path = rospkg.RosPack().get_path("mml_guidance")
+            pkg_path = get_package_share_directory('mml_guidance')
             self.is_velocity = False
             self.nn_input_size = (
                 self.N_th * 2 - 2 if self.is_velocity else self.N_th * 2
             )
             device = "cuda" if torch.cuda.is_available() else "cpu"
             if self.prediction_method == "NN":
-                model_file = pkg_path + "/scripts/mml_network/models/noisy_dnn_best.pth"
+                model_file = "/home/basestation/base_ws/src/mml_guidance/mml_guidance/mml_network/models/best_noisy_SimpleDNN.pth"
                 self.motion_model = SimpleDNN(
                     input_size=self.nn_input_size,
                     num_layers=2,
@@ -41,10 +41,7 @@ class ParticleFilter:
                     activation_fn="relu",
                 )
             elif self.prediction_method == "Transformer":
-                model_file = (
-                    pkg_path
-                    + "/scripts/mml_network/models/best_noisy_ScratchTransformer.pth"
-                )
+                model_file = "/home/basestation/base_ws/src/mml_guidance/mml_guidance/mml_network/models/best_noisy_ScratchTransformer.pth"
                 self.motion_model = ScratchTransformer(
                     input_dim=2, block_size=10, n_embed=5, n_head=4, n_layer=2
                 )
@@ -107,7 +104,7 @@ class ParticleFilter:
 
         # Particles to be resampled whether we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
-        self.initial_time = self.get_clock().now().seconds_nanoseconds()[0]
+        self.initial_time = clock.now().seconds_nanoseconds()[0] 
         self.last_time = 0.0
 
     def uniform_sample(self) -> np.ndarray:
@@ -149,7 +146,7 @@ class ParticleFilter:
         """Main function of the particle filter where the predict,
         update, resample and estimate steps are called.
         """
-        t = self.get_clock().now().seconds_nanoseconds()[0] - self.initial_time
+        t = clock.now().seconds_nanoseconds()[0] - self.initial_time
 
         # update measurement history with noisy_measurement
         self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
@@ -188,7 +185,7 @@ class ParticleFilter:
         outbounds = self.outside_bounds(self.particles[-1])
         self.neff = self.nEff(self.weights)
         if outbounds > self.N * 0.5:
-            self.get_logger().warn(
+            print(
                 f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
             )
             self.particles = self.uniform_sample()
@@ -231,7 +228,7 @@ class ParticleFilter:
                     self.resample()
 
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
-        # print("PF time: ", rospy.get_time() - t - self.initial_time)
+        # print("PF time: ", self.get_clock().now().seconds_nanoseconds()[0] - t - self.initial_time)
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief (weights) of the particle distribution.
@@ -320,7 +317,7 @@ class ParticleFilter:
         Input: State of the particles at time k-1
         Output: Predicted (propagated) state of the particles up to time k
         """
-        t = self.get_clock().now().seconds_nanoseconds()[0] - self.initial_time
+        t = clock.now().seconds_nanoseconds()[0] - self.initial_time
         dt = t - last_time
 
         particles[:-1, :, :] = particles[1:, :, :]  # shift particles in time

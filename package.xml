@@ -1,28 +1,20 @@
 <?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>mml_guidance</name>
   <version>0.0.0</version>
-  <description>The mml package</description>
-
-  <maintainer email="andrespulido@ufl.edu">andrespulido</maintainer>
+  <description>TODO: Package description</description>
+  <maintainer email="basestation@todo.todo">basestation</maintainer>
   <license>MIT</license>
-
-  <!-- ROS2 requires a build tool dependency on ament_cmake -->
-  <buildtool_depend>ament_cmake</buildtool_depend>
-
-  <!-- Build dependencies -->
-  <build_depend>geometry_msgs</build_depend>
-  <build_depend>nav_msgs</build_depend>
-  <build_depend>reef_msgs</build_depend>
-
-  <!-- Dependencies needed at runtime -->
+  <exec_depend>mml_guidance_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>reef_msgs</exec_depend>
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
-  <!-- Export section: ament package configuration -->
   <export>
-    <build_type>ament_cmake</build_type>
+    <build_type>ament_python</build_type>
   </export>
-  <member_of_group>rosidl_interface_packages</member_of_group>
 </package>

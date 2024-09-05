@@ -9,7 +9,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 class MarkovChain(Node):
     def __init__(self):
-        super().__init__("goal_pose_node")
+        super().__init__("markov_goal_pose")
 
         self.is_time_mode = (
             False  # Change this to False if you want to use distance mode
@@ -45,7 +45,10 @@ class MarkovChain(Node):
             self.pose_pub = self.create_publisher(PoseStamped, "goal_pose", 2)
             self.p = PoseStamped()
             self.turtle_odom_sub = self.create_subscription(
-                PoseStamped, "agent_pose", self.odom_cb, qos_profile
+                msg_type=PoseStamped,
+                topic="/" + "leo" + "/enu/pose",
+                callback=self.odom_cb,
+                qos_profile=1,
             )
 
         self.goal_pose_square()
@@ -56,8 +59,8 @@ class MarkovChain(Node):
         """Generates a square of sides 2*k"""
         self.goal_list = []
 
-        z = 0  # turtlebot on the ground
-        qx = qy = 0  # no roll or pitch
+        z = 0.  # turtlebot on the ground
+        qx = qy = 0.  # no roll or pitch
         k = 0.8  # Multiplier  change this to make square bigger or smaller
         x_offset = -1.25  # change this to not crash to the net
         y_offset = 0.2
@@ -69,8 +72,8 @@ class MarkovChain(Node):
                 "z": z,
                 "qx": qx,
                 "qy": qy,
-                "qz": 0,
-                "qw": 1,
+                "qz": 0.,
+                "qw": 1.,
             }
         )
         self.goal_list.append(
@@ -93,8 +96,8 @@ class MarkovChain(Node):
                 "z": z,
                 "qx": qx,
                 "qy": qy,
-                "qz": 0,
-                "qw": 1,
+                "qz": 0.,
+                "qw": 1.,
             }
         )  # 0 degrees orientation
         self.goal_list.append(
@@ -117,8 +120,8 @@ class MarkovChain(Node):
                 "z": z,
                 "qx": qx,
                 "qy": qy,
-                "qz": 1,
-                "qw": 0,
+                "qz": 1.,
+                "qw": 0.,
             }
         )  # 180 degrees orientation
         self.goal_list.append(
@@ -129,8 +132,8 @@ class MarkovChain(Node):
                 "z": z,
                 "qx": qx,
                 "qy": qy,
-                "qz": 1,
-                "qw": 0,
+                "qz": 1.,
+                "qw": 0.,
             }
         )  # 180 degrees orientation
         self.n_states = len(self.goal_list)

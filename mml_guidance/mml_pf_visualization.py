@@ -1,21 +1,16 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-import geometry_msgs.msg
-from nav_msgs.msg import Odometry
-from mml_guidance.msg import Particle, ParticleMean, ParticleArray
-import rospy
-from std_msgs.msg import Bool, Float32, Float32MultiArray
+import rclpy
+from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, PointStamped
+from nav_msgs.msg import Odometry
+from mml_guidance_msgs.msg import Particle, ParticleMean, ParticleArray
+from std_msgs.msg import Bool, Float32, Float32MultiArray
 import matplotlib.pyplot as plt
 import matplotlib
-import matplotlib.image
 import numpy as np
 import math
 import matplotlib.gridspec as gridspec
-from tf.transformations import euler_from_quaternion
-
-# from sensor_msgs.msg import Joy
-
 
 def euler_from_quaternion(x, y, z, w):
     """
@@ -39,10 +34,8 @@ def euler_from_quaternion(x, y, z, w):
 
     return roll_x, pitch_y, yaw_z  # in radians
 
-
 # extend the display of the visualization in some part of the screen
 def move_figure(f, x, y):
-
     """Move figure's upper left corner to pixel (x, y)"""
     backend = matplotlib.get_backend()
     if backend == "TkAgg":
@@ -51,112 +44,95 @@ def move_figure(f, x, y):
         f.canvas.manager.window.SetPosition((x, y))
     else:
         # This works for QT and GTK
-
-        # You can also use window.setGeometry
         f.canvas.manager.window.move(x, y)
     f.set_size_inches(19, 24.0)
 
-
-class MML_PF_Visualization:
+class MMLPFVisualization(Node):
     def __init__(self):
+        super().__init__('mml_pf_visualization')
+
         self.initialization_finished = False
+        self.is_sim = self.declare_parameter("is_sim", False).get_parameter_value().bool_value
+        self.declare_parameter("occlusion_widths", [0,0])
+        self.declare_parameter("occlusion_centers", [0,0,0,0])
 
-        self.is_sim = rospy.get_param("/is_sim", True)
-
-        # self.img_cam = mpimg.imread(visualization_path + "/resources/cam.png")
-
-        # number of real time data plotted in matplotlib
         self.data_size = 200
         self.update_size = 6
 
-        # as the spin function is call by an infinite loop in the file _pf_visualization_node, you can define the rate of this loop with and then add
-        self.loop_rate = rospy.Rate(100)
+        # ROS2 equivalent to rospy.Rate
+        self.loop_rate = self.create_rate(100)
 
-        # generation an interactive matplotlib visualization
-        plt.ion()  ## Note this correction
+        plt.ion()  # Interactive mode
 
-        # message container
-        self.temp_msg = None
-        self.mml_pf_subscriber = node.create_subscription(
-            ParticleMean, "xyTh_estimate", self.mml_pf_callback
+        # Creating subscribers
+        self.mml_pf_subscriber = self.create_subscription(
+            ParticleMean, "xyTh_estimate", self.mml_pf_callback, 10
         )
-        self.sampled_index_subscriber = node.create_subscription(
-            Float32MultiArray, "sampled_index", self.si_cb, queue_size=100
+        self.sampled_index_subscriber = self.create_subscription(
+            Float32MultiArray, "sampled_index", self.si_cb, 10
         )
-        self.mml_pred_pf_subscriber = node.create_subscription(
-            ParticleArray, "xyTh_predictions", self.mml_pred_pf_callback
+        self.mml_pred_pf_subscriber = self.create_subscription(
+            ParticleArray, "xyTh_predictions", self.mml_pred_pf_callback, 10
         )
-        self.mml_errEstimate_subscriber = node.create_subscription(
-            geometry_msgs.msg.PointStamped, "err_estimation", self.mml_err_callback
+        self.mml_errEstimate_subscriber = self.create_subscription(
+            PointStamped, "err_estimation", self.mml_err_callback, 10
         )
-        self.mml_entropy_subscriber = node.create_subscription(
-            Float32, "entropy", self.entropy_callback
+        self.mml_entropy_subscriber = self.create_subscription(
+            Float32, "entropy", self.entropy_callback, 10
         )
         if self.is_sim:
-            self.true_position_subscriber = node.create_subscription(
-                Odometry, "odom", self.odom_callback
+            self.true_position_subscriber = self.create_subscription(
+                Odometry, "odom", self.odom_callback, 10
             )
             self.mocap_msg = Odometry()
         else:
-            self.true_position_subscriber = node.create_subscription(
-                PoseStamped, "odom", self.odom_callback
+            self.true_position_subscriber = self.create_subscription(
+                PoseStamped, "odom", self.odom_callback, 10
             )
             self.mocap_msg = PoseStamped()
-        # self.joy_subscriber = node.create_subscription(Joy, "joy", self.joy_callback,queue_size=100)
-        self.noisy_measurements_subscriber = node.create_subscription(
-            PointStamped, "/noisy_measurement", self.measurement_callback
+        self.noisy_measurements_subscriber = self.create_subscription(
+            PointStamped, "/noisy_measurement", self.measurement_callback, 10
         )
-        self.update_subscriber = node.create_subscription(
-            Bool, "is_update", self.upd_callback, queue_size=100
+        self.update_subscriber = self.create_subscription(
+            Bool, "is_update", self.upd_callback, 10
         )
-        self.fov_subscriber = node.create_subscription(
-            Float32MultiArray, "fov_coord", self.fov_callback, queue_size=100
+        self.fov_subscriber = self.create_subscription(
+            Float32MultiArray, "fov_coord", self.fov_callback, 10
         )
-        self.des_fov_subscriber = node.create_subscription(
-            Float32MultiArray, "des_fov_coord", self.des_fov_callback, queue_size=100
+        self.des_fov_subscriber = self.create_subscription(
+            Float32MultiArray, "des_fov_coord", self.des_fov_callback, 10
         )
 
-        # initializa matlplotlib figure ui
-        fig = plt.figure()
-        fig2 = plt.figure()
-        # define 6 plot holder
+        # Initialize matplotlib figure UI
+        self.fig = plt.figure()
+        self.fig2 = plt.figure()
         gs = gridspec.GridSpec(ncols=3, nrows=3)
+        move_figure(self.fig, 0, 0)
 
-        # move the figure to the top left part of the screen
-        move_figure(fig, 0, 0)
-
-        # initialize subplot in the matplotlib figure
-        self.fig_ax1 = fig.add_subplot(gs[:, :])
+        self.fig_ax1 = self.fig.add_subplot(gs[:, :])
         self.fig_ax1.set_title("Map")
-        self.fig_ax2 = fig2.add_subplot(gs[0, 1])
+        self.fig_ax2 = self.fig2.add_subplot(gs[0, 1])
         self.fig_ax2.set_title("Est x vs Real x")
-        self.fig_ax3 = fig2.add_subplot(gs[1, 1])
+        self.fig_ax3 = self.fig2.add_subplot(gs[1, 1])
         self.fig_ax3.set_title("Est y vs Real y")
-        self.fig_ax4 = fig2.add_subplot(gs[2, 1])
-        self.fig_ax4.set_title("Est y vs Real y")
-        self.fig_ax5 = fig2.add_subplot(gs[:, 2])
+        self.fig_ax4 = self.fig2.add_subplot(gs[2, 1])
+        self.fig_ax4.set_title("Est yaw vs Real yaw")
+        self.fig_ax5 = self.fig2.add_subplot(gs[:, 2])
         self.fig_ax5.set_title("Entropy")
 
-        # set the map image boundaries and resize it to respect aspect ratio
         self.fig_ax1.axis("equal")
         self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
 
-        # initialize data structure
-        # estimate error lists to plot respective to timestamp
         self.xErrList = []
         self.yErrList = []
         self.yawErrList = []
         self.timestamplist = []
 
-        # entropty list to plot respective to timestamp
         self.entropyList = []
-
-        # real position of the robot using mocap posestamped and its timestamp
         self.xReallist = []
         self.yReallist = []
         self.yawReallist = []
         self.timestampReallist = []
-        # self.joy_msg = Joy()
         self.update_msg = Bool()
         self.measurement_msg = None
         self.update_msg.data = True
@@ -165,8 +141,8 @@ class MML_PF_Visualization:
         self.fov = np.zeros((5, 2))
         self.des_fov = np.zeros((5, 2))
         self.particles = np.zeros((1, 2))
-        self.K = rospy.get_param("/predict_window", 4)
-        self.N_s = rospy.get_param("/num_sampled_particles", 25)
+        self.K = self.declare_parameter("predict_window", 4).get_parameter_value().integer_value
+        self.N_s = self.declare_parameter("num_sampled_particles", 25).get_parameter_value().integer_value
         self.future_parts = np.zeros((self.K, self.N_s, 2))
         self.plot_prediction = False
         self.sampled_index = np.arange(self.N_s)
@@ -176,8 +152,9 @@ class MML_PF_Visualization:
         self.yaw_sigmaList = []
 
         # Road Network
-        self.road_network = rospy.get_param("/road_network", None)
-        if self.road_network == None:
+        #self.road_network = self.declare_parameter("road_network", None).get_parameter_value().array_value
+        self.road_network = None
+        if self.road_network is None:
             self.road_network = np.array(
                 [
                     [-1.25, 1.0],
@@ -191,50 +168,36 @@ class MML_PF_Visualization:
                 ]
             )
 
-        # initialization flags
         self.plot_flag = False
         self.initialization_finished = True
 
     def joy_callback(self, msg):
-
-        if (
-            msg.buttons[0] == 1
-            and abs((msg.header.stamp - self.joy_msg.header.stamp).to_sec()) > 0.1
-        ):
-            rospy.loginfo("Received an update in the visualization")
-            self.joy_msg = msg
+        # Not used in ROS2
+        pass
 
     def upd_callback(self, msg):
-        if self.initialization_finished == True:
+        if self.initialization_finished:
             if msg.data:
-                t = rospy.get_time()
-                # if(t - self.update_t > 0.3):
-                # if(msg.buttons[0]  == 1 and abs((msg.header.stamp - self.joy_msg.header.stamp).to_sec()) > 0.1 ):
-                #    print("on")
-                #    self.update_msg = msg
+                t = self.get_clock().now().to_msg().sec
                 self.update_t[:-1] = self.update_t[1:]
                 self.update_t[-1] = t
             self.update_msg = msg
 
     def fov_callback(self, msg):
-        if self.initialization_finished == True:
-            self.fov = msg.data
-            self.fov = np.reshape(self.fov, (5, 2))
+        if self.initialization_finished:
+            self.fov = np.array(msg.data).reshape((5, 2))
 
     def des_fov_callback(self, msg):
-        if self.initialization_finished == True:
-            self.des_fov = msg.data
-            self.des_fov = np.reshape(self.des_fov, (5, 2))
+        if self.initialization_finished:
+            self.des_fov = np.array(msg.data).reshape((5, 2))
 
     def mml_pf_callback(self, msg):
-        if self.initialization_finished == True:
+        if self.initialization_finished:
             self.particle_mean = np.array([msg.mean.x, msg.mean.y])
             self.cov = np.array(msg.cov)
 
             # setup the particle array
-            particle_list = []
-            for data in msg.all_particle:
-                particle_list.append([data.x, data.y])
+            particle_list = [[data.x, data.y] for data in msg.all_particle]
             self.particles = np.array(particle_list)
 
             # compute sigma values
@@ -278,7 +241,7 @@ class MML_PF_Visualization:
             # error on yaw update
             self.yawErrList.append(errYaw)
             # according timestamp update
-            self.timestamplist.append(rospy.Time.now().to_sec())
+            self.timestamplist.append(self.get_clock().now().seconds_nanoseconds()[0] )
             self.plot_flag = True
 
     def entropy_callback(self, msg):
@@ -489,11 +452,14 @@ class MML_PF_Visualization:
                     quad_x, quad_y, marker="+", color="r", label="Quad position "
                 )
                 # plot the occlusion
-                occlusions = rospy.get_param("/occlusions", None)
-                if occlusions != None:
-                    occ_centers = occlusions[0]
-                    widths = occlusions[1]
-                    for occ_center, width in zip(occ_centers, widths):
+                occ_centers = list(self.get_parameter('occlusion_centers').get_parameter_value().double_array_value)
+                occ_widths = list(self.get_parameter('occlusion_widths').get_parameter_value().double_array_value)
+                occ_widths = [1, 1]
+                occ_centers = [-1.25, -0.6, 0.35, 0.2]  # flattened [x1, y1, x2, y2] to send as parameters
+                occ_centers = [occ_centers[:2], occ_centers[2:]]
+                # TODO: make parameters
+                if occ_centers != None:
+                    for occ_center, width in zip(occ_centers, occ_widths):
                         x_dim = np.array([-width, width, width, -width, -width])
                         y_dim = np.array([-width, -width, width, width, -width])
                         self.fig_ax1.plot(
@@ -567,13 +533,12 @@ class MML_PF_Visualization:
                     )
 
                 # plot particles covariances
-                if self.temp_msg != None:
-                    self.plotCov(
-                        self.fig_ax1,
-                        self.particle_mean,
-                        self.cov.reshape((3, 3))[:2, :2],
-                    )
-                    self.fig_ax1.grid(True)
+                self.plotCov(
+                    self.fig_ax1,
+                    self.particle_mean,
+                    self.cov.reshape((3, 3))[:2, :2],
+                )
+                self.fig_ax1.grid(True)
 
                 # trim extra data to keep only the most updated data plotted
                 if len(self.timestamplist) > self.data_size:
@@ -641,10 +606,16 @@ class MML_PF_Visualization:
             self.loop_rate.sleep()
 
 
-if __name__ == "__main__":
-    rclpy.init()
-    node = rclpy.create_node("mml_pf_visualization", anonymous=False)
-    mml_pf_visualization = MML_PF_Visualization()
+def main(args=None):
+    rclpy.init(args=args)
+    node = MMLPFVisualization()
+    node.create_timer(1.0 / 60, node.visualization_spin)
 
-    while not rospy.is_shutdown():
-        mml_pf_visualization.visualization_spin()
+    while rclpy.ok():
+        #node.visualization_spin()
+        rclpy.spin(node)
+
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()

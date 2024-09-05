@@ -6,15 +6,14 @@ import time
 import scipy.stats as stats
 import os
 from geometry_msgs.msg import PointStamped, PoseStamped
-from lawnmower import LawnmowerPath
-from mml_guidance.msg import Particle, ParticleMean, ParticleArray
+from .lawnmower import LawnmowerPath
+from mml_guidance_msgs.msg import Particle, ParticleMean, ParticleArray
 from nav_msgs.msg import Odometry
-from ParticleFilter import ParticleFilter
-from kf import KalmanFilter
+from .ParticleFilter import ParticleFilter
+from .kf import KalmanFilter
 
 # from geometry_msgs.msg import Pose
-from reef_msgs.msg import DesiredState
-from rosflight_msgs.msg import RCRaw
+#from rosflight_msgs.msg import RCRaw
 from std_msgs.msg import Bool, Float32, Float32MultiArray
 
 
@@ -30,7 +29,7 @@ class Guidance(Node):
         )  # true to visualize plots
 
         self.guidance_mode = (
-            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Estimator"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = "Transformer"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
 
@@ -49,7 +48,7 @@ class Guidance(Node):
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
         self.height = 1.2  # height of the quadcopter in meters
-        camera_angle = np.array(
+        camera_angle = 3*np.array(
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
@@ -70,12 +69,15 @@ class Guidance(Node):
         self.sampled_index = np.arange(self.N)
         self.sampled_particles = self.filter.particles[:, : self.N_s, :]
         self.sampled_weights = np.ones(self.N_s) / self.N_s
-        self.position_following = False
+        self.position_following = True
 
         # Occlusions
         occ_widths = [1, 1]
-        occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
-        self.declare_parameter("occlusions", [occ_centers, occ_widths])
+        occ_centers = [-1.25, -0.6, 0.35, 0.2]  # flattened [x1, y1, x2, y2] to send as parameters
+        self.declare_parameter("occlusion_widths", occ_widths)
+        self.declare_parameter("occlusion_centers", occ_centers)
+        occ_centers = [occ_centers[:2], occ_centers[2:]]
+
         self.occlusions = [
             Occlusions(occ_centers[i], occ_widths[i]) for i in range(len(occ_widths))
         ]
@@ -105,7 +107,9 @@ class Guidance(Node):
             f"... and in prediction method: {self.prediction_method}"
         )
 
-        self.pose_pub = self.create_publisher(DesiredState, "desired_state", 1)
+        self.pose_pub = self.create_publisher(
+            msg_type=PoseStamped, topic="/mavros/setpoint_position/local", qos_profile=1
+        )
         self.err_tracking_pub = self.create_publisher(PointStamped, "err_tracking", 1)
 
         if self.is_sim:
@@ -125,7 +129,7 @@ class Guidance(Node):
             self.turtle_odom_sub = self.create_subscription(
                 Odometry, "/odom", self.turtle_hardware_odom_cb, 1
             )
-            self.rc_sub = self.create_subscription(RCRaw, "rc_raw", self.rc_cb, 1)
+            #self.rc_sub = self.create_subscription(RCRaw, "rc_raw", self.rc_cb, 1)
 
         if self.is_viz:
             self.particle_pub = self.create_publisher(ParticleMean, "xyTh_estimate", 1)
@@ -447,8 +451,8 @@ class Guidance(Node):
         else:
             return current_value
 
-    @staticmethod
-    def is_in_FOV(sparticles, fov):
+    #@staticmethod
+    def is_in_FOV(self, sparticles, fov):
         """Check if the particles are in the FOV of the camera.
         Input: Array of particles, FOV
         Output: Array of booleans indicating if each particle is in the FOV
@@ -631,22 +635,18 @@ class Guidance(Node):
                     self.filter.measurement_covariance[:2, :2],
                 )
             else:
-                self.actual_turtle_pose = np.array(
-                    [msg.pose.position.x, msg.pose.position.y]
+                turtle_orientation = np.array(
+                   [
+                       msg.pose.orientation.x,
+                       msg.pose.orientation.y,
+                       msg.pose.orientation.z,
+                       msg.pose.orientation.w,
+                   ]
                 )
-                # In the current network we do not use the orientation of the turtlebot
-                # turtle_orientation = np.array(
-                #    [
-                #        msg.pose.orientation.x,
-                #        msg.pose.orientation.y,
-                #        msg.pose.orientation.z,
-                #        msg.pose.orientation.w,
-                #    ]
-                # )
-                # _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
-                # self.noisy_turtle_pose = np.array(
-                #    [msg.pose.position.x, msg.pose.position.y, theta_z]
-                # )
+                _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
+                self.actual_turtle_pose = np.array(
+                   [msg.pose.position.x, msg.pose.position.y, theta_z]
+                )
 
                 # in hardware we assume the pose is already noisy
                 self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
@@ -657,11 +657,16 @@ class Guidance(Node):
                 self.filter.is_update = False  # no update
             else:
                 self.filter.is_occlusion = False
+                self.get_logger().info(f"in fov: {self.is_in_FOV(self.actual_turtle_pose[:2], self.FOV)}")
+                self.get_logger().info(f"fov: {self.FOV}")
+                self.get_logger().info(f"tp: {self.actual_turtle_pose[:2]}")
                 if self.is_in_FOV(self.actual_turtle_pose[:2], self.FOV):
                     # we get measurements if the turtle is in the FOV and not in occlusion
                     self.filter.is_update = True
                 else:
                     self.filter.is_update = False
+            #self.get_logger().info(f"is occ: {self.filter.is_occlusion}")
+            #self.get_logger().info(f"update: {self.filter.is_update}")
 
     def turtle_hardware_odom_cb(self, msg):
         """Callback where we get the linear and angular velocities
@@ -691,44 +696,31 @@ class Guidance(Node):
                 self.quad_position = np.array(
                     [msg.pose.position.x, msg.pose.position.y]
                 )  # -y to transform NWU to NED
-            # self.quad_position[1] = -self.quad_position[1] if not self.guidance_mode else self.quad_position[1]
             self.FOV = self.construct_FOV(self.quad_position)
 
     def pub_desired_state(self, event=None):
         """Publishes messages related to desired state"""
         if self.init_finished:
-            is_velocity = False  # [not used] might be useful later
-            ds = DesiredState()
+            ds = PoseStamped()
             # run the quad if sim or the remote controller
             # sends signal of autonomous control
             if self.position_following or self.is_sim:
-                if is_velocity:
-                    xvel = yvel = 0
-                    ds.velocity.x = xvel
-                    ds.velocity.y = yvel
-                    ds.position_valid = False
-                    ds.velocity_valid = True
-                else:
-                    ds.pose.x = self.goal_position[0]
-                    ds.pose.y = -self.goal_position[1]
-                    ds.pose.yaw = 1.571  # 90 degrees
-                    ds.position_valid = True
-                    ds.velocity_valid = False
+                ds.pose.position.x = self.goal_position[0]
+                ds.pose.position.y = self.goal_position[1]
+                #ds.pose.orientation.z = 1.571  # 90 degrees
             else:
-                ds.pose.x = 0
-                ds.pose.y = 0
-                ds.pose.yaw = 1.571
-                ds.position_valid = True
-                ds.velocity_valid = False
-            ds.pose.z = -self.height
+                ds.pose.position.x = 0
+                ds.pose.position.y = 0
+                #ds.pose.orientation.z = 1.571
+            ds.pose.position.z = self.height
             # Given boundary of the lab flight space [[x_min, y_min], [x_max, y_,max]]
             # clip the x and y position to the space self.filter.AVL_dims
-            ds.pose.x = np.clip(
-                ds.pose.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]
+            ds.pose.position.x = np.clip(
+                ds.pose.position.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]
             )
-            ds.pose.y = np.clip(
-                ds.pose.y, -self.filter.AVL_dims[1][1], -self.filter.AVL_dims[0][1]
-            )  # remember y is negative for the quad
+            ds.pose.position.y = np.clip(
+                ds.pose.position.y, self.filter.AVL_dims[1][1], self.filter.AVL_dims[0][1]
+            )  
             self.pose_pub.publish(ds)
             # tracking err pub
             self.FOV_err = self.quad_position - self.actual_turtle_pose[:2]
@@ -748,11 +740,11 @@ class Guidance(Node):
                         [self.FOV[0], self.FOV[2]],
                     ]
                 )
-                fov_msg.data = fov_matrix.flatten("C")
+                fov_msg.data = fov_matrix.flatten("C").tolist()
                 self.fov_pub.publish(fov_msg)
                 # Desired FOV
                 self.des_fov = self.construct_FOV(
-                    np.array([ds.pose.x, -ds.pose.y])
+                    np.array([ds.pose.position.x, -ds.pose.position.y])
                 )  # from turtle frame to quad frame
                 des_fov_matrix = np.array(
                     [
@@ -763,7 +755,7 @@ class Guidance(Node):
                         [self.des_fov[0], self.des_fov[2]],
                     ]
                 )
-                fov_msg.data = des_fov_matrix.flatten("C")
+                fov_msg.data = des_fov_matrix.flatten("C").tolist()
                 self.des_fov_pub.publish(fov_msg)
                 # Is update pub
                 update_msg = Bool()
@@ -794,7 +786,7 @@ class Guidance(Node):
                 particle_msg.yaw = np.linalg.norm(self.filter.particles[-1, ii, 2:4])
                 particle_msg.weight = self.filter.weights[ii]
                 mean_msg.all_particle.append(particle_msg)
-            mean_msg.cov = np.diag(self.filter.var).flatten("C")
+            mean_msg.cov = np.diag(self.filter.var).flatten("C").tolist()
             self.particle_pub.publish(mean_msg)
             # Error pub
             err_msg = PointStamped()
@@ -807,7 +799,7 @@ class Guidance(Node):
             self.n_eff_pub.publish(neff_msg)
             # Info gain pub
             info_gain_msg = Float32()
-            info_gain_msg.data = self.EER_range[0]
+            info_gain_msg.data = float(self.EER_range[0])
             self.entropy_pub.publish(info_gain_msg)
             # EER time pub
             eer_time_msg = Float32()
@@ -815,14 +807,14 @@ class Guidance(Node):
             self.eer_time_pub.publish(eer_time_msg)
             # Entropy pub
             entropy_msg = Float32()
-            entropy_msg.data = self.Hp_t
+            entropy_msg.data = float(self.Hp_t)
             self.entropy_pub.publish(entropy_msg)
             if self.prediction_method == "KF":
                 # Determinant of the covariance of the estimate
                 det_msg = Float32()
                 det_msg.data = np.linalg.det(self.kf.P[:2, :2])
                 # print("det: ", det_msg.data)
-                self.det_cov.publish(det_msg)
+                self.det_cov_pub.publish(det_msg)
 
     def guidance_pf(self, event=None):
         """Runs the particle (or Kalman) filter loop based on the estimation method"""
@@ -873,7 +865,11 @@ class Guidance(Node):
         # Use ROS2 service to kill nodes
         os.system("ros2 lifecycle set /drone_guidance shutdown")
         os.system("ros2 lifecycle set /mml_pf_visualization shutdown")
+        self.shutdown_timer.cancel()  # Cancel the timer after execution
 
+    def schedule_shutdown(self, time_to_shutdown):
+        # Create the timer and store the reference to cancel it later
+        self.shutdown_timer = self.create_timer(time_to_shutdown, self.shutdown)
 
 class Occlusions:
     def __init__(self, positions, widths):
@@ -888,9 +884,8 @@ def main(args=None):
     rclpy.init(args=args)
     guidance = Guidance()
 
-    time_to_shutdown = 90  # in seconds
-    guidance.create_timer(time_to_shutdown, guidance.shutdown, oneshot=True)
-    rclpy.on_shutdown(guidance.shutdown)
+    time_to_shutdown = 1000  # in seconds
+    guidance.schedule_shutdown(time_to_shutdown=time_to_shutdown)
 
     # Running functions at a certain rate
     guidance.create_timer(1.0 / 3.0, guidance.guidance_pf)
