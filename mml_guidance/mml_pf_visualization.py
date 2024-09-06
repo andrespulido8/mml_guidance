@@ -185,10 +185,12 @@ class MMLPFVisualization(Node):
 
     def fov_callback(self, msg):
         if self.initialization_finished:
+            # [bottom left, top left, top right, bottom right, bottom left]
             self.fov = np.array(msg.data).reshape((5, 2))
 
     def des_fov_callback(self, msg):
         if self.initialization_finished:
+            # [bottom left, top left, top right, bottom right, bottom left]
             self.des_fov = np.array(msg.data).reshape((5, 2))
 
     def mml_pf_callback(self, msg):
@@ -428,6 +430,7 @@ class MMLPFVisualization(Node):
                     color="b",
                     label="Action FOV",
                 )
+                # [bottom left, top left, top right, bottom right, bottom left]
                 act_x = (self.des_fov[2, 0] - self.des_fov[0, 0]) / 2.0 + self.des_fov[
                     0, 0
                 ]

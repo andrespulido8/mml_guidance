@@ -1,5 +1,4 @@
 import numpy as np
-from rclpy.node import Node
 from rclpy.clock import Clock, ClockType
 from ament_index_python.packages import get_package_share_directory
 import torch
@@ -19,7 +18,8 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])
+        #self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])  # AVL
+        self.AVL_dims = np.array([[-1.5, -1.0], [0.8, 1.9]])  # APRILab
         self.AVL_dims = (
             self.AVL_dims if not is_sim else np.array([[-3.0, -1.2], [1.0, 2.0]])
         )
@@ -45,11 +45,13 @@ class ParticleFilter:
                 self.motion_model = ScratchTransformer(
                     input_dim=2, block_size=10, n_embed=5, n_head=4, n_layer=2
                 )
-
-            # load weights
-            self.motion_model.load_state_dict(
-                torch.load(model_file, map_location=device)
-            )
+            try:
+                # Attempt to load the model parameters from the file
+                self.motion_model.load_state_dict(
+                    torch.load(model_file, map_location=device)
+                )
+            except FileNotFoundError:
+                    print(f"Error: The file '{model_file}' does not exist. Please make sure to change the directory to point to the correct file.")
         else:
             self.N_th = 2
 

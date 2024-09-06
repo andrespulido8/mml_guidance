@@ -28,6 +28,11 @@ To run only the turtlebot, do `roslaunch mml_guidance turtlebot_hardware.launch`
 To run only the quadcopter, do `roslaunch mml_guidance track_hardware.launch`.
 To bag data during hardware experiments run `roslaunch mml_guidance bag_hardware.launch prefix_name:="<insert prefix>"`
 
+#### APRILab
+For new version in APRILab, while inside the drone do `ros2 launch mavros apm.launch`. Then in the base station do `ros2 launch base_launch base.launch.yaml` and also `ros2 run drone_launch gp_origin`. 
+Inside the drone run the aliases `drone_alt_hold` to get it flying, `drone_pos_hold` to have it stable and then `drone_guided` to have it receive waypoints. 
+To launch the node do `ros2 launch mml_guidance april_hardware.launch.py`
+
 ## Motion Model Learning (Neural Network)
 The files needed to run the NN are located in [this DropBox](https://www.dropbox.com/sh/dmmskhd9mjbo9ws/AAD5oRf90joVTDinnghFxzG7a?dl=0).
 You should move the csv to `mml_guidance/scripts/mml_network/` and the .pth weights to `mml_guidance/scripts/mml_network/models/`.

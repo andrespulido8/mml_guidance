@@ -29,7 +29,7 @@ class Guidance(Node):
         )  # true to visualize plots
 
         self.guidance_mode = (
-            "Estimator"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = "Transformer"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
 
@@ -48,7 +48,7 @@ class Guidance(Node):
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
         self.height = 1.2  # height of the quadcopter in meters
-        camera_angle = 3*np.array(
+        camera_angle = np.array(
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
         self.FOV_dims = np.tan(camera_angle) * self.height
@@ -274,7 +274,10 @@ class Guidance(Node):
                 pred_msg.particle_array.pop(0)  # eliminate the oldest particle
             self.particle_pred_pub.publish(pred_msg)  # publish the history
             # publish the sampled index array
-            self.sampled_index_pub.publish(data=self.sampled_index)
+            # Convert numpy array to Float32MultiArray before publishing
+            float32_multi_array_msg = Float32MultiArray()
+            float32_multi_array_msg.data = self.sampled_index.astype(float).flatten().tolist()
+            self.sampled_index_pub.publish(float32_multi_array_msg)
 
         # Future possible measurements
         # TODO: implement N_m sampled measurements (assumption: N_m = 1)
@@ -657,16 +660,11 @@ class Guidance(Node):
                 self.filter.is_update = False  # no update
             else:
                 self.filter.is_occlusion = False
-                self.get_logger().info(f"in fov: {self.is_in_FOV(self.actual_turtle_pose[:2], self.FOV)}")
-                self.get_logger().info(f"fov: {self.FOV}")
-                self.get_logger().info(f"tp: {self.actual_turtle_pose[:2]}")
                 if self.is_in_FOV(self.actual_turtle_pose[:2], self.FOV):
                     # we get measurements if the turtle is in the FOV and not in occlusion
                     self.filter.is_update = True
                 else:
                     self.filter.is_update = False
-            #self.get_logger().info(f"is occ: {self.filter.is_occlusion}")
-            #self.get_logger().info(f"update: {self.filter.is_update}")
 
     def turtle_hardware_odom_cb(self, msg):
         """Callback where we get the linear and angular velocities
@@ -687,23 +685,25 @@ class Guidance(Node):
             # print("no rc message > 500, MANUAL MODE: turn it on with the rc controller")
 
     def quad_odom_cb(self, msg):
+        """Quad position needs to be in ENU"""
         if self.init_finished:
             if self.is_sim:
                 self.quad_position = np.array(
                     [msg.pose.position.x, -msg.pose.position.y]
                 )
             else:
+                #self.quad_position = np.array(
+                #    [-msg.pose.position.y, msg.pose.position.x]
+                #)  # -y to transform NWU to ENU
                 self.quad_position = np.array(
                     [msg.pose.position.x, msg.pose.position.y]
-                )  # -y to transform NWU to NED
+                )  # if position comes in ENU 
             self.FOV = self.construct_FOV(self.quad_position)
 
     def pub_desired_state(self, event=None):
         """Publishes messages related to desired state"""
         if self.init_finished:
             ds = PoseStamped()
-            # run the quad if sim or the remote controller
-            # sends signal of autonomous control
             if self.position_following or self.is_sim:
                 ds.pose.position.x = self.goal_position[0]
                 ds.pose.position.y = self.goal_position[1]
@@ -719,7 +719,7 @@ class Guidance(Node):
                 ds.pose.position.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]
             )
             ds.pose.position.y = np.clip(
-                ds.pose.position.y, self.filter.AVL_dims[1][1], self.filter.AVL_dims[0][1]
+                ds.pose.position.y, self.filter.AVL_dims[0][1], self.filter.AVL_dims[1][1]
             )  
             self.pose_pub.publish(ds)
             # tracking err pub
@@ -739,13 +739,13 @@ class Guidance(Node):
                         [self.FOV[1], self.FOV[2]],
                         [self.FOV[0], self.FOV[2]],
                     ]
-                )
+                )  # [bottom left, top left, top right, bottom right, bottom left]
                 fov_msg.data = fov_matrix.flatten("C").tolist()
                 self.fov_pub.publish(fov_msg)
                 # Desired FOV
                 self.des_fov = self.construct_FOV(
-                    np.array([ds.pose.position.x, -ds.pose.position.y])
-                )  # from turtle frame to quad frame
+                    np.array([ds.pose.position.x, ds.pose.position.y])
+                )  
                 des_fov_matrix = np.array(
                     [
                         [self.des_fov[0], self.des_fov[2]],
@@ -754,7 +754,7 @@ class Guidance(Node):
                         [self.des_fov[1], self.des_fov[2]],
                         [self.des_fov[0], self.des_fov[2]],
                     ]
-                )
+                )  # [bottom left, top left, top right, bottom right, bottom left]
                 fov_msg.data = des_fov_matrix.flatten("C").tolist()
                 self.des_fov_pub.publish(fov_msg)
                 # Is update pub
@@ -803,7 +803,7 @@ class Guidance(Node):
             self.entropy_pub.publish(info_gain_msg)
             # EER time pub
             eer_time_msg = Float32()
-            eer_time_msg.data = self.t_EER
+            eer_time_msg.data = float(self.t_EER)
             self.eer_time_pub.publish(eer_time_msg)
             # Entropy pub
             entropy_msg = Float32()

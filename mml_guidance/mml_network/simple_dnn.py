@@ -30,6 +30,9 @@ class SimpleDNN(nn.Module):
         else:
             raise ValueError("Invalid activation function")
 
+        # move weights to device 
+        self.to(device)
+
     def forward(self, x):
         for layer in self.layers[:-1]:
             x = self.activation_fn(layer(x))
