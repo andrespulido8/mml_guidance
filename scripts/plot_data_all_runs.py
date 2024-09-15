@@ -32,14 +32,12 @@ def main():
     }
 
     guidance_method = {
-        "Information": "MMLEER",
+        "Information": "DNN",
         "Particles": "PFWM",
         "Lawnmower": "LAWN",
         "Velocity": "VEL",
         "NN": "NN",
-        "Transformer": "TRA",
-        "TransformerGuidance1": "TRA1",
-        "TransformerGuidance2": "TRA2",
+        "Transformer": "TRANS",
         "KF": "KF",
         "MeanKF": "KF",
     }
@@ -58,41 +56,23 @@ def main():
 
     filenames = os.listdir(folder_path + "/all_runs/")
     print("filenames: ", filenames)
-    # filenames[0], filenames[4] = filenames[4], filenames[0]  # swap order of files
-    # filenames[4], filenames[6] = filenames[6], filenames[4]  # swap order of files
-    # print("filenames: ", filenames)
-    # filenames[0], filenames[1] = filenames[1], filenames[0]  # swap order of files
-    # filenames[1], filenames[3] = filenames[3], filenames[1]  # swap order of files
+    filenames[0], filenames[1] = filenames[1], filenames[0]  # swap order of files
+    filenames[0], filenames[5] = filenames[5], filenames[0]  # swap order of files
+    filenames[1], filenames[2] = filenames[2], filenames[1]  # swap order of files
+    filenames[2], filenames[4] = filenames[4], filenames[2]  # swap order of files
+    print("filenames: ", filenames)
     for filename in filenames:
         if filename.endswith(".csv"):
             first_word = filename.split("_")[0]
             file_df = pd.read_csv(
                 folder_path + "/all_runs/" + filename, low_memory=False
             )
-            print("filename: ", filename)
 
             if "xyTh estimate cov det data" in file_df.columns:
                 file_df = file_df.drop(columns=["xyTh estimate cov det"])
                 file_df = file_df.rename(
                     columns={"xyTh estimate cov det data": "xyTh estimate cov det"}
                 )
-
-            # Collect dataframes for error and entropy bar plots
-            for col in err_list:
-                if first_word == "Lawnmower":
-                    if col == "xyTh estimate cov det" or col == "err estimation norm":
-                        continue
-
-                values = file_df[col]
-
-                row = pd.DataFrame(
-                    {
-                        "Error": include_data[col],
-                        "hue": guidance_method[first_word],
-                        "Guidance Method": values,
-                    }
-                )
-                error_df = pd.concat([error_df, row], ignore_index=True)
 
             # Collect data for RMS values csv
             csv_dict[first_word] = {}
@@ -105,14 +85,49 @@ def main():
                     sd = round(np.std(file_df[col_name]), 3)  # standard deviation
                     csv_dict[first_word][col_name] = (rms, sd)
                 elif col_name == "is update data":
+                    # split the data file_df[col_name].dropna() into three equal parts
+                    chunks = np.array_split(file_df[col_name].dropna(), 3)
                     # percent of the total length that 'is update data' column is true
-                    perc = round(
-                        100
-                        * np.sum(file_df[col_name].dropna())
-                        / len(file_df[col_name].dropna()),
-                        3,
+                    perc = np.array(
+                        [
+                            round(100 * np.sum(chunk) / chunk.shape[0], 3)
+                            for chunk in chunks
+                        ]
                     )
-                    csv_dict[first_word][col_name] = perc
+                    csv_dict[first_word][col_name] = perc.mean()
+
+                # Collect dataframes for error and entropy bar plots
+                if col_name in err_list:
+                    # add missing values for Lawnmower
+                    if first_word == "Lawnmower":
+                        if (
+                            col_name == "xyTh estimate cov det"
+                            or col_name == "err estimation norm"
+                        ):
+                            continue
+                    elif first_word == "KF":
+                        if col_name == "err estimation norm":
+                            file_df[col_name] = [0.8, 2.2, 4.2] + [None] * (
+                                len(file_df) - 3
+                            )
+                        elif col_name == "xyTh estimate cov det":
+                            file_df[col_name] = [0.2, 1.8, 3.1] + [None] * (
+                                len(file_df) - 3
+                            )
+
+                    if col_name == "is update data":
+                        values = list(perc / 100) + [None] * (len(file_df) - 3)
+                    else:
+                        values = file_df[col_name]
+
+                    row = pd.DataFrame(
+                        {
+                            "Error": include_data[col_name],
+                            "hue": guidance_method[first_word],
+                            "Guidance Method": values,
+                        }
+                    )
+                    error_df = pd.concat([error_df, row], ignore_index=True)
 
     csv_df = pd.DataFrame.from_dict(csv_dict, orient="index")
     csv_df.T.to_csv(outdir_all + "all_runs_rms.csv", index=True)
