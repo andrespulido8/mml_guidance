@@ -6,11 +6,10 @@ from rosbags.rosbag2 import Reader
 from rosbags.typesys import get_typestore, Stores
 
 # Path to the bag file
-bag_directory = "/home/andrespulido/mml_ws/src/mml_guidance/hardware_data/RAL_csv/LCSS/Information_csv/"
-bag_file_path = bag_directory + "information_09_12_2024_3"
+bag_directory = "/home/andrespulido/mml_ws/src/mml_guidance/hardware_data/RAL_csv/LCSS/"
+bag_file_path = bag_directory + "transformer_09_10_2024_1"
 
-is_write_csv = False
-is_join_csv = True
+is_write_csv = True  # True is to write csv from a bag file and False is to join the csvs to a single run
 
 if is_write_csv:
     # Create a typestore and get the string class.
@@ -72,8 +71,9 @@ if is_write_csv:
         df.to_csv(csv_file_path, index=False)
 
     print(f"Data saved to {csv_file_path}")
+else:
+    include_cov_data = True
 
-if is_join_csv:
     # Get all the csv files in the directory
     csv_files = [f for f in os.listdir(bag_directory) if f.endswith(".csv")]
     print("CSV files found:", csv_files)
@@ -85,6 +85,18 @@ if is_join_csv:
     for csv_file in csv_files:
         df = pd.read_csv(os.path.join(bag_directory, csv_file))
         joined_df = pd.concat([joined_df, df], axis=0)
+
+    if include_cov_data:
+        # Add a column to store the covariance determinant
+        cov_dir = bag_directory + "../"
+        csv_files = [f for f in os.listdir(cov_dir) if f.endswith(".csv")]
+        cov_df = pd.DataFrame()
+        for csv_file in csv_files:
+            df = pd.read_csv(os.path.join(cov_dir, csv_file))
+            cov_df = pd.concat([cov_df, df], axis=0)
+
+        cov_df.reset_index(drop=True, inplace=True)
+        joined_df["cov data"] = cov_df["cov data"]
 
     # convert the cov data column to string
     joined_df = joined_df.dropna(subset=["cov data"])
