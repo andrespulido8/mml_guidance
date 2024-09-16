@@ -16,6 +16,35 @@ sns.set_theme()
 sns.set_style("white")
 sns.set_context("paper", font_scale=2)
 
+def plot_error_bars(error_df, outdir_all, title, ylabel, xlabel, figwidth, islegend=False):
+    ## PLOTS
+    rms_estimator = lambda x: np.sqrt(np.mean(np.square(x)))
+    dpi = 300
+    # BAR
+    fig, ax = plt.subplots(figsize=(figwidth, 6.5))
+    sns.barplot(
+        y="Guidance Method",
+        x="Error",
+        data=error_df,
+        ax=ax,
+        hue="hue",
+        estimator=rms_estimator,
+        capsize=0.1,
+        errorbar="sd",
+        width=1.,
+        legend=islegend,  # Suppress the legend
+        err_kws={'linewidth': 1.5}
+    )
+    if islegend:
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles, labels, title="Guidance Methods", fontsize=16, title_fontsize=18)
+    ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
+    ax.set_ylabel(ylabel=ylabel, fontdict=font)
+    ax.set_xlabel(xlabel=xlabel, fontdict=font)
+    #ax.set_ylim([0, 5])
+    sns.despine(right=True)
+    plt.tight_layout()  # Automatically adjust subplot parameters to give specified padding
+    plt.savefig(outdir_all + title + ".png", dpi=dpi)
 
 def main():
     outdir_all = folder_path + "/all_runs/figures/"
@@ -44,6 +73,8 @@ def main():
 
     # empty dataframes to store the data for the bar plots
     error_df = pd.DataFrame()
+    perc_df = pd.DataFrame()
+    cov_df = pd.DataFrame()
     err_list = [
         "xyTh estimate cov det",
         "err estimation norm",
@@ -57,9 +88,9 @@ def main():
     filenames = os.listdir(folder_path + "/all_runs/")
     print("filenames: ", filenames)
     filenames[0], filenames[1] = filenames[1], filenames[0]  # swap order of files
-    filenames[0], filenames[5] = filenames[5], filenames[0]  # swap order of files
-    filenames[1], filenames[2] = filenames[2], filenames[1]  # swap order of files
-    filenames[2], filenames[4] = filenames[4], filenames[2]  # swap order of files
+    filenames[0], filenames[3] = filenames[3], filenames[0]  # swap order of files
+    filenames[4], filenames[2] = filenames[2], filenames[4]  # swap order of files
+    #filenames[2], filenames[4] = filenames[4], filenames[2]  # swap order of files
     print("filenames: ", filenames)
     for filename in filenames:
         if filename.endswith(".csv"):
@@ -127,36 +158,20 @@ def main():
                             "Guidance Method": values,
                         }
                     )
-                    error_df = pd.concat([error_df, row], ignore_index=True)
+                    if col_name == "is update data":
+                        perc_df = pd.concat([perc_df, row], ignore_index=True)
+                    elif col_name == "xyTh estimate cov det":
+                        cov_df = pd.concat([cov_df, row], ignore_index=True)
+                    elif col_name == "err estimation norm" or col_name == "err tracking norm":
+                        error_df = pd.concat([error_df, row], ignore_index=True)
 
     csv_df = pd.DataFrame.from_dict(csv_dict, orient="index")
     csv_df.T.to_csv(outdir_all + "all_runs_rms.csv", index=True)
     print("RMS values and Standard Deviation: \n", csv_df.T)
 
-    ## PLOTS
-    rms_estimator = lambda x: np.sqrt(np.mean(np.square(x)))
-    dpi = 300
-    # BAR
-    fig, ax = plt.subplots(figsize=(10, 6.5))
-    sns.barplot(
-        y="Guidance Method",
-        x="Error",
-        data=error_df,
-        ax=ax,
-        hue="hue",
-        estimator=rms_estimator,
-        capsize=0.1,
-        errorbar="sd",
-    )
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles, labels, title="Guidance Methods", fontsize=16, title_fontsize=18)
-    ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
-    ax.set_ylabel("Value", fontdict=font)
-    ax.set_xlabel("Evaluation Metric", fontdict=font)
-    ax.set_ylim([0, 5])
-    sns.despine(right=True)
-    plt.savefig(outdir_all + "bar_errors_fix" + ".png", dpi=dpi)
-    # plt.show()
+    plot_error_bars(error_df, outdir_all, "errors", "Error [m]", "", figwidth=6, islegend=True)
+    plot_error_bars(perc_df, outdir_all, "percentage", "Percentage [%]", "", figwidth=3)
+    plot_error_bars(cov_df, outdir_all, "cov", "[m ]", "", figwidth=3)
 
 
 if __name__ == "__main__":
