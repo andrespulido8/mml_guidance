@@ -81,13 +81,13 @@ def parameter_search(
     print(f"\nBest parameters: {best_params}")
     print(f"Best test loss: {best_loss}")
 
-    plt.legend()
+    plt.legend(loc="upper right")
     plt.show()
 
     return best_params
 
 
-def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
+def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None, test_percent=0.2, title="Test"):
     # font sizes for the plot labels
     font = {"family": "serif", "weight": "normal", "size": 40}
     sns.set_theme()
@@ -120,7 +120,7 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
         # ax.plot(X_test[:, 0], X_test[:, 1], color="black", linestyle="--", label="Path", alpha=0.5)
 
         # Plot predicted arrows
-        arrow_length = 3  # higher value means shorter arrows
+        arrow_length = 1.5  # higher value means shorter arrows
         plt.quiver(
             X_test[:, -2],
             X_test[:, -1],
@@ -130,6 +130,7 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
             label="Predicted",
             alpha=0.7,
             scale=arrow_length,
+            headwidth=6,  # Increase the width of the arrowhead
         )
 
         # Plot actual arrows
@@ -142,14 +143,21 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
             label="Actual",
             alpha=0.7,
             scale=arrow_length,
+            headwidth=6,  # Increase the width of the arrowhead
         )
 
     else:
         # plot the predicted and actual velocities as arrows from the positions defined in df
-        _, Xpos_test, _, _ = train_test_split(
-            df.iloc[:, :-2].values, df.iloc[:, -2:], test_size=0.2, random_state=42
-        )
-        arrow_length = 0.1
+        #_, Xpos_test, _, _ = train_test_split(
+        #    df.iloc[:, :-2].values, df.iloc[:, -2:], test_size=0.2, random_state=42
+        #)
+        length = df.shape[0]
+        if title == "Test":
+            Xpos_test = df.iloc[math.floor(length * (1 - test_percent)) :, :-2].values
+        elif title == "Train":
+            Xpos_test = df.iloc[: math.floor(length * (1 - test_percent)), :-2].values
+        print("Xpos_test: ", Xpos_test.shape)
+        arrow_length = 0.15
         for i in range(Xpos_test.shape[0] - 1):
             plt.arrow(
                 Xpos_test[i, -2],
@@ -157,6 +165,8 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
                 y_pred[i, -2] * arrow_length,
                 y_pred[i, -1] * arrow_length,
                 color="red",
+                width=0.005,
+                head_width=0.02,
             )
             plt.arrow(
                 Xpos_test[i, -2],
@@ -164,8 +174,14 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
                 y_test[i, 0] * arrow_length,
                 y_test[i, 1] * arrow_length,
                 color="blue",
+                width=0.005,
+                head_width=0.02,
             )
+        # empty arrows for labels
+        plt.arrow(0, 0, 0, 0, color="red", label="Predicted")
+        plt.arrow(0, 0, 0, 0, color="blue", label="Actual")
 
+    plt.title(title)
     # axis labels
     plt.xlabel("$x_g$ [m]")
     plt.ylabel("$y_g$ [m]")
@@ -174,7 +190,7 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None):
     plt.ylim([-1.5, 2])
     # equal aspect ratio
     plt.gca().set_aspect("equal", adjustable="box")
-    plt.legend()
+    plt.legend(loc="upper right")
     plt.show()
 
 
@@ -191,8 +207,9 @@ def select_model(model_name, input_size):
         print("input size: ", input_size)
         model = TransAm(in_dim=2, n_embed=10, num_layers=1, n_head=1, dropout=0.01)
     elif model_name == "ScratchTransformer":
+        block_size = input_size // 2
         model = ScratchTransformer(
-            input_dim=2, block_size=10, n_embed=5, n_head=4, n_layer=2
+            input_dim=2, block_size=block_size, n_embed=5, n_head=4, n_layer=2
         )
     else:
         raise ValueError("Invalid model name")
@@ -231,7 +248,7 @@ def select_parameters(model_name, input_size):
 
 
 def main():
-    is_velocities = False
+    is_velocities = True
     is_parameter_search = False
     model_name = (
         "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
@@ -240,43 +257,50 @@ def main():
 
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
     # print the files in the directory
-    if is_velocities:
-        df_vel = pd.read_csv(path + "converted_training_data.csv")
     df = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
+    if is_velocities:
+        prefix_name = prefix_name + "velocities_"
+        df_vel = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
     X = df.iloc[:, :-2].values if not is_velocities else df_vel.iloc[:, :-2].values
     y = df.iloc[:, -2:].values if not is_velocities else df_vel.iloc[:, -2:].values
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+    # split the data into training and testing sets
+    test_percent = 0.8
+    length = len(X)
+    X_train, X_test = X[: math.floor(length * (1 - test_percent))], X[
+        math.floor(length * (1 - test_percent)) :
+    ]
+    y_train, y_test = y[: math.floor(length * (1 - test_percent))], y[
+        math.floor(length * (1 - test_percent)) :
+    ]
     X_train = torch.from_numpy(X_train.astype(np.float32)).to(
         device
     )  # (N, T*C) = (N, 10*2)
     X_test = torch.from_numpy(X_test.astype(np.float32)).to(device)
     y_train = torch.from_numpy(y_train.astype(np.float32)).to(device)
     y_test = torch.from_numpy(y_test.astype(np.float32)).to(device)
-
-    print("X_train shape: ", X_train.shape)
+    print("Train size: ", X_train.shape, y_train.shape)
+    print("Test size: ", X_test.shape, y_test.shape)
 
     criterion = nn.MSELoss()
 
     model = select_model(model_name=model_name, input_size=X_train.shape[1])
 
+    epochs = 20
+    weights_filename = (
+        path
+        + "../../scripts/mml_network/models/best_"
+        + prefix_name
+        + model_name
+        + ".pth"
+    )
     if is_parameter_search:
         param_grid = select_parameters(
             model_name=model_name, input_size=X_train.shape[1]
         )
 
         ModelClass = model.__class__
-        weights_filename = (
-            path
-            + "/../../scripts/mml_network/models/best_"
-            + prefix_name
-            + model_name
-            + ".pth"
-        )
 
-        epochs = 200
         best_params = parameter_search(
             ModelClass,
             param_grid,
@@ -291,7 +315,7 @@ def main():
         model.load_state_dict(torch.load(weights_filename))
     else:
         optimizer = optim.Adam(model.parameters(), lr=4e-3)
-        losslist = train(model, criterion, optimizer, X_train, y_train, epochs=200)
+        losslist = train(model, criterion, optimizer, X_train, y_train, epochs=epochs)
 
         # plot the loss
         plt.plot(losslist)
@@ -299,7 +323,8 @@ def main():
         plt.ylabel("Loss")
         plt.show()
 
-        # torch.save(model.state_dict(), "transformer.pth")
+        torch.save(model.state_dict(), weights_filename)
+        print("Model saved to: ", weights_filename)
 
     model.eval()
     test_loss, y_pred = evaluate(model, criterion, X_test, y_test)
@@ -308,7 +333,10 @@ def main():
     X_test = X_test.to("cpu").detach().numpy()
     y_pred = y_pred.to("cpu").detach().numpy()
     y_test = y_test.to("cpu").detach().numpy()
-    plot_NN_output(X_test, y_pred, y_test, is_velocities, df)
+    plot_NN_output(X_test, y_pred, y_test, is_velocities, df, test_percent, "Test")
+    train_loss, y_pred = evaluate(model, criterion, X_train, y_train)
+    print("Train Loss: ", train_loss)
+    plot_NN_output(X_train , y_pred, y_train, is_velocities, df, test_percent, "Train")
 
     return 0
 

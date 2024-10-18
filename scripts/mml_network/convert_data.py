@@ -9,7 +9,7 @@ def create_dataset():
     is_occlusions = False
 
     # split the path and file name. Path will be ~/mml_ws/src/mml_guidance
-    path = os.path.expanduser("~/mml_ws/src/mml_guidance/hardware_data/")
+    path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
     # print the files in the directory
     df = pd.read_csv(
         path + "training_data_2024-03-28-00-01-46__slash_noisy_measurement.csv"
@@ -38,6 +38,7 @@ def create_dataset():
 
     if is_veloctities:
         df_time = df.iloc[reduced_df.index, 0]
+        print("head of df_time: ", df_time.head(10))
 
         print("length of df_time: ", len(df_time))
 
@@ -71,7 +72,13 @@ def create_dataset():
         )
 
     # Save the final DataFrame to a new CSV file
-    out_name = "converted_noisy_velocities_training_data.csv"
+    if is_veloctities:
+        out_name = "converted_noisy_velocities_training_data.csv"
+    else:
+        if is_occlusions:
+            out_name = "converted_noisy_positions_occlusions_training_data.csv"
+        else:
+            out_name = "converted_noisy_positions_training_data.csv"
     final_df.to_csv(path + out_name, index=False)
     print("Converted dataset saved to : ", path + out_name)
 

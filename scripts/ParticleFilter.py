@@ -31,7 +31,10 @@ class ParticleFilter:
             )
             device = "cuda" if torch.cuda.is_available() else "cpu"
             if self.prediction_method == "NN":
-                model_file = pkg_path + "/scripts/mml_network/models/noisy_dnn_best.pth"
+                if self.is_velocity:
+                    model_file = pkg_path + "/scripts/mml_network/models/best_noisy_velocities_SimpleDNN.pth"
+                else:
+                    model_file = pkg_path + "/scripts/mml_network/models/best_noisy_SimpleDNN.pth"
                 self.motion_model = SimpleDNN(
                     input_size=self.nn_input_size,
                     num_layers=2,

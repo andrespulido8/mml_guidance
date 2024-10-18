@@ -144,6 +144,7 @@ class ScratchTransformer(nn.Module):
 
         """
         super().__init__()
+        self.block_size = block_size
         # each token directly reads off the logits for the next token from a lookup table
         self.embed = nn.Linear(input_dim, n_embed).to(device)
         self.position_embedding_table = nn.Embedding(block_size, n_embed).to(device)
@@ -168,7 +169,7 @@ class ScratchTransformer(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, src, targets=None):
-        src = src.view(-1, 10, 2)
+        src = src.view(-1, self.block_size, 2)
 
         # src and targets are both (B,T,C) tensors
         src = self.embed(src)

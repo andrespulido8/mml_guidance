@@ -60,7 +60,7 @@ class Guidance:
         self.EER_range = np.array([0, 0, 0])
         self.t_EER = 0.0
         self.eer_particle = 0  # initialize future particle to follow
-        self.sampled_index = np.arange(self.N)
+        self.sampled_index = np.arange(self.N_s)
         self.sampled_particles = self.filter.particles[:, : self.N_s, :]
         self.sampled_weights = np.ones(self.N_s) / self.N_s
         self.position_following = False
@@ -690,23 +690,15 @@ class Guidance:
     def pub_desired_state(self, event=None):
         """Publishes messages related to desired state"""
         if self.init_finished:
-            is_velocity = False  # [not used] might be useful later
             ds = DesiredState()
             # run the quad if sim or the remote controller
             # sends signal of autonomous control
             if self.position_following or self.is_sim:
-                if is_velocity:
-                    xvel = yvel = 0
-                    ds.velocity.x = xvel
-                    ds.velocity.y = yvel
-                    ds.position_valid = False
-                    ds.velocity_valid = True
-                else:
-                    ds.pose.x = self.goal_position[0]
-                    ds.pose.y = -self.goal_position[1]
-                    ds.pose.yaw = 1.571  # 90 degrees
-                    ds.position_valid = True
-                    ds.velocity_valid = False
+                ds.pose.x = self.goal_position[0]
+                ds.pose.y = -self.goal_position[1]
+                ds.pose.yaw = 1.571  # 90 degrees
+                ds.position_valid = True
+                ds.velocity_valid = False
             else:
                 ds.pose.x = 0
                 ds.pose.y = 0

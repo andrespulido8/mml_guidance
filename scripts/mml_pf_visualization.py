@@ -63,6 +63,9 @@ class MML_PF_Visualization:
 
         self.is_sim = rospy.get_param("/is_sim", True)
 
+        rospy.loginfo(
+            f"Initializing visualization node with parameter is_sim: {self.is_sim}"
+        )
         # self.img_cam = mpimg.imread(visualization_path + "/resources/cam.png")
 
         # number of real time data plotted in matplotlib
