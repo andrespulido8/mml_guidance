@@ -25,7 +25,7 @@ class Guidance:
         self.guidance_mode = (
             "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
-        self.prediction_method = "Transformer"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
+        self.prediction_method = "Transformer"  # 'Transformer', 'NN', 'KF', 'Velocity' or 'Unicycle'
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -231,7 +231,7 @@ class Guidance:
                 self.prediction_method == "NN"
                 or self.prediction_method == "Transformer"
             ):
-                future_parts = self.filter.predict_mml(np.copy(future_parts))
+                future_parts = self.filter.predict_mml(np.copy(future_parts), np.ones(future_parts.shape[0])*0.33)
             elif self.prediction_method == "Unicycle":
                 future_parts, last_future_time = self.filter.predict(
                     future_parts,
@@ -283,7 +283,7 @@ class Guidance:
                 future_weight[:, jj] = self.filter.update(
                     self.sampled_weights, future_parts, z_hat[jj]
                 )
-
+ 
                 # H (x_{k+K} | \hat{z}_{k+K})
                 Hp_k[jj] = self.entropy_particle(
                     future_parts[-2],
@@ -298,18 +298,18 @@ class Guidance:
                     np.copy(self.sampled_weights),
                     future_parts[-1],
                 )
-
+ 
             # Information Gain
             EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]
-
+ 
         # EER = I.mean() # implemented when N_m is implemented
         action_index = np.argmax(EER)
         self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
         # print("EER: ", EER)
-
+     
         self.t_EER = rospy.get_time() - self.initial_time - now
         # print("EER time: ", self.t_EER)
-
+ 
         self.eer_particle = self.sampled_index[action_index]
 
     def entropy_particle(
@@ -546,7 +546,7 @@ class Guidance:
                     self.prediction_method == "NN"
                     or self.prediction_method == "Transformer"
                 ):
-                    future_part = self.filter.predict_mml(future_part)
+                    future_part = self.filter.predict_mml(future_part, np.ones(future_part.shape[0])*0.33)
                 if self.prediction_method == "Unicycle":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
@@ -879,7 +879,7 @@ if __name__ == "__main__":
     # Running functions at a certain rate
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.guidance_pf)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
-    if guidance.guidance_mode == "Information":
+    if guidance.guidance_mode == "Information" or guidance.guidance_mode == "Estimator":
         rospy.Timer(rospy.Duration(1.0 / 2.5), guidance.information_driven_guidance)
 
     # Publish topics

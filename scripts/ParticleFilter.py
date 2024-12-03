@@ -23,18 +23,19 @@ class ParticleFilter:
         )
 
         if self.prediction_method == "NN" or self.prediction_method == "Transformer":
-            self.N_th = 10  # Number of time history particles
+            self.N_th = 15  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
-            self.is_velocity = False
-            self.nn_input_size = (
-                self.N_th * 2 - 2 if self.is_velocity else self.N_th * 2
-            )
+            self.is_velocity = True
+            is_occlusions_weights = True
+            input_dim = 3  # x, y, time
+            self.nn_input_size = self.N_th * input_dim 
+            rospy.loginfo(f"Input dim and size: {input_dim}, {self.nn_input_size}")
             device = "cuda" if torch.cuda.is_available() else "cpu"
+            prefix_name = "noisy_"
+            prefix_name = prefix_name + "velocities_" if self.is_velocity else prefix_name + "time_"
+            prefix_name = prefix_name + "occlusions_" if is_occlusions_weights else prefix_name
             if self.prediction_method == "NN":
-                if self.is_velocity:
-                    model_file = pkg_path + "/scripts/mml_network/models/best_noisy_velocities_SimpleDNN.pth"
-                else:
-                    model_file = pkg_path + "/scripts/mml_network/models/best_noisy_SimpleDNN.pth"
+                prefix_name = prefix_name + "SimpleDNN"
                 self.motion_model = SimpleDNN(
                     input_size=self.nn_input_size,
                     num_layers=2,
@@ -43,14 +44,12 @@ class ParticleFilter:
                     activation_fn="relu",
                 )
             elif self.prediction_method == "Transformer":
-                model_file = (
-                    pkg_path
-                    + "/scripts/mml_network/models/best_noisy_ScratchTransformer.pth"
-                )
+                prefix_name = prefix_name + "ScratchTransformer"
                 self.motion_model = ScratchTransformer(
-                    input_dim=2, block_size=10, n_embed=5, n_head=4, n_layer=2
+                    input_dim=input_dim, block_size=self.N_th, n_embed=5, n_head=4, n_layer=2
                 )
-
+            
+            model_file = f"{pkg_path}/scripts/mml_network/models/best_{prefix_name}.pth"
             # load weights
             self.motion_model.load_state_dict(
                 torch.load(model_file, map_location=device)
@@ -82,14 +81,15 @@ class ParticleFilter:
 
         if (
             self.prediction_method != "Unicycle" and self.prediction_method != "KF"
-        ):  # NN and Velocity
+        ):  # NN Transformer and Velocity
             self.measurement_covariance = np.diag([0.01, 0.01])
-            self.process_covariance = np.diag([0.001, 0.001])
+            self.process_covariance = np.diag([0.0003, 0.0003])
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
             (self.N_th, self.measurement_covariance.shape[0])
         )
+        self.dt_history = np.ones(self.N_th) * 0.333
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles[-1,:, :2] = np.array([
@@ -156,27 +156,28 @@ class ParticleFilter:
         # update measurement history with noisy_measurement
         self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
         self.measurement_history[-1, :2] = noisy_measurement[:2]
+        self.dt_history = np.roll(self.dt_history, -1, axis=0)
+        self.dt_history[-1] = t - self.last_time 
 
         # Prediction step
         if self.prediction_method == "NN" or self.prediction_method == "Transformer":
-            self.particles = self.predict_mml(np.copy(self.particles))
+            self.particles = self.predict_mml(np.copy(self.particles), self.dt_history)
         elif self.prediction_method == "Unicycle":
             self.measurement_history[-1, 2] = noisy_measurement[2]
-            self.particles, self.last_time = self.predict(
+            self.particles = self.predict(
                 self.particles,
-                self.last_time,
+                self.dt_history[-1],
                 angular_velocity=ang_vel,
                 linear_velocity=lin_vel,
             )
         elif self.prediction_method == "Velocity":
-            dt = t - self.last_time
             estimate_velocity = (
                 self.measurement_history[-1, :] - self.measurement_history[-2, :]
-            ) * dt
+            ) * self.dt_history[-1],
 
-            self.particles, self.last_time = self.predict(
+            self.particles = self.predict(
                 self.particles,
-                self.last_time,
+                self.dt_history[-1],
             )
 
         # Update step
@@ -189,15 +190,13 @@ class ParticleFilter:
         # Resampling step
         outbounds = self.outside_bounds(self.particles[-1])
         self.neff = self.nEff(self.weights)
-        if outbounds > self.N * 0.5:
+        if outbounds > self.N * 0.8:
             # Resample if fraction of particles are outside the lab boundaries
             rospy.logwarn(
                 f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
             )
             self.particles = self.uniform_sample()
-        if (
-            not self.is_occlusion
-        ):  # agent can only tell if it is occluded, not the shape of occlusion
+        else:
             if (
                 self.neff < self.N * 0.99
             ):  # nEff is only infinity when something went wrong
@@ -212,7 +211,7 @@ class ParticleFilter:
                         # backwards difference for velocities
                         self.particles[-1, :, 2:] = np.random.multivariate_normal(
                             estimate_velocity,
-                            dt * self.measurement_covariance,
+                            self.dt_history[-1] * self.measurement_covariance,
                             self.N,
                         )
                     else:
@@ -233,6 +232,9 @@ class ParticleFilter:
                     # some are good but some are bad, resample
                     self.resample()
 
+        self.last_time = t
+
+        # estimate for viz
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
         # print("PF time: ", rospy.get_time() - t - self.initial_time)
 
@@ -274,29 +276,31 @@ class ParticleFilter:
         # )
         return like
 
-    def predict_mml(self, particles):
+    def predict_mml(self, particles, dt_history):
         """Propagates the current particles through the motion model learned with the
         neural network.
         Input: N_th (number of time histories) sets of particles up to time k-1
         Output: N_th sets of propagated particles up to time k
         """
-        # print("particles: ", particles.shape)
-        if self.is_velocity:
-            current_parts = np.copy(particles[:, :, :2])
-            particles = (particles[1:, :, :2] - particles[:-1, :, :2]) / 0.333  # 3 Hz
+        
+        time_hist = np.cumsum(dt_history[::-1])[::-1]  # time from index i to current time
+        tiled_thist = np.tile(time_hist.reshape(-1,1), (1, particles.shape[1])).reshape(-1,particles.shape[1], 1)
+        particles = np.concatenate((particles, tiled_thist), axis=2)
 
         next_parts = self.motion_model.predict(
-            np.transpose(particles[:, :, :2], (1, 0, 2)).reshape(
+            np.transpose(particles[:, :, :], (1, 0, 2)).reshape(
                 particles.shape[1], self.nn_input_size
             )
         )
-        # print("next_parts: ", next_parts)
+
+        # print("shape of next_parts: ", next_parts.shape)
+        # print("next_parts: ", next_parts[0])
         if self.is_velocity:
             next_parts = (
-                current_parts[-1] + next_parts * 0.333
+                particles[-1, :, :2] + next_parts * dt_history[-1]
             )  # x(t+1) = x(t) + v(t) * dt
-            particles = current_parts
 
+        # roll particles in time, add latest prediction
         particles = np.concatenate(
             (
                 particles[1:, :, :2],
@@ -304,6 +308,7 @@ class ParticleFilter:
             ),
             axis=0,
         )
+        # important: will not work without this
         particles[-1, :, :] = self.add_noise(
             particles[-1, :, :], 2 * self.process_covariance
         )
@@ -312,7 +317,7 @@ class ParticleFilter:
     def predict(
         self,
         particles,
-        last_time,
+        dt,
         linear_velocity=np.zeros(2),
         angular_velocity=np.zeros(1),
     ):
@@ -323,9 +328,6 @@ class ParticleFilter:
         Input: State of the particles at time k-1
         Output: Predicted (propagated) state of the particles up to time k
         """
-        t = rospy.get_time() - self.initial_time
-        dt = t - last_time
-
         particles[:-1, :, :] = particles[1:, :, :]  # shift particles in time
         if self.prediction_method == "Unicycle":
             delta_theta = angular_velocity[0] * dt
@@ -370,9 +372,7 @@ class ParticleFilter:
                 particles[-2, :, :2] + delta_distance * particles[-1, :, :2]
             )
 
-        last_time = t
-
-        return particles, last_time
+        return particles
 
     def resample(self):
         """Uses the multinomial resampling algorithm to update the belief in the system state.

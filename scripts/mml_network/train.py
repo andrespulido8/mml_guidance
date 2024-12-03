@@ -87,7 +87,7 @@ def parameter_search(
     return best_params
 
 
-def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None, test_percent=0.2, title="Test"):
+def plot_NN_output(features, predictions, true_label, is_velocities, title="Test"):
     # font sizes for the plot labels
     font = {"family": "serif", "weight": "normal", "size": 40}
     sns.set_theme()
@@ -97,9 +97,18 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None, test_percent=
     # figure with legends
     fig, ax = plt.subplots()
 
-    occlusions = np.array(
-        [[-1.75, -0.75, -1.1, -0.1], [-0.15, 0.85, -0.3, 0.7]]
-    )  # [x_min, x_max, y_min, y_max]
+    occ_widths = [1, 1]
+    occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
+    # [x_min, x_max, y_min, y_max]
+    occlusions = [
+        [
+            occ_centers[i][0] - occ_widths[i] / 2,
+            occ_centers[i][0] + occ_widths[i] / 2,
+            occ_centers[i][1] - occ_widths[i] / 2,
+            occ_centers[i][1] + occ_widths[i] / 2,
+        ]
+        for i in range(len(occ_centers))
+    ]
     # plot the squares representing occlusions
     for occlusion in occlusions:
         plt.plot(
@@ -107,94 +116,81 @@ def plot_NN_output(X_test, y_pred, y_test, is_velocities, df=None, test_percent=
             [occlusion[2], occlusion[2], occlusion[3], occlusion[3], occlusion[2]],
             color="black",
         )
-    # plot an arrow from the last point of X_test to the predicted point and the actual point
 
-    if not is_velocities:
-        # Calculate arrow directions for predictions and actual values
-        pred_dx = y_pred[:, 0] - X_test[:, -2]
-        pred_dy = y_pred[:, 1] - X_test[:, -1]
-        actual_dx = y_test[:, 0] - X_test[:, -2]
-        actual_dy = y_test[:, 1] - X_test[:, -1]
-
-        # Plot path
-        # ax.plot(X_test[:, 0], X_test[:, 1], color="black", linestyle="--", label="Path", alpha=0.5)
-
-        # Plot predicted arrows
-        arrow_length = 1.5  # higher value means shorter arrows
-        plt.quiver(
-            X_test[:, -2],
-            X_test[:, -1],
-            pred_dx,
-            pred_dy,
-            color="red",
-            label="Predicted",
-            alpha=0.7,
-            scale=arrow_length,
-            headwidth=6,  # Increase the width of the arrowhead
-        )
-
-        # Plot actual arrows
-        plt.quiver(
-            X_test[:, -2],
-            X_test[:, -1],
-            actual_dx,
-            actual_dy,
-            color="blue",
-            label="Actual",
-            alpha=0.7,
-            scale=arrow_length,
-            headwidth=6,  # Increase the width of the arrowhead
-        )
-
-    else:
-        # plot the predicted and actual velocities as arrows from the positions defined in df
-        #_, Xpos_test, _, _ = train_test_split(
-        #    df.iloc[:, :-2].values, df.iloc[:, -2:], test_size=0.2, random_state=42
-        #)
-        length = df.shape[0]
-        if title == "Test":
-            Xpos_test = df.iloc[math.floor(length * (1 - test_percent)) :, :-2].values
-        elif title == "Train":
-            Xpos_test = df.iloc[: math.floor(length * (1 - test_percent)), :-2].values
-        print("Xpos_test: ", Xpos_test.shape)
-        arrow_length = 0.15
-        for i in range(Xpos_test.shape[0] - 1):
+    clip_arrow = 2.  # clip the arrow length
+    if is_velocities:
+        pos = features[:, -3:-1] 
+        arrow_length = np.clip(features[:, -1], -clip_arrow, clip_arrow)  # time step
+        for i in range(pos.shape[0] - 1):
             plt.arrow(
-                Xpos_test[i, -2],
-                Xpos_test[i, -1],
-                y_pred[i, -2] * arrow_length,
-                y_pred[i, -1] * arrow_length,
+                pos[i, -2],
+                pos[i, -1],
+                predictions[i, -2] * arrow_length[i],
+                predictions[i, -1] * arrow_length[i],
                 color="red",
                 width=0.005,
                 head_width=0.02,
             )
             plt.arrow(
-                Xpos_test[i, -2],
-                Xpos_test[i, -1],
-                y_test[i, 0] * arrow_length,
-                y_test[i, 1] * arrow_length,
+                pos[i, -2],
+                pos[i, -1],
+                true_label[i, 0] * arrow_length[i],
+                true_label[i, 1] * arrow_length[i],
                 color="blue",
                 width=0.005,
                 head_width=0.02,
             )
-        # empty arrows for labels
-        plt.arrow(0, 0, 0, 0, color="red", label="Predicted")
-        plt.arrow(0, 0, 0, 0, color="blue", label="Actual")
+    else:
+        # Calculate arrow directions for predictions and actual values (position - prev_position)
+        pred_dx = np.clip(predictions[:, 0] - features[:, -3], -clip_arrow/10, clip_arrow/10)
+        pred_dy = np.clip(predictions[:, 1] - features[:, -2], -clip_arrow/10, clip_arrow/10)
+        actual_dx = np.clip(true_label[:, 0] - features[:, -3], -clip_arrow/10, clip_arrow/10)
+        actual_dy = np.clip(true_label[:, 1] - features[:, -2], -clip_arrow/10, clip_arrow/10)
+
+        arrow_length = 2.5  # higher value means shorter arrows
+        # Plot actual arrows
+        plt.quiver(
+            features[:, -3],
+            features[:, -2],
+            actual_dx,
+            actual_dy,
+            color="blue",
+            alpha=0.9,
+            scale=arrow_length,
+            headwidth=2,  # Increase the width of the arrowhead
+            width=0.0035,
+        )
+        # Plot predicted arrows
+        plt.quiver(
+            features[:, -3],
+            features[:, -2],
+            pred_dx,
+            pred_dy,
+            color="red",
+            alpha=0.9,
+            scale=arrow_length,
+            headwidth=2,  # Increase the width of the arrowhead
+            width=0.0035,
+        )
+
+    # Plot path
+    ax.plot(features[features.shape[0]//2, 0::3], features[features.shape[0]//2, 1::3], color="black", marker="o", label="Path History Sample", linewidth=1)
+    # for legend
+    plt.arrow(0, 0, 0, 0, color="red", label="Predicted")
+    plt.arrow(0, 0, 0, 0, color="blue", label="Actual")
 
     plt.title(title)
-    # axis labels
     plt.xlabel("$x_g$ [m]")
     plt.ylabel("$y_g$ [m]")
-    # min and max x and y values
-    plt.xlim([-2, 1.0])
-    plt.ylim([-1.5, 2])
+    # plt.xlim([-2, 1.0])
+    # plt.ylim([-1.5, 2])
     # equal aspect ratio
     plt.gca().set_aspect("equal", adjustable="box")
-    plt.legend(loc="upper right")
+    plt.legend(bbox_to_anchor=(1, 1))
     plt.show()
 
 
-def select_model(model_name, input_size):
+def select_model(model_name, input_size, input_dim=2):
     if model_name == "SimpleDNN":
         model = SimpleDNN(
             input_size=input_size,
@@ -205,11 +201,11 @@ def select_model(model_name, input_size):
         )
     elif model_name == "TransAm":
         print("input size: ", input_size)
-        model = TransAm(in_dim=2, n_embed=10, num_layers=1, n_head=1, dropout=0.01)
+        model = TransAm(in_dim=input_dim, n_embed=10, num_layers=1, n_head=1, dropout=0.01)
     elif model_name == "ScratchTransformer":
-        block_size = input_size // 2
+        block_size = input_size // input_dim
         model = ScratchTransformer(
-            input_dim=2, block_size=block_size, n_embed=5, n_head=4, n_layer=2
+            input_dim=input_dim, block_size=block_size, n_embed=5, n_head=4, n_layer=2
         )
     else:
         raise ValueError("Invalid model name")
@@ -237,7 +233,7 @@ def select_parameters(model_name, input_size):
         }
     elif model_name == "TransAm":
         param_grid = {
-            "n_embed": [2, 5, 10],
+            "n_embed": [3, 5, 10],
             "num_layers": [1, 2],
             "n_head": [1, 2],
         }
@@ -249,30 +245,52 @@ def select_parameters(model_name, input_size):
 
 def main():
     is_velocities = True
+    is_occlusion = True 
     is_parameter_search = False
+    get_every_n = 2
     model_name = (
-        "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
+        "SimpleDNN"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
     )
     prefix_name = "noisy_"
 
-    path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
-    # print the files in the directory
-    df = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
-    if is_velocities:
-        prefix_name = prefix_name + "velocities_"
-        df_vel = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
-    X = df.iloc[:, :-2].values if not is_velocities else df_vel.iloc[:, :-2].values
-    y = df.iloc[:, -2:].values if not is_velocities else df_vel.iloc[:, -2:].values
+    print(f"Training NN w is_velocities: {is_velocities}, model: {model_name}, is_parameter_search: {is_parameter_search}, prefix_name: {prefix_name}")
 
+    path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
+
+    input_dim = 3
+    
+    prefix_name = prefix_name + "velocities_" if is_velocities else prefix_name + "time_"
+
+    if is_occlusion:
+        df_no_occlusion = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")  # non-occluded
+        prefix_name = prefix_name + "occlusions_"
+        print("df shape: ", df_no_occlusion.shape)
+
+    df = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
+    print("df shape: ", df.shape)
+    X = df.iloc[::get_every_n, :-3].values
+    Y = df.iloc[::get_every_n, -3:-1].values
+    print("shape of X: ", X.shape)
+    print("shape of Y: ", Y.shape)
+    
     # split the data into training and testing sets
-    test_percent = 0.8
-    length = len(X)
-    X_train, X_test = X[: math.floor(length * (1 - test_percent))], X[
-        math.floor(length * (1 - test_percent)) :
-    ]
-    y_train, y_test = y[: math.floor(length * (1 - test_percent))], y[
-        math.floor(length * (1 - test_percent)) :
-    ]
+    test_percent = 0.2
+    epochs = 200
+
+    def get_ordered_train_test(data):
+        length = len(data)
+        data_train, data_test = data[: math.floor(length * (1 - test_percent))], data[
+            math.floor(length * (1 - test_percent)) :
+        ]
+        return data_train, data_test
+
+    X_train, X_test = get_ordered_train_test(X)
+    y_train, y_test = get_ordered_train_test(Y)
+    if is_occlusion:
+        test_percent = 0.4
+        _, X_test = get_ordered_train_test(df_no_occlusion.iloc[::get_every_n, :-3].values)
+        _, y_test = get_ordered_train_test(df_no_occlusion.iloc[::get_every_n, -3:-1].values)
+
     X_train = torch.from_numpy(X_train.astype(np.float32)).to(
         device
     )  # (N, T*C) = (N, 10*2)
@@ -284,16 +302,9 @@ def main():
 
     criterion = nn.MSELoss()
 
-    model = select_model(model_name=model_name, input_size=X_train.shape[1])
+    model = select_model(model_name=model_name, input_size=X_train.shape[1], input_dim=input_dim)
 
-    epochs = 20
-    weights_filename = (
-        path
-        + "../../scripts/mml_network/models/best_"
-        + prefix_name
-        + model_name
-        + ".pth"
-    )
+    weights_filename = f"../../scripts/mml_network/models/best_{prefix_name}{model_name}.pth"
     if is_parameter_search:
         param_grid = select_parameters(
             model_name=model_name, input_size=X_train.shape[1]
@@ -327,16 +338,21 @@ def main():
         print("Model saved to: ", weights_filename)
 
     model.eval()
+
+    # evaluate training data
+    train_loss, y_pred_train = evaluate(model, criterion, X_train, y_train)
+    y_pred_train = y_pred_train.to("cpu").detach().numpy()
+    X_train = X_train.to("cpu").detach().numpy()
+    print("Train Loss: ", train_loss)
+    plot_NN_output(X_train, y_pred_train, y_train, is_velocities, "Train")
+
+    # evaluate test data
     test_loss, y_pred = evaluate(model, criterion, X_test, y_test)
     print("Test Loss: ", test_loss)
-
     X_test = X_test.to("cpu").detach().numpy()
     y_pred = y_pred.to("cpu").detach().numpy()
     y_test = y_test.to("cpu").detach().numpy()
-    plot_NN_output(X_test, y_pred, y_test, is_velocities, df, test_percent, "Test")
-    train_loss, y_pred = evaluate(model, criterion, X_train, y_train)
-    print("Train Loss: ", train_loss)
-    plot_NN_output(X_train , y_pred, y_train, is_velocities, df, test_percent, "Train")
+    plot_NN_output(X_test, y_pred, y_test, is_velocities, "Test")
 
     return 0
 
