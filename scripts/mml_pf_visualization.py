@@ -126,7 +126,7 @@ class MML_PF_Visualization:
         gs = gridspec.GridSpec(ncols=3, nrows=3)
 
         # move the figure to the top left part of the screen
-        move_figure(fig, 0, 0)
+        #move_figure(fig, 0, 0)
 
         # initialize subplot in the matplotlib figure
         self.fig_ax1 = fig.add_subplot(gs[:, :])
@@ -139,10 +139,11 @@ class MML_PF_Visualization:
         self.fig_ax4.set_title("Est y vs Real y")
         self.fig_ax5 = fig2.add_subplot(gs[:, 2])
         self.fig_ax5.set_title("Entropy")
+        plt.close(fig2)
 
         # set the map image boundaries and resize it to respect aspect ratio
         self.fig_ax1.axis("equal")
-        self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+        self.fig_ax1.set(xlim=(-3.5, 3.5), ylim=(-5, 5))
 
         # initialize data structure
         # estimate error lists to plot respective to timestamp
@@ -341,7 +342,7 @@ class MML_PF_Visualization:
                 self.fig_ax4.set_title("Est yaw vs Real yaw")
                 self.fig_ax5.set_title("Entropy")
                 self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                self.fig_ax1.set(xlim=(-3.5, 3.5), ylim=(-5, 5))
 
                 # plot the road network
                 self.fig_ax1.plot(
@@ -387,7 +388,7 @@ class MML_PF_Visualization:
                 # plot spaguetti plots and scatter using the future particles and the sampled index
                 # TODO: change from blue to black
                 self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                # self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                 if self.plot_prediction:
                     slope = (0.5 - 0.05) / (self.K - 1)
                     for k in range(self.K):
@@ -427,8 +428,8 @@ class MML_PF_Visualization:
                                     alpha=0.2,
                                 )
                             counter += 1
-                            self.fig_ax1.axis("equal")
-                            self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                            # self.fig_ax1.axis("equal")
+                            # self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                     self.fig_ax1.scatter(
                         self.fov[0, 0],
                         self.fov[0, 1],
@@ -439,7 +440,7 @@ class MML_PF_Visualization:
                     )  # fake for legend
 
                 self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                # self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                 # plot the real position
                 if self.is_sim:
                     self.fig_ax1.plot(
@@ -533,15 +534,15 @@ class MML_PF_Visualization:
                         self.mocap_msg.pose.pose.orientation.z,
                         self.mocap_msg.pose.pose.orientation.w,
                     )[2]
-                    self.fig_ax1.arrow(
-                        self.mocap_msg.pose.pose.position.x,
-                        self.mocap_msg.pose.pose.position.y,
-                        0.25 * math.cos(real_theta),
-                        0.25 * math.sin(real_theta),
-                        width=0.05,
-                        color="magenta",
-                        label="Estimated yaw",
-                    )
+                    # self.fig_ax1.arrow(
+                    #     self.mocap_msg.pose.pose.position.x,
+                    #     self.mocap_msg.pose.pose.position.y,
+                    #     0.25 * math.cos(real_theta),
+                    #     0.25 * math.sin(real_theta),
+                    #     width=0.05,
+                    #     color="magenta",
+                    #     label="Estimated yaw",
+                    # )
                 else:
                     real_theta = euler_from_quaternion(
                         self.mocap_msg.pose.orientation.x,
