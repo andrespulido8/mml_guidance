@@ -619,10 +619,6 @@ class Guidance:
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
                 self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
-                self.noisy_turtle_pose[:2] = self.filter.add_noise(
-                    self.actual_turtle_pose[:2],
-                    self.filter.measurement_covariance[:2, :2],
-                )
             else:
                 self.actual_turtle_pose = np.array(
                     [msg.pose.position.x, msg.pose.position.y]
@@ -637,12 +633,10 @@ class Guidance:
                 #    ]
                 # )
                 # _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
-                # self.noisy_turtle_pose = np.array(
-                #    [msg.pose.position.x, msg.pose.position.y, theta_z]
-                # )
-
-                # in hardware we assume the pose is already noisy
-                self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
+            self.noisy_turtle_pose[:2] = self.filter.add_noise(
+                self.actual_turtle_pose[:2],
+                self.filter.measurement_covariance[:2, :2],
+            )
 
             # Only update if the turtle is not in occlusion and in the FOV
             if self.in_occlusion(self.actual_turtle_pose[:2]):
@@ -854,8 +848,8 @@ class Guidance:
         rospy.logfatal("Timer expired or user terminated. Stopping the node...")
         rospy.sleep(0.1)
         # rospy.signal_shutdown("Timer signal shutdown")
-        # os.system("rosnode kill other_node")
-        os.system("rosnode kill drone_guidance mml_pf_visualization")
+        os.system("rosnode kill /drone_guidance /robot0/markov_goal_pose")
+        os.system("rosnode kill /mml_pf_visualization ")
         # os.system("rosservice call /gazebo/reset_world")
 
 

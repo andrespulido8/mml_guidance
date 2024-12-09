@@ -52,7 +52,7 @@ class ParticleFilter:
             model_file = f"{pkg_path}/scripts/mml_network/models/best_{prefix_name}.pth"
             # load weights
             self.motion_model.load_state_dict(
-                torch.load(model_file, map_location=device)
+                torch.load(model_file, map_location=device, weights_only=True)
             )
         else:
             self.N_th = 2
@@ -83,7 +83,7 @@ class ParticleFilter:
             self.prediction_method != "Unicycle" and self.prediction_method != "KF"
         ):  # NN Transformer and Velocity
             self.measurement_covariance = np.diag([0.01, 0.01])
-            self.process_covariance = np.diag([0.0003, 0.0003])
+            self.process_covariance = np.diag([0.0005, 0.0005])
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
