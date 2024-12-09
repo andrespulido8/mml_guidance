@@ -126,7 +126,7 @@ class MML_PF_Visualization:
         gs = gridspec.GridSpec(ncols=3, nrows=3)
 
         # move the figure to the top left part of the screen
-        #move_figure(fig, 0, 0)
+        # move_figure(fig, 0, 0)
 
         # initialize subplot in the matplotlib figure
         self.fig_ax1 = fig.add_subplot(gs[:, :])
@@ -143,7 +143,8 @@ class MML_PF_Visualization:
 
         # set the map image boundaries and resize it to respect aspect ratio
         self.fig_ax1.axis("equal")
-        self.fig_ax1.set(xlim=(-3.5, 3.5), ylim=(-5, 5))
+        self.limits = {"x": [-3.0, 2.0], "y": [-2, 2.5]}
+        self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
 
         # initialize data structure
         # estimate error lists to plot respective to timestamp
@@ -342,7 +343,7 @@ class MML_PF_Visualization:
                 self.fig_ax4.set_title("Est yaw vs Real yaw")
                 self.fig_ax5.set_title("Entropy")
                 self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=(-3.5, 3.5), ylim=(-5, 5))
+                self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
 
                 # plot the road network
                 self.fig_ax1.plot(
@@ -362,10 +363,10 @@ class MML_PF_Visualization:
                     [
                         i
                         for i in self.sampled_index
-                        if self.particles[i, 0] < 5.5
-                        and self.particles[i, 0] > -5.5
-                        and self.particles[i, 1] < 7
-                        and self.particles[i, 1] > -7
+                        if self.particles[i, 0] < self.limits["x"][1]
+                        and self.particles[i, 0] > self.limits["x"][0]
+                        and self.particles[i, 1] < self.limits["y"][1]
+                        and self.particles[i, 1] > self.limits["y"][0]
                     ]
                 )
                 self.fig_ax1.scatter(
@@ -388,7 +389,7 @@ class MML_PF_Visualization:
                 # plot spaguetti plots and scatter using the future particles and the sampled index
                 # TODO: change from blue to black
                 self.fig_ax1.axis("equal")
-                # self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
                 if self.plot_prediction:
                     slope = (0.5 - 0.05) / (self.K - 1)
                     for k in range(self.K):
@@ -429,18 +430,20 @@ class MML_PF_Visualization:
                                 )
                             counter += 1
                             # self.fig_ax1.axis("equal")
-                            # self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                            self.fig_ax1.set(
+                                xlim=self.limits["x"], ylim=self.limits["y"]
+                            )
                     self.fig_ax1.scatter(
                         self.fov[0, 0],
                         self.fov[0, 1],
                         marker=".",
                         color="b",
-                        alpha=0.3,
+                        alpha=0.01,
                         label="Propagated Particles",
                     )  # fake for legend
 
                 self.fig_ax1.axis("equal")
-                # self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
                 # plot the real position
                 if self.is_sim:
                     self.fig_ax1.plot(
