@@ -25,7 +25,9 @@ class Guidance:
         self.guidance_mode = (
             "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
         )
-        self.prediction_method = "Transformer"  # 'Transformer', 'NN', 'KF', 'Velocity' or 'Unicycle'
+        self.prediction_method = (
+            "Transformer"  # 'Transformer', 'NN', 'KF', 'Velocity' or 'Unicycle'
+        )
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -69,9 +71,7 @@ class Guidance:
         occ_widths = [1, 1]
         occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
         rospy.set_param("/occlusions", [occ_centers, occ_widths])
-        self.occlusions = [
-            Occlusions(occ_centers[i], occ_widths[i]) for i in range(len(occ_widths))
-        ]
+        self.occlusions = Occlusions(occ_centers, occ_widths)
 
         if self.guidance_mode == "Lawnmower":
             # Lawnmower Method
@@ -231,7 +231,9 @@ class Guidance:
                 self.prediction_method == "NN"
                 or self.prediction_method == "Transformer"
             ):
-                future_parts = self.filter.predict_mml(np.copy(future_parts), np.ones(future_parts.shape[0])*0.33)
+                future_parts = self.filter.predict_mml(
+                    np.copy(future_parts), np.ones(future_parts.shape[0]) * 0.33
+                )
             elif self.prediction_method == "Unicycle":
                 future_parts, last_future_time = self.filter.predict(
                     future_parts,
@@ -279,11 +281,13 @@ class Guidance:
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
             # checking for measurement outside of fov or in occlusion
-            if self.is_in_FOV(z_hat[jj], k_fov) and not self.in_occlusion(z_hat[jj]):
+            if self.is_in_FOV(z_hat[jj], k_fov) and not self.occlusions.in_occlusion(
+                z_hat[jj]
+            ):
                 future_weight[:, jj] = self.filter.update(
                     self.sampled_weights, future_parts, z_hat[jj]
                 )
- 
+
                 # H (x_{k+K} | \hat{z}_{k+K})
                 Hp_k[jj] = self.entropy_particle(
                     future_parts[-2],
@@ -298,18 +302,18 @@ class Guidance:
                     np.copy(self.sampled_weights),
                     future_parts[-1],
                 )
- 
+
             # Information Gain
             EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]
- 
+
         # EER = I.mean() # implemented when N_m is implemented
         action_index = np.argmax(EER)
         self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
         # print("EER: ", EER)
-     
+
         self.t_EER = rospy.get_time() - self.initial_time - now
         # print("EER time: ", self.t_EER)
- 
+
         self.eer_particle = self.sampled_index[action_index]
 
     def entropy_particle(
@@ -497,42 +501,6 @@ class Guidance:
             self.lawnmower_idx += self.increment
             return self.path[int(np.floor(self.lawnmower_idx)), :2]
 
-    def in_occlusion(self, pos):
-        """Return true if the position measurement is in occlusion zones for a single
-        position but if it is an array of positions, return an array of booleans for
-        particles inside occlusion
-        Inputs: pos: position to check - numpy.array of shape (2,)
-        """
-        if pos.ndim == 1:
-            in_occ = False
-            for occlusion in self.occlusions:
-                if np.all(
-                    [
-                        pos[0] > occlusion.positions[0] - occlusion.widths / 2,
-                        pos[0] < occlusion.positions[0] + occlusion.widths / 2,
-                        pos[1] > occlusion.positions[1] - occlusion.widths / 2,
-                        pos[1] < occlusion.positions[1] + occlusion.widths / 2,
-                    ]
-                ):
-                    in_occ = True
-            return in_occ
-        else:
-            # array of false values of size pos
-            prev_check = np.zeros(pos.shape[0], dtype=bool)
-            for occlusion in self.occlusions:
-                prev_check = np.logical_or(
-                    prev_check,
-                    np.logical_and.reduce(
-                        [
-                            pos[:, 0] > occlusion.positions[0] - occlusion.widths / 2,
-                            pos[:, 0] < occlusion.positions[0] + occlusion.widths / 2,
-                            pos[:, 1] > occlusion.positions[1] - occlusion.widths / 2,
-                            pos[:, 1] < occlusion.positions[1] + occlusion.widths / 2,
-                        ]
-                    ),
-                )
-            return prev_check
-
     def get_goal_position(self, event=None):
         """Get the goal position based on the guidance mode.
         Output: goal_position (numpy.array of shape (2,))"""
@@ -546,7 +514,9 @@ class Guidance:
                     self.prediction_method == "NN"
                     or self.prediction_method == "Transformer"
                 ):
-                    future_part = self.filter.predict_mml(future_part, np.ones(future_part.shape[0])*0.33)
+                    future_part = self.filter.predict_mml(
+                        future_part, np.ones(future_part.shape[0]) * 0.33
+                    )
                 if self.prediction_method == "Unicycle":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
@@ -639,7 +609,7 @@ class Guidance:
             )
 
             # Only update if the turtle is not in occlusion and in the FOV
-            if self.in_occlusion(self.actual_turtle_pose[:2]):
+            if self.occlusions.in_occlusion(self.actual_turtle_pose[:2]):
                 self.filter.is_occlusion = True
                 self.filter.is_update = False  # no update
             else:
@@ -812,7 +782,7 @@ class Guidance:
             self.filter.resample_index = np.where(
                 np.logical_and(
                     self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                    ~self.in_occlusion(self.filter.particles[-1, :, :2]),
+                    ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
             # set weights of samples close to zero
@@ -855,11 +825,44 @@ class Guidance:
 
 class Occlusions:
     def __init__(self, positions, widths):
-        """All occlusions are defined as squares with
-        some position (x and y) and some width. The attributes are
-        the arrays of positions and widths of the occlusions."""
-        self.positions = positions
-        self.widths = widths
+        """List of occlusions with helper functions"""
+        self.occlusions = [(positions[ii], widths[ii]) for ii in range(len(positions))]
+
+    def in_occlusion(self, pos):
+        """Return true if the position measurement is in occlusion zones for a single
+        position but if it is an array of positions, return an array of booleans for
+        particles inside occlusion
+        Inputs: pos: position to check - numpy.array of shape (2,)
+        """
+        if pos.ndim == 1:
+            for position, width in self.occlusions:
+                if np.all(
+                    [
+                        pos[0] > position[0] - width / 2,
+                        pos[0] < position[0] + width / 2,
+                        pos[1] > position[1] - width / 2,
+                        pos[1] < position[1] + width / 2,
+                    ]
+                ):
+                    return True
+            return False
+        else:
+            return np.array(
+                [
+                    any(
+                        np.all(
+                            [
+                                pos[ii, 0] > position[0] - width / 2,
+                                pos[ii, 0] < position[0] + width / 2,
+                                pos[ii, 1] > position[1] - width / 2,
+                                pos[ii, 1] < position[1] + width / 2,
+                            ]
+                        )
+                        for position, width in self.occlusions
+                    )
+                    for ii in range(pos.shape[0])
+                ]
+            )
 
 
 if __name__ == "__main__":
