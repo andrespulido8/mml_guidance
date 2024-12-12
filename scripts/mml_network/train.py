@@ -11,13 +11,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-try:  
+try:
     # for running the script from the scripts directory
     from simple_dnn import SimpleDNN
     from transformer_functions import TransAm
     from scratch_transformer import ScratchTransformer
 except ImportError:
-    # for running the script with ROS 
+    # for running the script with ROS
     from mml_network.simple_dnn import SimpleDNN
     from mml_network.transformer_functions import TransAm
     from mml_network.scratch_transformer import ScratchTransformer
@@ -36,12 +36,18 @@ def train(model, criterion, optimizer, X_train, y_train, epochs=100, online=Fals
         losses.append(loss.item())
         if (epoch + 1) % 10 == 0:
             print(f"Epoch {epoch+1}/{epochs}, Training Loss: {loss.item()}")
-    
+
     if online:
         X_train = X_train.to("cpu").detach().numpy()
         outputs = outputs.to("cpu").detach().numpy()
         y_train = y_train.to("cpu").detach().numpy()
-        plot_NN_output(X_train.reshape(X_train.shape[0], -1), outputs.reshape(X_train.shape[0], -1), y_train.reshape(X_train.shape[0], -1), True, "Online")
+        plot_NN_output(
+            X_train.reshape(X_train.shape[0], -1),
+            outputs.reshape(X_train.shape[0], -1),
+            y_train.reshape(X_train.shape[0], -1),
+            True,
+            "Online",
+        )
     return losses
 
 
@@ -130,9 +136,9 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
             color="black",
         )
 
-    clip_arrow = 2.  # clip the arrow length
+    clip_arrow = 2.0  # clip the arrow length
     if is_velocities:
-        pos = features[:, -3:-1] 
+        pos = features[:, -3:-1]
         arrow_length = np.clip(features[:, -1], -clip_arrow, clip_arrow)  # time step
         for i in range(pos.shape[0] - 1):
             plt.arrow(
@@ -155,10 +161,18 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
             )
     else:
         # Calculate arrow directions for predictions and actual values (position - prev_position)
-        pred_dx = np.clip(predictions[:, 0] - features[:, -3], -clip_arrow/10, clip_arrow/10)
-        pred_dy = np.clip(predictions[:, 1] - features[:, -2], -clip_arrow/10, clip_arrow/10)
-        actual_dx = np.clip(true_label[:, 0] - features[:, -3], -clip_arrow/10, clip_arrow/10)
-        actual_dy = np.clip(true_label[:, 1] - features[:, -2], -clip_arrow/10, clip_arrow/10)
+        pred_dx = np.clip(
+            predictions[:, 0] - features[:, -3], -clip_arrow / 10, clip_arrow / 10
+        )
+        pred_dy = np.clip(
+            predictions[:, 1] - features[:, -2], -clip_arrow / 10, clip_arrow / 10
+        )
+        actual_dx = np.clip(
+            true_label[:, 0] - features[:, -3], -clip_arrow / 10, clip_arrow / 10
+        )
+        actual_dy = np.clip(
+            true_label[:, 1] - features[:, -2], -clip_arrow / 10, clip_arrow / 10
+        )
 
         arrow_length = 2.5  # higher value means shorter arrows
         # Plot actual arrows
@@ -188,7 +202,14 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
 
     # Plot 3 paths
     for i in range(3):
-        ax.plot(features[i, 0::3], features[i, 1::3], color="black", marker="o", linewidth=1, alpha=0.5)
+        ax.plot(
+            features[i, 0::3],
+            features[i, 1::3],
+            color="black",
+            marker="o",
+            linewidth=1,
+            alpha=0.5,
+        )
     # label for legend of path
     plt.plot(0, 0, color="black", marker="o", label="Path History Sample", linewidth=1)
     # for legend
@@ -204,9 +225,13 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
     plt.gca().set_aspect("equal", adjustable="box")
     plt.legend(bbox_to_anchor=(1, 1))
     if title == "Online":
-        plt.savefig("/home/andres/mml_ws/src/mml_guidance/sim_data/online_network_test_output.png", bbox_inches='tight')
+        plt.savefig(
+            "/home/andres/mml_ws/src/mml_guidance/sim_data/online_network_test_output.png",
+            bbox_inches="tight",
+        )
     else:
         plt.show()
+
 
 def select_model(model_name, input_size, input_dim=2):
     if model_name == "SimpleDNN":
@@ -219,7 +244,9 @@ def select_model(model_name, input_size, input_dim=2):
         )
     elif model_name == "TransAm":
         print("input size: ", input_size)
-        model = TransAm(in_dim=input_dim, n_embed=10, num_layers=1, n_head=1, dropout=0.01)
+        model = TransAm(
+            in_dim=input_dim, n_embed=10, num_layers=1, n_head=1, dropout=0.01
+        )
     elif model_name == "ScratchTransformer":
         block_size = input_size // input_dim
         model = ScratchTransformer(
@@ -263,7 +290,7 @@ def select_parameters(model_name, input_size):
 
 def main():
     is_velocities = True
-    is_occlusion = True 
+    is_occlusion = True
     is_parameter_search = False
     evaluate_model = True
     get_every_n = 2
@@ -272,16 +299,22 @@ def main():
     )
     prefix_name = "noisy_"
 
-    print(f"Training NN w is_velocities: {is_velocities}, model: {model_name}, is_parameter_search: {is_parameter_search}, prefix_name: {prefix_name}")
+    print(
+        f"Training NN w is_velocities: {is_velocities}, model: {model_name}, is_parameter_search: {is_parameter_search}, prefix_name: {prefix_name}"
+    )
 
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
 
     input_dim = 3
-    
-    prefix_name = prefix_name + "velocities_" if is_velocities else prefix_name + "time_"
+
+    prefix_name = (
+        prefix_name + "velocities_" if is_velocities else prefix_name + "time_"
+    )
 
     if is_occlusion:
-        df_no_occlusion = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")  # non-occluded
+        df_no_occlusion = pd.read_csv(
+            path + "converted_" + prefix_name + "training_data.csv"
+        )  # non-occluded
         prefix_name = prefix_name + "occlusions_"
         print("df shape: ", df_no_occlusion.shape)
 
@@ -291,24 +324,29 @@ def main():
     Y = df.iloc[::get_every_n, -3:-1].values
     print("shape of X: ", X.shape)
     print("shape of Y: ", Y.shape)
-    
+
     # split the data into training and testing sets
     test_percent = 0.2
     epochs = 200
 
     def get_ordered_train_test(data):
         length = len(data)
-        data_train, data_test = data[: math.floor(length * (1 - test_percent))], data[
-            math.floor(length * (1 - test_percent)) :
-        ]
+        data_train, data_test = (
+            data[: math.floor(length * (1 - test_percent))],
+            data[math.floor(length * (1 - test_percent)) :],
+        )
         return data_train, data_test
 
     X_train, X_test = get_ordered_train_test(X)
     y_train, y_test = get_ordered_train_test(Y)
     if is_occlusion:
         test_percent = 0.4
-        _, X_test = get_ordered_train_test(df_no_occlusion.iloc[::get_every_n, :-3].values)
-        _, y_test = get_ordered_train_test(df_no_occlusion.iloc[::get_every_n, -3:-1].values)
+        _, X_test = get_ordered_train_test(
+            df_no_occlusion.iloc[::get_every_n, :-3].values
+        )
+        _, y_test = get_ordered_train_test(
+            df_no_occlusion.iloc[::get_every_n, -3:-1].values
+        )
 
     X_train = torch.from_numpy(X_train.astype(np.float32)).to(
         device
@@ -321,9 +359,13 @@ def main():
 
     criterion = nn.MSELoss()
 
-    model = select_model(model_name=model_name, input_size=X_train.shape[1], input_dim=input_dim)
+    model = select_model(
+        model_name=model_name, input_size=X_train.shape[1], input_dim=input_dim
+    )
 
-    weights_filename = f"../../scripts/mml_network/models/best_{prefix_name}{model_name}.pth"
+    weights_filename = (
+        f"../../scripts/mml_network/models/best_{prefix_name}{model_name}.pth"
+    )
     if is_parameter_search:
         param_grid = select_parameters(
             model_name=model_name, input_size=X_train.shape[1]
