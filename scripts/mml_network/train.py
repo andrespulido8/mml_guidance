@@ -11,14 +11,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-from simple_dnn import SimpleDNN
-from transformer_functions import TransAm
-from scratch_transformer import ScratchTransformer
+try:  
+    # for running the script from the scripts directory
+    from simple_dnn import SimpleDNN
+    from transformer_functions import TransAm
+    from scratch_transformer import ScratchTransformer
+except ImportError:
+    # for running the script with ROS 
+    from mml_network.simple_dnn import SimpleDNN
+    from mml_network.transformer_functions import TransAm
+    from mml_network.scratch_transformer import ScratchTransformer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def train(model, criterion, optimizer, X_train, y_train, epochs=100):
+def train(model, criterion, optimizer, X_train, y_train, epochs=100, online=False):
     losses = []
     for epoch in range(epochs):
         outputs = model(X_train)
@@ -29,6 +36,12 @@ def train(model, criterion, optimizer, X_train, y_train, epochs=100):
         losses.append(loss.item())
         if (epoch + 1) % 10 == 0:
             print(f"Epoch {epoch+1}/{epochs}, Training Loss: {loss.item()}")
+    
+    if online:
+        X_train = X_train.to("cpu").detach().numpy()
+        outputs = outputs.to("cpu").detach().numpy()
+        y_train = y_train.to("cpu").detach().numpy()
+        plot_NN_output(X_train.reshape(X_train.shape[0], -1), outputs.reshape(X_train.shape[0], -1), y_train.reshape(X_train.shape[0], -1), True, "Online")
     return losses
 
 
@@ -173,8 +186,11 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
             width=0.0035,
         )
 
-    # Plot path
-    ax.plot(features[features.shape[0]//2, 0::3], features[features.shape[0]//2, 1::3], color="black", marker="o", label="Path History Sample", linewidth=1)
+    # Plot 3 paths
+    for i in range(3):
+        ax.plot(features[i, 0::3], features[i, 1::3], color="black", marker="o", linewidth=1, alpha=0.5)
+    # label for legend of path
+    plt.plot(0, 0, color="black", marker="o", label="Path History Sample", linewidth=1)
     # for legend
     plt.arrow(0, 0, 0, 0, color="red", label="Predicted")
     plt.arrow(0, 0, 0, 0, color="blue", label="Actual")
@@ -187,8 +203,10 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
     # equal aspect ratio
     plt.gca().set_aspect("equal", adjustable="box")
     plt.legend(bbox_to_anchor=(1, 1))
-    plt.show()
-
+    if title == "Online":
+        plt.savefig("/home/andres/mml_ws/src/mml_guidance/sim_data/online_network_test_output.png", bbox_inches='tight')
+    else:
+        plt.show()
 
 def select_model(model_name, input_size, input_dim=2):
     if model_name == "SimpleDNN":
@@ -247,9 +265,10 @@ def main():
     is_velocities = True
     is_occlusion = True 
     is_parameter_search = False
+    evaluate_model = True
     get_every_n = 2
     model_name = (
-        "SimpleDNN"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
+        "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
     )
     prefix_name = "noisy_"
 
@@ -342,6 +361,7 @@ def main():
     # evaluate training data
     train_loss, y_pred_train = evaluate(model, criterion, X_train, y_train)
     y_pred_train = y_pred_train.to("cpu").detach().numpy()
+    y_train = y_train.to("cpu").detach().numpy()
     X_train = X_train.to("cpu").detach().numpy()
     print("Train Loss: ", train_loss)
     plot_NN_output(X_train, y_pred_train, y_train, is_velocities, "Train")
@@ -354,6 +374,18 @@ def main():
     y_test = y_test.to("cpu").detach().numpy()
     plot_NN_output(X_test, y_pred, y_test, is_velocities, "Test")
 
+    if evaluate_model:
+        weights_filename = f"../../scripts/mml_network/models/online_model.pth"
+        model.load_state_dict(torch.load(weights_filename, weights_only=True))
+        model.eval()
+        X_test = torch.from_numpy(X_test.astype(np.float32)).to(device)
+        y_test = torch.from_numpy(y_test.astype(np.float32)).to(device)
+        test_loss, y_pred = evaluate(model, criterion, X_test, y_test)
+        print("Online Model Test Loss: ", test_loss)
+        X_test = X_test.to("cpu").detach().numpy()
+        y_pred = y_pred.to("cpu").detach().numpy()
+        y_test = y_test.to("cpu").detach().numpy()
+        plot_NN_output(X_test, y_pred, y_test, is_velocities, "Test")
     return 0
 
 

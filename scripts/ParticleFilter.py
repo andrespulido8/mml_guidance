@@ -2,9 +2,12 @@ import numpy as np
 import rospy
 import rospkg
 import torch
+import torch.nn as nn
+import torch.optim as optim
 
 from mml_network.simple_dnn import SimpleDNN
 from mml_network.scratch_transformer import ScratchTransformer
+from mml_network.train import train
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
@@ -28,12 +31,18 @@ class ParticleFilter:
             self.is_velocity = True
             is_occlusions_weights = True
             input_dim = 3  # x, y, time
-            self.nn_input_size = self.N_th * input_dim 
+            self.nn_input_size = self.N_th * input_dim
             rospy.loginfo(f"Input dim and size: {input_dim}, {self.nn_input_size}")
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
             prefix_name = "noisy_"
-            prefix_name = prefix_name + "velocities_" if self.is_velocity else prefix_name + "time_"
-            prefix_name = prefix_name + "occlusions_" if is_occlusions_weights else prefix_name
+            prefix_name = (
+                prefix_name + "velocities_"
+                if self.is_velocity
+                else prefix_name + "time_"
+            )
+            prefix_name = (
+                prefix_name + "occlusions_" if is_occlusions_weights else prefix_name
+            )
             if self.prediction_method == "NN":
                 prefix_name = prefix_name + "SimpleDNN"
                 self.motion_model = SimpleDNN(
@@ -46,13 +55,17 @@ class ParticleFilter:
             elif self.prediction_method == "Transformer":
                 prefix_name = prefix_name + "ScratchTransformer"
                 self.motion_model = ScratchTransformer(
-                    input_dim=input_dim, block_size=self.N_th, n_embed=5, n_head=4, n_layer=2
+                    input_dim=input_dim,
+                    block_size=self.N_th,
+                    n_embed=5,
+                    n_head=4,
+                    n_layer=2,
                 )
-            
+
             model_file = f"{pkg_path}/scripts/mml_network/models/best_{prefix_name}.pth"
             # load weights
             self.motion_model.load_state_dict(
-                torch.load(model_file, map_location=device, weights_only=True)
+                torch.load(model_file, map_location=self.device, weights_only=True)
             )
         else:
             self.N_th = 2
@@ -76,20 +89,26 @@ class ParticleFilter:
             self.Nx = 2
             self.measurement_covariance = np.diag([0.01, 0.01])
             self.process_covariance = np.diag([0.01, 0.01, 0.001, 0.001])
-        elif self.prediction_method == "NN" or self.prediction_method == "Transformer":
-            self.Nx = 2
 
         if (
             self.prediction_method != "Unicycle" and self.prediction_method != "KF"
         ):  # NN Transformer and Velocity
+            self.Nx = 2
             self.measurement_covariance = np.diag([0.01, 0.01])
             self.process_covariance = np.diag([0.0005, 0.0005])
+            self.n_batches = 10
+        else:
+            self.n_batches = 1
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
-            (self.N_th, self.measurement_covariance.shape[0])
+            (
+                self.N_th * self.n_batches + self.n_batches,
+                self.measurement_covariance.shape[0],
+            )
         )
         self.dt_history = np.ones(self.N_th) * 0.333
+        self.dt_measurement_history = np.zeros(self.measurement_history.shape[0])
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles[-1,:, :2] = np.array([
@@ -111,6 +130,9 @@ class ParticleFilter:
         self.resample_index = np.arange(self.N)
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
+        self.last_update_time = 0.0
+        self.iteration = 0
+        self.optimize_every_n_iterations = 10
 
     def uniform_sample(self) -> np.ndarray:
         """Uniformly samples the particles between min and max values per state.
@@ -151,13 +173,7 @@ class ParticleFilter:
         """Main function of the particle filter where the predict,
         update, resample and estimate steps are called.
         """
-        t = rospy.get_time() - self.initial_time
-
-        # update measurement history with noisy_measurement
-        self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
-        self.measurement_history[-1, :2] = noisy_measurement[:2]
-        self.dt_history = np.roll(self.dt_history, -1, axis=0)
-        self.dt_history[-1] = t - self.last_time 
+        self.update_measurement_and_dt_history(noisy_measurement)
 
         # Prediction step
         if self.prediction_method == "NN" or self.prediction_method == "Transformer":
@@ -172,8 +188,9 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             estimate_velocity = (
-                self.measurement_history[-1, :] - self.measurement_history[-2, :]
-            ) * self.dt_history[-1],
+                (self.measurement_history[-1, :] - self.measurement_history[-2, :])
+                * self.dt_history[-1],
+            )
 
             self.particles = self.predict(
                 self.particles,
@@ -222,7 +239,9 @@ class ParticleFilter:
                         )
                         # repeat the measurement history to be the same size as the particles
                         measurement_history_repeated = np.tile(
-                            self.measurement_history.reshape(self.N_th, 1, self.Nx),
+                            self.measurement_history[-self.N_th :].reshape(
+                                self.N_th, 1, self.Nx
+                            ),
                             (1, self.N, 1),
                         )
                         self.particles = measurement_history_repeated + noise
@@ -232,11 +251,25 @@ class ParticleFilter:
                     # some are good but some are bad, resample
                     self.resample()
 
-        self.last_time = t
-
         # estimate for viz
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
         # print("PF time: ", rospy.get_time() - t - self.initial_time)
+
+        # optimize the learned model
+        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
+            filled_elements = np.count_nonzero(self.measurement_history) // self.Nx
+            rospy.loginfo(
+                f"Iteration: {self.iteration}; Filled elements: {filled_elements} / {self.measurement_history.shape[0]}"
+            )
+            # if measurement history buffer is full
+            if (
+                np.all(self.measurement_history)
+                and self.iteration % self.optimize_every_n_iterations == 0
+            ):
+                self.optimize_learned_model()
+            self.iteration += 1
+
+        self.last_time = rospy.get_time() - self.initial_time
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief (weights) of the particle distribution.
@@ -282,10 +315,10 @@ class ParticleFilter:
         Input: N_th (number of time histories) sets of particles up to time k-1
         Output: N_th sets of propagated particles up to time k
         """
-        
-        time_hist = np.cumsum(dt_history[::-1])[::-1]  # time from index i to current time
-        tiled_thist = np.tile(time_hist.reshape(-1,1), (1, particles.shape[1])).reshape(-1,particles.shape[1], 1)
-        particles = np.concatenate((particles, tiled_thist), axis=2)
+        tiled_dt_hist = np.tile(
+            dt_history.reshape(-1, 1), (1, particles.shape[1])
+        ).reshape(-1, particles.shape[1], 1)
+        particles = np.concatenate((particles, tiled_dt_hist), axis=2)
 
         next_parts = self.motion_model.predict(
             np.transpose(particles[:, :, :], (1, 0, 2)).reshape(
@@ -447,6 +480,71 @@ class ParticleFilter:
             | (particles[:, 1] < self.AVL_dims[0, 1])
             | (particles[:, 1] > self.AVL_dims[1, 1])
         )
+
+    def update_measurement_and_dt_history(self, noisy_measurement):
+        """Update the measurement history and the time history"""
+        t = rospy.get_time() - self.initial_time
+        dt = t - self.last_time
+        self.dt_history[:-1] = self.dt_history[1:] + dt  # delta time from index i to -1
+        self.dt_history[-1] = dt
+        if self.is_update:
+            self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
+            self.measurement_history[-1, :2] = noisy_measurement[:2]
+            update_dt = t - self.last_update_time
+            self.dt_measurement_history[:-1] = (
+                self.dt_measurement_history[1:] + update_dt
+            )
+            self.dt_measurement_history[-1] = update_dt
+            self.last_update_time = t
+
+    def optimize_learned_model(self):
+        """Optimize the neural network model with the particles and weights"""
+        print("Optimizing the learned model")
+        T, _ = self.measurement_history.shape
+        # training parameters
+        epochs = 10
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
+        # data transformation
+        label_index = np.arange(T - 1, self.n_batches, -self.N_th - 1)[::-1]
+        feature_index = np.setdiff1d(np.arange(T), label_index)
+        X_train = self.measurement_history[feature_index].reshape(
+            (self.n_batches, self.N_th, self.Nx)
+        )
+        dt_time_features = self.dt_measurement_history[feature_index].reshape(
+            (self.n_batches, self.N_th)
+        ) - self.dt_measurement_history[label_index].reshape(-1, 1)
+        X_train = np.concatenate((X_train, dt_time_features[..., np.newaxis]), axis=2)
+        y_train = self.measurement_history[label_index]
+        if self.is_velocity:
+            y_train = (y_train - X_train[:, -1, :2]) / X_train[:, -1, 2].reshape(
+                -1, 1
+            )  # vel = (x(t+1) - x(t)) / dt
+        X_train = torch.from_numpy(X_train.astype(np.float32)).to(self.device)
+        y_train = torch.from_numpy(y_train.astype(np.float32)).to(self.device)
+
+        losses = train(
+            self.motion_model,
+            criterion,
+            optimizer,
+            X_train,
+            y_train,
+            epochs,
+            online=True,
+        )
+        print("Losses: ", losses)
+
+        # discard the measurement history and only keep the last N_th
+        self.measurement_history[: -self.N_th] = np.zeros_like(
+            self.measurement_history[: -self.N_th]
+        )
+
+    def save_model(self):
+        """Save the model to a file"""
+        pkg_path = rospkg.RosPack().get_path("mml_guidance")
+        model_file = f"{pkg_path}/scripts/mml_network/models/online_model.pth"
+        torch.save(self.motion_model.state_dict(), model_file)
+        rospy.loginfo(f"Model saved to {model_file}")
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
