@@ -96,14 +96,14 @@ class ParticleFilter:
             self.Nx = 2
             self.measurement_covariance = np.diag([0.01, 0.01])
             self.process_covariance = np.diag([0.0005, 0.0005])
-            self.n_batches = 10
+            n_batches = 100
         else:
-            self.n_batches = 1
+            n_batches = 1
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
             (
-                self.N_th * self.n_batches + self.n_batches,
+                self.N_th + n_batches,
                 self.measurement_covariance.shape[0],
             )
         )
@@ -502,20 +502,29 @@ class ParticleFilter:
         print("Optimizing the learned model")
         T, _ = self.measurement_history.shape
         # training parameters
-        epochs = 10
+        epochs = 50
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
+        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.005)
         # data transformation
-        label_index = np.arange(T - 1, self.n_batches, -self.N_th - 1)[::-1]
-        feature_index = np.setdiff1d(np.arange(T), label_index)
-        X_train = self.measurement_history[feature_index].reshape(
-            (self.n_batches, self.N_th, self.Nx)
+        X_train = np.zeros(
+            (self.measurement_history.shape[0] - self.N_th, self.N_th, self.Nx)
         )
-        dt_time_features = self.dt_measurement_history[feature_index].reshape(
-            (self.n_batches, self.N_th)
-        ) - self.dt_measurement_history[label_index].reshape(-1, 1)
+        dt_time_features = np.zeros(
+            (self.measurement_history.shape[0] - self.N_th, self.N_th)
+        )
+        y_train = np.zeros((self.measurement_history.shape[0] - self.N_th, self.Nx))
+
+        # TODO: avoid for loop
+        for i in range(X_train.shape[0]):
+            X_train[i] = self.measurement_history[i : i + self.N_th].copy()
+            dt_time_features[i] = (
+                self.dt_measurement_history[i : i + self.N_th].copy()
+                - self.dt_measurement_history[i + self.N_th]
+            )
+            y_train[i] = self.measurement_history[i + self.N_th].copy()
+
         X_train = np.concatenate((X_train, dt_time_features[..., np.newaxis]), axis=2)
-        y_train = self.measurement_history[label_index]
+
         if self.is_velocity:
             y_train = (y_train - X_train[:, -1, :2]) / X_train[:, -1, 2].reshape(
                 -1, 1
@@ -532,7 +541,7 @@ class ParticleFilter:
             epochs,
             online=True,
         )
-        print("Losses: ", losses)
+        print("Losses: ", losses[:: len(losses) // 3])
 
         # discard the measurement history and only keep the last N_th
         self.measurement_history[: -self.N_th] = np.zeros_like(

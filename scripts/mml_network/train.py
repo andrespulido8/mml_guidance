@@ -233,6 +233,14 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
         plt.show()
 
 
+def initialize_weights(model):
+    for layer in model.modules():
+        if isinstance(layer, nn.Linear):
+            nn.init.kaiming_uniform_(layer.weight, nonlinearity="relu")
+            if layer.bias is not None:
+                nn.init.constant_(layer.bias, 0)
+
+
 def select_model(model_name, input_size, input_dim=2):
     if model_name == "SimpleDNN":
         model = SimpleDNN(
@@ -257,6 +265,14 @@ def select_model(model_name, input_size, input_dim=2):
 
     print("Number of parameters: ", sum(p.numel() for p in model.parameters()))
     model = model.to(device)
+
+    # Set the random seed for reproducibility
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+
+    # Reinitialize the weights to ensure they are random
+    initialize_weights(model)
 
     return model
 
@@ -326,7 +342,7 @@ def main():
     print("shape of Y: ", Y.shape)
 
     # split the data into training and testing sets
-    test_percent = 0.2
+    test_percent = 0.993
     epochs = 200
 
     def get_ordered_train_test(data):
