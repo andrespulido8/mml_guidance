@@ -47,7 +47,7 @@ class Guidance:
         camera_angle = np.array(
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
-        self.FOV_dims = np.tan(camera_angle) * self.height
+        self.FOV_dims = 1 * np.tan(camera_angle) * self.height
         self.FOV = self.construct_FOV(self.quad_position)
 
         ## INFO-DRIVEN GUIDANCE ##
@@ -55,7 +55,7 @@ class Guidance:
         # self.N_m = 1  # not implemented yet
         self.N_s = 25  # Number of sampled particles
         rospy.set_param("/num_sampled_particles", self.N_s)
-        self.K = 4  # Time steps to propagate in the future for EER
+        self.K = 3  # Time steps to propagate in the future for EER
         rospy.set_param("/predict_window", self.K)
         self.Hp_t = 1.0  # partial entropy
         self.prev_Hp = np.ones((5, 1))
@@ -780,10 +780,7 @@ class Guidance:
         # the particles in FOV and not in occlusion if there is no measurement (negative information)
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
-                np.logical_and(
-                    self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                    ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
-                )
+                self.is_in_FOV(self.filter.particles[-1], self.FOV),
             )[0]
             # set weights of samples close to zero
             self.filter.weights[self.filter.resample_index] = 1e-10
@@ -870,7 +867,7 @@ if __name__ == "__main__":
     rospy.init_node("guidance", anonymous=True)
     guidance = Guidance()
 
-    time_to_shutdown = 90
+    time_to_shutdown = 180  # 3 minutes
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
 

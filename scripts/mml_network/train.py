@@ -45,8 +45,8 @@ def train(model, criterion, optimizer, X_train, y_train, epochs=100, online=Fals
             X_train.reshape(X_train.shape[0], -1),
             outputs.reshape(X_train.shape[0], -1),
             y_train.reshape(X_train.shape[0], -1),
-            True,
-            "Online",
+            is_velocities=True,
+            title="Online",
         )
     return losses
 
@@ -201,7 +201,7 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
         )
 
     # Plot 3 paths
-    for i in range(3):
+    for i in range(min(3, features.shape[0])):
         ax.plot(
             features[i, 0::3],
             features[i, 1::3],
@@ -211,7 +211,14 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
             alpha=0.5,
         )
     # label for legend of path
-    plt.plot(0, 0, color="black", marker="o", label="Path History Sample", linewidth=1)
+    plt.plot(
+        features[0, 0],
+        features[0, 1],
+        color="black",
+        marker="o",
+        label="Path History Sample",
+        linewidth=1,
+    )
     # for legend
     plt.arrow(0, 0, 0, 0, color="red", label="Predicted")
     plt.arrow(0, 0, 0, 0, color="blue", label="Actual")
@@ -258,7 +265,7 @@ def select_model(model_name, input_size, input_dim=2):
     elif model_name == "ScratchTransformer":
         block_size = input_size // input_dim
         model = ScratchTransformer(
-            input_dim=input_dim, block_size=block_size, n_embed=5, n_head=4, n_layer=2
+            input_dim=input_dim, block_size=block_size, n_embed=10, n_head=4, n_layer=2
         )
     else:
         raise ValueError("Invalid model name")
@@ -306,9 +313,10 @@ def select_parameters(model_name, input_size):
 
 def main():
     is_velocities = True
-    is_occlusion = True
+    is_occlusion = False
     is_parameter_search = False
     evaluate_model = True
+    is_connected_graph = True
     get_every_n = 2
     model_name = (
         "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
@@ -327,12 +335,16 @@ def main():
         prefix_name + "velocities_" if is_velocities else prefix_name + "time_"
     )
 
-    if is_occlusion:
+    if is_occlusion or evaluate_model:
         df_no_occlusion = pd.read_csv(
             path + "converted_" + prefix_name + "training_data.csv"
         )  # non-occluded
-        prefix_name = prefix_name + "occlusions_"
+        prefix_name = prefix_name + "occlusions_" if is_occlusion else prefix_name
         print("df shape: ", df_no_occlusion.shape)
+
+    prefix_name = (
+        "connected_graph_" + prefix_name if is_connected_graph else prefix_name
+    )
 
     df = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
     print("df shape: ", df.shape)
@@ -342,7 +354,7 @@ def main():
     print("shape of Y: ", Y.shape)
 
     # split the data into training and testing sets
-    test_percent = 0.993
+    test_percent = 0.3
     epochs = 200
 
     def get_ordered_train_test(data):
@@ -355,8 +367,8 @@ def main():
 
     X_train, X_test = get_ordered_train_test(X)
     y_train, y_test = get_ordered_train_test(Y)
-    if is_occlusion:
-        test_percent = 0.4
+    if is_occlusion or evaluate_model:
+        test_percent = 0.8
         _, X_test = get_ordered_train_test(
             df_no_occlusion.iloc[::get_every_n, :-3].values
         )
@@ -400,7 +412,7 @@ def main():
             weights_filename=weights_filename,
         )
         model = ModelClass(**best_params)
-        model.load_state_dict(torch.load(weights_filename))
+        model.load_state_dict(torch.load(weights_filename, weights_only=True))
     else:
         optimizer = optim.Adam(model.parameters(), lr=4e-3)
         losslist = train(model, criterion, optimizer, X_train, y_train, epochs=epochs)
@@ -433,6 +445,7 @@ def main():
     plot_NN_output(X_test, y_pred, y_test, is_velocities, "Test")
 
     if evaluate_model:
+        # weights_filename = f"../../scripts/mml_network/models/best_connected_graph_noisy_velocities_ScratchTransformer.pth"
         weights_filename = f"../../scripts/mml_network/models/online_model.pth"
         model.load_state_dict(torch.load(weights_filename, weights_only=True))
         model.eval()

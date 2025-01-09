@@ -20,21 +20,21 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])
+        self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])  # hardware
         self.AVL_dims = (
-            self.AVL_dims if not is_sim else np.array([[-3.0, -1.2], [1.0, 2.0]])
+            self.AVL_dims if not is_sim else np.array([[-1.7, -1.0], [0.9, 2.0]])
         )
 
         if self.prediction_method == "NN" or self.prediction_method == "Transformer":
             self.N_th = 15  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             self.is_velocity = True
-            is_occlusions_weights = True
+            is_occlusions_weights = False
             input_dim = 3  # x, y, time
             self.nn_input_size = self.N_th * input_dim
             rospy.loginfo(f"Input dim and size: {input_dim}, {self.nn_input_size}")
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            prefix_name = "noisy_"
+            prefix_name = "connected_graph_noisy_"  # "connected_graph_noisy_" or "" for pretrained on road network
             prefix_name = (
                 prefix_name + "velocities_"
                 if self.is_velocity
@@ -57,7 +57,7 @@ class ParticleFilter:
                 self.motion_model = ScratchTransformer(
                     input_dim=input_dim,
                     block_size=self.N_th,
-                    n_embed=5,
+                    n_embed=10,
                     n_head=4,
                     n_layer=2,
                 )
@@ -84,7 +84,7 @@ class ParticleFilter:
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
             self.measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
-            self.process_covariance = np.diag([0.01, 0.01, 0.001])
+            self.process_covariance = np.diag([0.05, 0.05, 0.005])
         elif self.prediction_method == "KF":
             self.Nx = 2
             self.measurement_covariance = np.diag([0.01, 0.01])
@@ -96,14 +96,21 @@ class ParticleFilter:
             self.Nx = 2
             self.measurement_covariance = np.diag([0.01, 0.01])
             self.process_covariance = np.diag([0.0005, 0.0005])
-            n_batches = 100
+            buffer_size = (
+                300  # large but not infinite to not have dynamic memory allocation
+            )
+            self.max_batch_size = 62
+            assert (
+                self.N_th + self.max_batch_size < buffer_size
+            ), "Buffer size too small"
+            self.optimize_every_n_iterations = 10
         else:
-            n_batches = 1
+            buffer_size = 1
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
             (
-                self.N_th + n_batches,
+                self.N_th + buffer_size,
                 self.measurement_covariance.shape[0],
             )
         )
@@ -132,7 +139,6 @@ class ParticleFilter:
         self.last_time = 0.0
         self.last_update_time = 0.0
         self.iteration = 0
-        self.optimize_every_n_iterations = 10
 
     def uniform_sample(self) -> np.ndarray:
         """Uniformly samples the particles between min and max values per state.
@@ -258,15 +264,16 @@ class ParticleFilter:
         # optimize the learned model
         if self.prediction_method == "NN" or self.prediction_method == "Transformer":
             filled_elements = np.count_nonzero(self.measurement_history) // self.Nx
-            rospy.loginfo(
-                f"Iteration: {self.iteration}; Filled elements: {filled_elements} / {self.measurement_history.shape[0]}"
-            )
+            if not np.all(self.measurement_history):
+                rospy.loginfo(
+                    f"Iteration: {self.iteration}; Filled elements: {filled_elements} / {self.measurement_history.shape[0]}"
+                )
             # if measurement history buffer is full
             if (
-                np.all(self.measurement_history)
+                filled_elements > self.N_th + self.optimize_every_n_iterations
                 and self.iteration % self.optimize_every_n_iterations == 0
             ):
-                self.optimize_learned_model()
+                self.optimize_learned_model(filled_elements)
             self.iteration += 1
 
         self.last_time = rospy.get_time() - self.initial_time
@@ -497,31 +504,34 @@ class ParticleFilter:
             self.dt_measurement_history[-1] = update_dt
             self.last_update_time = t
 
-    def optimize_learned_model(self):
+    def optimize_learned_model(self, filled_elements):
         """Optimize the neural network model with the particles and weights"""
-        print("Optimizing the learned model")
-        T, _ = self.measurement_history.shape
+        rospy.loginfo("Optimizing the learned model")
+        measurement_history = self.measurement_history[-filled_elements:]
+        dt_measurement_history = self.dt_measurement_history[-filled_elements:]
         # training parameters
-        epochs = 50
+        epochs = 5
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.005)
+        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
         # data transformation
-        X_train = np.zeros(
-            (self.measurement_history.shape[0] - self.N_th, self.N_th, self.Nx)
+        batch_size = np.min((self.max_batch_size, filled_elements - self.N_th))
+        X_train = np.zeros((batch_size, self.N_th, self.Nx))
+        dt_time_features = np.zeros((batch_size, self.N_th))
+        y_train = np.zeros((batch_size, self.Nx))
+
+        # sample n_batches indexes from the data
+        idx = np.random.choice(
+            measurement_history.shape[0] - self.N_th, batch_size, replace=False
         )
-        dt_time_features = np.zeros(
-            (self.measurement_history.shape[0] - self.N_th, self.N_th)
-        )
-        y_train = np.zeros((self.measurement_history.shape[0] - self.N_th, self.Nx))
 
         # TODO: avoid for loop
-        for i in range(X_train.shape[0]):
-            X_train[i] = self.measurement_history[i : i + self.N_th].copy()
+        for i, sampled_i in enumerate(idx):
+            X_train[i] = measurement_history[sampled_i : sampled_i + self.N_th].copy()
             dt_time_features[i] = (
-                self.dt_measurement_history[i : i + self.N_th].copy()
-                - self.dt_measurement_history[i + self.N_th]
+                dt_measurement_history[sampled_i : sampled_i + self.N_th].copy()
+                - dt_measurement_history[sampled_i + self.N_th]
             )
-            y_train[i] = self.measurement_history[i + self.N_th].copy()
+            y_train[i] = measurement_history[sampled_i + self.N_th].copy()
 
         X_train = np.concatenate((X_train, dt_time_features[..., np.newaxis]), axis=2)
 
@@ -529,6 +539,7 @@ class ParticleFilter:
             y_train = (y_train - X_train[:, -1, :2]) / X_train[:, -1, 2].reshape(
                 -1, 1
             )  # vel = (x(t+1) - x(t)) / dt
+
         X_train = torch.from_numpy(X_train.astype(np.float32)).to(self.device)
         y_train = torch.from_numpy(y_train.astype(np.float32)).to(self.device)
 
@@ -542,11 +553,6 @@ class ParticleFilter:
             online=True,
         )
         print("Losses: ", losses[:: len(losses) // 3])
-
-        # discard the measurement history and only keep the last N_th
-        self.measurement_history[: -self.N_th] = np.zeros_like(
-            self.measurement_history[: -self.N_th]
-        )
 
     def save_model(self):
         """Save the model to a file"""
