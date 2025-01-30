@@ -78,7 +78,10 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size, input_dim=2, dropout=0.2, block_size=10):
         super().__init__()
         self.heads = nn.ModuleList(
-            [Head(head_size=head_size, input_dim=input_dim, block_size=block_size) for _ in range(num_heads)]
+            [
+                Head(head_size=head_size, input_dim=input_dim, block_size=block_size)
+                for _ in range(num_heads)
+            ]
         )
         self.proj = nn.Linear(head_size * num_heads, input_dim)
         self.dropout = nn.Dropout(dropout)
@@ -117,7 +120,9 @@ class Block(nn.Module):
         # input_dim: embedding dimension, n_head: the number of heads we'd like
         super().__init__()
         head_size = input_dim // n_head
-        self.sa = MultiHeadAttention(n_head, head_size, input_dim=input_dim, block_size=block_size)
+        self.sa = MultiHeadAttention(
+            n_head, head_size, input_dim=input_dim, block_size=block_size
+        )
         self.ffwd = FeedFoward(input_dim)
         self.ln1 = nn.LayerNorm(input_dim)
         self.ln2 = nn.LayerNorm(input_dim)
@@ -129,7 +134,7 @@ class Block(nn.Module):
 
 
 class ScratchTransformer(nn.Module):
-    def __init__(self, input_dim=3, block_size=15, n_embed=2, n_head=1, n_layer=1):
+    def __init__(self, input_dim=3, block_size=5, n_embed=2, n_head=1, n_layer=1):
         """A simple transformer for time series forecasting.
         The transformer consists of a stack of blocks, each containing a multi-head self-attention
         mechanism and a simple feed-forward neural network at the end.
@@ -153,12 +158,13 @@ class ScratchTransformer(nn.Module):
         self.position_embedding_table = nn.Embedding(block_size, n_embed).to(device)
         # self.position_embedding_table  = PositionalEncoding(n_embed, 0.2, max_len=10)
         self.blocks = nn.Sequential(
-            *[Block(n_embed, n_head=n_head, block_size=block_size).to(device) for _ in range(n_layer)]
+            *[
+                Block(n_embed, n_head=n_head, block_size=block_size).to(device)
+                for _ in range(n_layer)
+            ]
         )
         self.ln_f = nn.LayerNorm(n_embed).to(device)  # final layer norm
-        self.lm_head = nn.Linear(n_embed, 2).to(
-            device
-        ) 
+        self.lm_head = nn.Linear(n_embed, 2).to(device)
 
         # better init
         self.apply(self._init_weights)

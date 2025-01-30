@@ -501,7 +501,7 @@ class Guidance:
             self.lawnmower_idx += self.increment
             return self.path[int(np.floor(self.lawnmower_idx)), :2]
 
-    def get_goal_position(self, event=None):
+    def update_goal_position(self, event=None):
         """Get the goal position based on the guidance mode.
         Output: goal_position (numpy.array of shape (2,))"""
         if self.guidance_mode == "Information":
@@ -654,6 +654,7 @@ class Guidance:
     def pub_desired_state(self, event=None):
         """Publishes messages related to desired state"""
         if self.init_finished:
+            self.update_goal_position()
             ds = DesiredState()
             # run the quad if sim or the remote controller
             # sends signal of autonomous control
@@ -780,7 +781,11 @@ class Guidance:
         # the particles in FOV and not in occlusion if there is no measurement (negative information)
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
-                self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                    self.is_in_FOV(self.filter.particles[-1], self.FOV),
+            #     np.logical_and(
+            #         self.is_in_FOV(self.filter.particles[-1], self.FOV),
+            #         self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
+            #     )
             )[0]
             # set weights of samples close to zero
             self.filter.weights[self.filter.resample_index] = 1e-10
@@ -876,9 +881,10 @@ if __name__ == "__main__":
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information" or guidance.guidance_mode == "Estimator":
         rospy.Timer(rospy.Duration(1.0 / 2.5), guidance.information_driven_guidance)
+    if guidance.prediction_method == "NN" or guidance.prediction_method == "Transformer":
+        rospy.Timer(rospy.Duration(1.0 / 0.8), guidance.filter.optimize_learned_model_callback)  # 1.1Hz is  
 
     # Publish topics
-    rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.get_goal_position)
     if guidance.is_viz:
         rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_pf)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.pub_desired_state)

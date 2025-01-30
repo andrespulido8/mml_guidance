@@ -34,7 +34,7 @@ def create_dataset():
     else:
         file = "training_data_2024-03-28-00-01-46__slash_noisy_measurement.csv"
 
-    N_th = 15  # Number of time steps to consider for the history
+    N_th = 5  # Number of time steps to consider for the history
 
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
     df = pd.read_csv(

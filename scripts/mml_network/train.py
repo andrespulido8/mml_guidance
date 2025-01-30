@@ -265,7 +265,7 @@ def select_model(model_name, input_size, input_dim=2):
     elif model_name == "ScratchTransformer":
         block_size = input_size // input_dim
         model = ScratchTransformer(
-            input_dim=input_dim, block_size=block_size, n_embed=10, n_head=4, n_layer=2
+            input_dim=input_dim, block_size=block_size, n_embed=5, n_head=2, n_layer=2   
         )
     else:
         raise ValueError("Invalid model name")
@@ -321,7 +321,7 @@ def main():
     model_name = (
         "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
     )
-    prefix_name = "noisy_"
+    prefix_name = "noisy_5_"
 
     print(
         f"Training NN w is_velocities: {is_velocities}, model: {model_name}, is_parameter_search: {is_parameter_search}, prefix_name: {prefix_name}"

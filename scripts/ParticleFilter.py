@@ -26,7 +26,7 @@ class ParticleFilter:
         )
 
         if self.prediction_method == "NN" or self.prediction_method == "Transformer":
-            self.N_th = 15  # Number of time history particles
+            self.N_th = 5  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             self.is_velocity = True
             is_occlusions_weights = False
@@ -34,7 +34,7 @@ class ParticleFilter:
             self.nn_input_size = self.N_th * input_dim
             rospy.loginfo(f"Input dim and size: {input_dim}, {self.nn_input_size}")
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            prefix_name = "connected_graph_noisy_"  # "connected_graph_noisy_" or "" for pretrained on road network
+            prefix_name = "noisy_5_"  # "connected_graph_noisy_5_" or "noisy_5_" for pretrained on road network
             prefix_name = (
                 prefix_name + "velocities_"
                 if self.is_velocity
@@ -57,8 +57,8 @@ class ParticleFilter:
                 self.motion_model = ScratchTransformer(
                     input_dim=input_dim,
                     block_size=self.N_th,
-                    n_embed=10,
-                    n_head=4,
+                    n_embed=5,
+                    n_head=2,
                     n_layer=2,
                 )
 
@@ -99,11 +99,11 @@ class ParticleFilter:
             buffer_size = (
                 300  # large but not infinite to not have dynamic memory allocation
             )
-            self.max_batch_size = 62
+            self.max_batch_size = 64
             assert (
                 self.N_th + self.max_batch_size < buffer_size
             ), "Buffer size too small"
-            self.optimize_every_n_iterations = 10
+            # self.optimize_every_n_iterations = 4
         else:
             buffer_size = 1
 
@@ -179,6 +179,7 @@ class ParticleFilter:
         """Main function of the particle filter where the predict,
         update, resample and estimate steps are called.
         """
+        # t = rospy.get_time() - self.initial_time
         self.update_measurement_and_dt_history(noisy_measurement)
 
         # Prediction step
@@ -259,24 +260,23 @@ class ParticleFilter:
 
         # estimate for viz
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
-        # print("PF time: ", rospy.get_time() - t - self.initial_time)
-
-        # optimize the learned model
-        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
-            filled_elements = np.count_nonzero(self.measurement_history) // self.Nx
-            if not np.all(self.measurement_history):
-                rospy.loginfo(
-                    f"Iteration: {self.iteration}; Filled elements: {filled_elements} / {self.measurement_history.shape[0]}"
-                )
-            # if measurement history buffer is full
-            if (
-                filled_elements > self.N_th + self.optimize_every_n_iterations
-                and self.iteration % self.optimize_every_n_iterations == 0
-            ):
-                self.optimize_learned_model(filled_elements)
-            self.iteration += 1
-
         self.last_time = rospy.get_time() - self.initial_time
+
+    def optimize_learned_model_callback(self, event=None):
+        """Optimize the neural network model with the particles and weights"""
+        rospy.loginfo(f"shape of measurement history: {self.measurement_history.shape}")
+        filled_elements = np.count_nonzero(self.measurement_history) // self.Nx
+        if not np.all(self.measurement_history):
+            rospy.loginfo(
+                f"Iteration: {self.iteration}; Filled elements: {filled_elements} / {self.measurement_history.shape[0]}"
+            )
+        # if measurement history buffer is full
+        if (
+            filled_elements > self.N_th + self.max_batch_size / 2
+            # and self.iteration % self.optimize_every_n_iterations == 0
+        ):
+            self.optimize_learned_model(filled_elements)
+        #self.iteration += 1
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief (weights) of the particle distribution.
