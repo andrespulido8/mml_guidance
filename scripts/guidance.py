@@ -781,11 +781,11 @@ class Guidance:
         # the particles in FOV and not in occlusion if there is no measurement (negative information)
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
-                    self.is_in_FOV(self.filter.particles[-1], self.FOV),
-            #     np.logical_and(
-            #         self.is_in_FOV(self.filter.particles[-1], self.FOV),
-            #         self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
-            #     )
+                self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                #     np.logical_and(
+                #         self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                #         self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
+                #     )
             )[0]
             # set weights of samples close to zero
             self.filter.weights[self.filter.resample_index] = 1e-10
@@ -881,8 +881,13 @@ if __name__ == "__main__":
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
     if guidance.guidance_mode == "Information" or guidance.guidance_mode == "Estimator":
         rospy.Timer(rospy.Duration(1.0 / 2.5), guidance.information_driven_guidance)
-    if guidance.prediction_method == "NN" or guidance.prediction_method == "Transformer":
-        rospy.Timer(rospy.Duration(1.0 / 0.8), guidance.filter.optimize_learned_model_callback)  # 1.1Hz is  
+    if (
+        guidance.prediction_method == "NN"
+        or guidance.prediction_method == "Transformer"
+    ):
+        rospy.Timer(
+            rospy.Duration(1.0 / 0.8), guidance.filter.optimize_learned_model_callback
+        )  # 1.1Hz is
 
     # Publish topics
     if guidance.is_viz:
