@@ -14,7 +14,7 @@ ANG_VEL = 0.0
 
 
 class ParticleFilter:
-    def __init__(self, num_particles=10, prediction_method="NN", is_sim=False):
+    def __init__(self, num_particles=10, prediction_method="NN", is_sim=False, drone_height=2.):
 
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
@@ -81,9 +81,11 @@ class ParticleFilter:
         if self.prediction_method == "Velocity":
             self.Nx = 4  # number of states
             self.vmax = 0.7  # m/s
+            self.best_measurement_covariance = np.diag([0.01, 0.01])
+            self.process_covariance = np.diag([0.05, 0.05])
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
-            self.measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
+            self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
             self.process_covariance = np.diag([0.05, 0.05, 0.005])
         elif self.prediction_method == "KF":
             self.Nx = 2
@@ -91,10 +93,10 @@ class ParticleFilter:
             self.process_covariance = np.diag([0.01, 0.01, 0.001, 0.001])
 
         if (
-            self.prediction_method != "Unicycle" and self.prediction_method != "KF"
-        ):  # NN Transformer and Velocity
-            self.Nx = 2
-            self.measurement_covariance = np.diag([0.01, 0.01])
+            self.prediction_method == "NN" or self.prediction_method == "Transformer"
+        ):  
+            self.Nx = 2 
+            self.best_measurement_covariance = np.diag([0.006, 0.006])
             self.process_covariance = np.diag([0.0005, 0.0005])
             buffer_size = (
                 300  # large but not infinite to not have dynamic memory allocation
@@ -106,6 +108,8 @@ class ParticleFilter:
             # self.optimize_every_n_iterations = 4
         else:
             buffer_size = 1
+
+        self.update_measurement_covariance(height=drone_height)
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
         self.measurement_history = np.zeros(
@@ -503,6 +507,14 @@ class ParticleFilter:
             )
             self.dt_measurement_history[-1] = update_dt
             self.last_update_time = t
+        
+    def update_measurement_covariance(self, height):
+        """Update the measurement covariance matrix based on the height of the drone agent
+        """
+        gain = 1 + (max(height, 1.1) - 1.1) / (2. - 1.1)  # start with 2 (h=2.) and decrease to 1 (h=1.1)
+        print("Gain: ", gain)
+        self.measurement_covariance = gain * self.best_measurement_covariance
+        print("Measurement covariance: ", np.diag(self.measurement_covariance))
 
     def optimize_learned_model(self, filled_elements):
         """Optimize the neural network model with the particles and weights"""

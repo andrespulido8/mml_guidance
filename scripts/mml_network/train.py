@@ -82,7 +82,7 @@ def parameter_search(
         # initialize the model with the given parameters, make it so that it can take any parameter for any model
         model = ModelClass(**params)
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.01)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
         losses = train(model, criterion, optimizer, X_train, y_train, epochs)
         test_loss, _ = evaluate(model, criterion, X_test, y_test)
         print("Test Loss: ", test_loss, "\n")

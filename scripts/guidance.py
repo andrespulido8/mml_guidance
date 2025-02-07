@@ -43,11 +43,11 @@ class Guidance:
         self.N = 500  # Number of particles
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
-        self.height = 1.2  # height of the quadcopter in meters
-        camera_angle = np.array(
+        self.height = 1.8  # initial height of the quadcopter in meters
+        self.CAMERA_ANGLES = np.array(
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
-        self.FOV_dims = 1 * np.tan(camera_angle) * self.height
+        self.update_FOV_dims_and_measurement_cov()
         self.FOV = self.construct_FOV(self.quad_position)
 
         ## INFO-DRIVEN GUIDANCE ##
@@ -485,6 +485,13 @@ class Guidance:
         )
         return fov
 
+    def update_FOV_dims_and_measurement_cov(self):
+        """Update the FOV dimensions based on the camera angles and height of drone
+            as well as the measurement covariance based on the height of the drone
+        """
+        self.FOV_dims = np.tan(self.CAMERA_ANGLES) * self.height
+        self.filter.update_measurement_covariance(self.height)
+
     def lawnmower(self) -> np.ndarray:
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
@@ -537,6 +544,23 @@ class Guidance:
             self.goal_position = mower_position
         elif self.guidance_mode == "Estimator":
             self.goal_position = self.actual_turtle_pose
+
+        # set height depending on runtime
+        time_based = False
+        if time_based:
+            self.runtime = rospy.get_time() - self.initial_time
+            self.height = 2. - (0.7 / 180) * min(self.runtime, 180)  # 2. to 1.1 meters after 180 seconds
+            print("\nruntime: ", self.runtime)
+        else:
+            dheight = 0.02
+            print("\nfilter update: ", self.filter.is_update)
+            if self.filter.is_update:
+                self.height -= dheight
+            else:
+                self.height += dheight
+            self.height = np.clip(self.height, 1.1, 1.8)
+        print("height: ", self.height)
+        self.update_FOV_dims_and_measurement_cov()
 
     @staticmethod
     def euler_from_quaternion(q):
@@ -701,16 +725,16 @@ class Guidance:
                 fov_msg.data = fov_matrix.flatten("C")
                 self.fov_pub.publish(fov_msg)
                 # Desired FOV
-                self.des_fov = self.construct_FOV(
+                des_fov = self.construct_FOV(
                     np.array([ds.pose.x, -ds.pose.y])
                 )  # from turtle frame to quad frame
                 des_fov_matrix = np.array(
                     [
-                        [self.des_fov[0], self.des_fov[2]],
-                        [self.des_fov[0], self.des_fov[3]],
-                        [self.des_fov[1], self.des_fov[3]],
-                        [self.des_fov[1], self.des_fov[2]],
-                        [self.des_fov[0], self.des_fov[2]],
+                        [des_fov[0], des_fov[2]],
+                        [des_fov[0], des_fov[3]],
+                        [des_fov[1], des_fov[3]],
+                        [des_fov[1], des_fov[2]],
+                        [des_fov[0], des_fov[2]],
                     ]
                 )
                 fov_msg.data = des_fov_matrix.flatten("C")
@@ -781,11 +805,10 @@ class Guidance:
         # the particles in FOV and not in occlusion if there is no measurement (negative information)
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
-                self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                #     np.logical_and(
-                #         self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                #         self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
-                #     )
+                np.logical_and(
+                        self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                        ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
+                )
             )[0]
             # set weights of samples close to zero
             self.filter.weights[self.filter.resample_index] = 1e-10
