@@ -76,11 +76,11 @@ class Guidance:
         if self.guidance_mode == "Lawnmower":
             # Lawnmower Method
             lawnmower = LawnmowerPath(POINTS_PER_SLICE=8)
-            bounds = [self.filter.AVL_dims[0], 
+            bounds = [
+                self.filter.AVL_dims[0],
                 np.array([self.filter.AVL_dims[1][0], self.filter.AVL_dims[0][1]]),
                 self.filter.AVL_dims[1],
                 np.array([self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][1]]),
-                
             ]
             self.path, _ = lawnmower.generate_path(bounds, path_dist=0.4, angle=0)
             lawnmower.plot(bounds=bounds, path=self.path)
@@ -230,7 +230,6 @@ class Guidance:
         Hp_k = np.zeros(self.N_s)  # partial entropy
         EER = np.zeros(self.N_s)  # Expected Entropy Reduction
         future_parts = np.copy(self.sampled_particles)
-        last_future_time = np.copy(self.filter.last_time)
 
         pred_msg = ParticleArray()
         for k in range(self.K):  # propagate k steps in the future
@@ -242,16 +241,16 @@ class Guidance:
                     np.copy(future_parts), np.ones(future_parts.shape[0]) * 0.33
                 )
             elif self.prediction_method == "Unicycle":
-                future_parts, last_future_time = self.filter.predict(
+                future_parts = self.filter.predict(
                     future_parts,
-                    last_future_time + 0.3,
+                    0.33,
                     angular_velocity=self.angular_velocity,
                     linear_velocity=self.linear_velocity,
                 )
             elif self.prediction_method == "Velocity":
-                future_parts, last_future_time = self.filter.predict(
+                future_parts = self.filter.predict(
                     future_parts,
-                    last_future_time + 0.3,
+                    0.33,
                 )
 
             if self.is_viz:
@@ -338,6 +337,7 @@ class Guidance:
         Output:
             entropy (numpy.int64)
         """
+        # t = rospy.get_time() - self.initial_time
         if wgts.size > 0:
             # likelihod of measurement p(zt|xt)
             # (how likely is each of the particles in the gaussian of the measurement)
@@ -494,7 +494,7 @@ class Guidance:
 
     def update_FOV_dims_and_measurement_cov(self):
         """Update the FOV dimensions based on the camera angles and height of drone
-            as well as the measurement covariance based on the height of the drone
+        as well as the measurement covariance based on the height of the drone
         """
         self.FOV_dims = np.tan(self.CAMERA_ANGLES) * self.height
         self.filter.update_measurement_covariance(self.height)
@@ -502,14 +502,19 @@ class Guidance:
     def lawnmower(self) -> np.ndarray:
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
-        If the rate of pub_desired_state changes, the POINTS_PER_SLICE 
+        If the rate of pub_desired_state changes, the POINTS_PER_SLICE
         variable needs to change
         """
         if self.filter.is_update:
             return self.noisy_turtle_pose[:2]
         else:
-            if np.linalg.norm(self.quad_position - self.path[self.lawnmower_idx, :2]) > 1.:
-                self.lawnmower_idx = np.argmin(np.linalg.norm(self.path[:, :2] - self.quad_position, axis=1))
+            if (
+                np.linalg.norm(self.quad_position - self.path[self.lawnmower_idx, :2])
+                > 1.0
+            ):
+                self.lawnmower_idx = np.argmin(
+                    np.linalg.norm(self.path[:, :2] - self.quad_position, axis=1)
+                )
             if self.lawnmower_idx <= 0:
                 self.increment = 1
             if self.lawnmower_idx >= self.path.shape[0] - 1:
@@ -558,17 +563,19 @@ class Guidance:
         time_based = False
         if time_based:
             self.runtime = rospy.get_time() - self.initial_time
-            self.height = 2. - (0.7 / 180) * min(self.runtime, 180)  # 2. to 1.1 meters after 180 seconds
-            print("\nruntime: ", self.runtime)
+            self.height = 2.0 - (0.7 / 180) * min(
+                self.runtime, 180
+            )  # 2. to 1.1 meters after 180 seconds
+            # print("\nruntime: ", self.runtime)
         else:
             dheight = 0.02
-            print("\nfilter update: ", self.filter.is_update)
+            # print("\nfilter update: ", self.filter.is_update)
             if self.filter.is_update:
                 self.height -= dheight
             else:
                 self.height += dheight
             self.height = np.clip(self.height, 1.1, 1.8)
-        print("height: ", self.height)
+        # print("height: ", self.height)
         self.update_FOV_dims_and_measurement_cov()
 
     @staticmethod
@@ -625,8 +632,13 @@ class Guidance:
                 if self.prediction_method == "DMMN" and False:
                     # use this to give fast update measurements to DMMN instead of guidance_pf
                     t = rospy.get_time() - self.initial_time
-                    if self.filter.is_update or self.filter.motion_model.lastTime is None:
-                        _, etaHat, _, _ = self.filter.motion_model.learn(self.actual_turtle_pose[:2], self.linear_velocity, t)
+                    if (
+                        self.filter.is_update
+                        or self.filter.motion_model.lastTime is None
+                    ):
+                        _, etaHat, _, _ = self.filter.motion_model.learn(
+                            self.actual_turtle_pose[:2], self.linear_velocity, t
+                        )
                     else:
                         etaHat, _ = self.filter.motion_model.predict(t)
                     _, optimized = self.filter.motion_model.optimize()
@@ -824,8 +836,8 @@ class Guidance:
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
                 np.logical_and(
-                        self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                        ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
+                    self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                    ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
             # set weights of samples close to zero
@@ -861,13 +873,17 @@ class Guidance:
             if self.filter.motion_model.lastTime is None:
                 # self.kf.X = np.concatenate((self.actual_turtle_pose[:2], [0.1, 0.1]))
                 # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
-                _, etaHat, _, _ = self.filter.motion_model.learn(self.actual_turtle_pose[:2], self.linear_velocity, t)
+                _, etaHat, _, _ = self.filter.motion_model.learn(
+                    self.actual_turtle_pose[:2], self.linear_velocity, t
+                )
 
             # self.kf.predict(dt=0.333)
             if self.filter.is_update:
                 # self.kf.update(self.noisy_turtle_pose[:2])
                 # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
-                _, etaHat, _, _ = self.filter.motion_model.learn(self.actual_turtle_pose[:2], self.linear_velocity, t)
+                _, etaHat, _, _ = self.filter.motion_model.learn(
+                    self.actual_turtle_pose[:2], self.linear_velocity, t
+                )
             else:
                 etaHat, _ = self.filter.motion_model.predict(t)
 
@@ -879,7 +895,7 @@ class Guidance:
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
         rospy.logfatal("Timer expired or user terminated. Stopping the node...")
-        self.filter.save_model()  if self.prediction_method == "NN" or self.prediction_method == "Transformer" else None
+        self.filter.save_model() if self.prediction_method == "NN" or self.prediction_method == "Transformer" else None
         rospy.sleep(0.1)
         # rospy.signal_shutdown("Timer signal shutdown")
         os.system("rosnode kill /drone_guidance /robot0/markov_goal_pose")

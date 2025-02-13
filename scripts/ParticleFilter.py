@@ -15,7 +15,9 @@ ANG_VEL = 0.0
 
 
 class ParticleFilter:
-    def __init__(self, num_particles=10, prediction_method="NN", is_sim=False, drone_height=2.):
+    def __init__(
+        self, num_particles=10, prediction_method="NN", is_sim=False, drone_height=2.0
+    ):
 
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
@@ -93,9 +95,9 @@ class ParticleFilter:
             self.best_measurement_covariance = np.diag([0.01, 0.01])
             self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
         if self.prediction_method == "DMMN":
-            inputSize = 2 #number of inputs to NN
+            inputSize = 2  # number of inputs to NN
             gamma = 0.1  # a learning for online learning
-            k1 = 5.  # a learning for online learning
+            k1 = 5.0  # a learning for online learning
             # NN parameters
             numberHiddenLayers = 2  # number of hidden layers
             hiddenSize = 6  # size of each hidden layer
@@ -107,15 +109,27 @@ class ParticleFilter:
             alpha = 0.001  # learning rate for SGD
             memorySize = 150  # number of data points to save for each training
             batchSize = 20  # size of a batch for each training epoch, should be multiple of memory size
-            numberEpochs = 25 # 25  # number of iterations for each training
+            numberEpochs = 25  # 25  # number of iterations for each training
             minDistance = 0.005  # minimum distance between any two data points
 
-            self.motion_model = dmmn.MotionModel(alpha,numberHiddenLayers,inputSize,hiddenSize,outputSize,probHiddenDrop,useAttention,memorySize,batchSize,numberEpochs,minDistance,gamma,k1)
+            self.motion_model = dmmn.MotionModel(
+                alpha,
+                numberHiddenLayers,
+                inputSize,
+                hiddenSize,
+                outputSize,
+                probHiddenDrop,
+                useAttention,
+                memorySize,
+                batchSize,
+                numberEpochs,
+                minDistance,
+                gamma,
+                k1,
+            )
 
-        if (
-            self.prediction_method == "NN" or self.prediction_method == "Transformer"
-        ):  
-            self.Nx = 2 
+        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
+            self.Nx = 2
             self.best_measurement_covariance = np.diag([0.006, 0.006])
             self.process_covariance = np.diag([0.0005, 0.0005])
             buffer_size = (
@@ -125,7 +139,6 @@ class ParticleFilter:
             assert (
                 self.N_th + self.max_batch_size < buffer_size
             ), "Buffer size too small"
-            # self.optimize_every_n_iterations = 4
         else:
             buffer_size = 1
 
@@ -220,9 +233,8 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             estimate_velocity = (
-                (self.measurement_history[-1, :] - self.measurement_history[-2, :])
-                * self.dt_history[-1]
-            )
+                self.measurement_history[-1, :] - self.measurement_history[-2, :]
+            ) * self.dt_history[-1]
 
             self.particles = self.predict(
                 self.particles,
@@ -297,11 +309,12 @@ class ParticleFilter:
             )
         # if measurement history buffer is full
         if (
-            filled_elements > self.N_th + self.max_batch_size / 2
+            filled_elements
+            > self.N_th + self.max_batch_size / 2
             # and self.iteration % self.optimize_every_n_iterations == 0
         ):
             self.optimize_learned_model(filled_elements)
-        #self.iteration += 1
+        # self.iteration += 1
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief (weights) of the particle distribution.
@@ -516,9 +529,12 @@ class ParticleFilter:
     def update_measurement_and_dt_history(self, noisy_measurement):
         """Update the measurement history and the time history"""
         t = rospy.get_time() - self.initial_time
+
         dt = t - self.last_time
+        # pf dt history
         self.dt_history[:-1] = self.dt_history[1:] + dt  # delta time from index i to -1
         self.dt_history[-1] = dt
+
         if self.is_update:
             self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
             self.measurement_history[-1, :2] = noisy_measurement[:2]
@@ -528,14 +544,15 @@ class ParticleFilter:
             )
             self.dt_measurement_history[-1] = update_dt
             self.last_update_time = t
-        
+
     def update_measurement_covariance(self, height):
-        """Update the measurement covariance matrix based on the height of the drone agent
-        """
-        gain = 1 + (max(height, 1.1) - 1.1) / (2. - 1.1)  # start with 2 (h=2.) and decrease to 1 (h=1.1)
-        print("Gain: ", gain)
+        """Update the measurement covariance matrix based on the height of the drone agent"""
+        gain = 1 + (max(height, 1.1) - 1.1) / (
+            2.0 - 1.1
+        )  # start with 2 (h=2.) and decrease to 1 (h=1.1)
+        # print("Gain: ", gain)
         self.measurement_covariance = gain * self.best_measurement_covariance
-        print("Measurement covariance: ", np.diag(self.measurement_covariance))
+        # print("Measurement covariance: ", np.diag(self.measurement_covariance))
 
     def optimize_learned_model(self, filled_elements):
         """Optimize the neural network model with the particles and weights"""
@@ -585,7 +602,6 @@ class ParticleFilter:
             epochs,
             online=True,
         )
-        print("Losses: ", losses[:: len(losses) // 3])
 
     def save_model(self):
         """Save the model to a file"""
