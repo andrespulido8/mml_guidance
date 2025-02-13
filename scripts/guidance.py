@@ -75,8 +75,15 @@ class Guidance:
 
         if self.guidance_mode == "Lawnmower":
             # Lawnmower Method
-            lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5, is_sim=self.is_sim)
-            self.path = lawnmower.trajectory()
+            lawnmower = LawnmowerPath(POINTS_PER_SLICE=8)
+            bounds = [self.filter.AVL_dims[0], 
+                np.array([self.filter.AVL_dims[1][0], self.filter.AVL_dims[0][1]]),
+                self.filter.AVL_dims[1],
+                np.array([self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][1]]),
+                
+            ]
+            self.path, _ = lawnmower.generate_path(bounds, path_dist=0.4, angle=0)
+            lawnmower.plot(bounds=bounds, path=self.path)
             self.lawnmower_idx = 0
             self.increment = 1
         if self.prediction_method == "KF":
@@ -495,12 +502,14 @@ class Guidance:
     def lawnmower(self) -> np.ndarray:
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
-        If the rate of pub_desired_state changes, the increment
+        If the rate of pub_desired_state changes, the POINTS_PER_SLICE 
         variable needs to change
         """
         if self.filter.is_update:
             return self.noisy_turtle_pose[:2]
         else:
+            if np.linalg.norm(self.quad_position - self.path[self.lawnmower_idx, :2]) > 1.:
+                self.lawnmower_idx = np.argmin(np.linalg.norm(self.path[:, :2] - self.quad_position, axis=1))
             if self.lawnmower_idx <= 0:
                 self.increment = 1
             if self.lawnmower_idx >= self.path.shape[0] - 1:
