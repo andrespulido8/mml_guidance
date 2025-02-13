@@ -23,10 +23,10 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Information"  # 'Information', 'WeightedMean', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = (
-            "Transformer"  # 'Transformer', 'NN', 'KF', 'Velocity' or 'Unicycle'
+            "Transformer"  # 'Transformer', 'NN', 'DMMN', 'KF', 'Velocity' or 'Unicycle'
         )
 
         # Initialization of robot variables
@@ -537,7 +537,7 @@ class Guidance:
                         last_future_time + 0.3,
                     )
             self.goal_position = future_part[-1][0]
-        elif self.guidance_mode == "Particles":
+        elif self.guidance_mode == "WeightedMean":
             self.goal_position = self.filter.weighted_mean
         elif self.guidance_mode == "Lawnmower":
             mower_position = self.lawnmower()
@@ -613,6 +613,15 @@ class Guidance:
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
                 self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
+                if self.prediction_method == "DMMN" and False:
+                    # use this to give fast update measurements to DMMN instead of guidance_pf
+                    t = rospy.get_time() - self.initial_time
+                    if self.filter.is_update or self.filter.motion_model.lastTime is None:
+                        _, etaHat, _, _ = self.filter.motion_model.learn(self.actual_turtle_pose[:2], self.linear_velocity, t)
+                    else:
+                        etaHat, _ = self.filter.motion_model.predict(t)
+                    _, optimized = self.filter.motion_model.optimize()
+                    self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
             else:
                 self.actual_turtle_pose = np.array(
                     [msg.pose.position.x, msg.pose.position.y]
@@ -837,11 +846,31 @@ class Guidance:
                 self.noisy_turtle_pose[:2]
             ) if self.filter.is_update else None
             self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
+        elif self.prediction_method == "DMMN":
+            # initialize the Kalman filter with true positions if it is the first time
+            t = rospy.get_time() - self.initial_time
+            if self.filter.motion_model.lastTime is None:
+                # self.kf.X = np.concatenate((self.actual_turtle_pose[:2], [0.1, 0.1]))
+                # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
+                _, etaHat, _, _ = self.filter.motion_model.learn(self.actual_turtle_pose[:2], self.linear_velocity, t)
+
+            # self.kf.predict(dt=0.333)
+            if self.filter.is_update:
+                # self.kf.update(self.noisy_turtle_pose[:2])
+                # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
+                _, etaHat, _, _ = self.filter.motion_model.learn(self.actual_turtle_pose[:2], self.linear_velocity, t)
+            else:
+                etaHat, _ = self.filter.motion_model.predict(t)
+
+            _, optimized = self.filter.motion_model.optimize()
+            # rospy.loginfo("actual: %s", self.actual_turtle_pose)
+            # rospy.loginfo("MMN estimate: %s", etaHat)
+            self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
 
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
         rospy.logfatal("Timer expired or user terminated. Stopping the node...")
-        self.filter.save_model()
+        self.filter.save_model()  if self.prediction_method == "NN" or self.prediction_method == "Transformer" else None
         rospy.sleep(0.1)
         # rospy.signal_shutdown("Timer signal shutdown")
         os.system("rosnode kill /drone_guidance /robot0/markov_goal_pose")

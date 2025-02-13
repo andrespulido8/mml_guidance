@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+import mml_network.motion_model_network as dmmn
 from mml_network.simple_dnn import SimpleDNN
 from mml_network.scratch_transformer import ScratchTransformer
 from mml_network.train import train
@@ -87,10 +88,29 @@ class ParticleFilter:
             self.Nx = 3
             self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
             self.process_covariance = np.diag([0.05, 0.05, 0.005])
-        elif self.prediction_method == "KF":
+        elif self.prediction_method == "KF" or self.prediction_method == "DMMN":
             self.Nx = 2
-            self.measurement_covariance = np.diag([0.01, 0.01])
-            self.process_covariance = np.diag([0.01, 0.01, 0.001, 0.001])
+            self.best_measurement_covariance = np.diag([0.01, 0.01])
+            self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
+        if self.prediction_method == "DMMN":
+            inputSize = 2 #number of inputs to NN
+            gamma = 0.1  # a learning for online learning
+            k1 = 5.  # a learning for online learning
+            # NN parameters
+            numberHiddenLayers = 2  # number of hidden layers
+            hiddenSize = 6  # size of each hidden layer
+            outputSize = 5  # size of the output of the NN
+            probHiddenDrop = 0.0  # dropout probability for hidden layers
+            useAttention = False  # use attention at output layer
+
+            # learning parameters
+            alpha = 0.001  # learning rate for SGD
+            memorySize = 150  # number of data points to save for each training
+            batchSize = 20  # size of a batch for each training epoch, should be multiple of memory size
+            numberEpochs = 25 # 25  # number of iterations for each training
+            minDistance = 0.005  # minimum distance between any two data points
+
+            self.motion_model = dmmn.MotionModel(alpha,numberHiddenLayers,inputSize,hiddenSize,outputSize,probHiddenDrop,useAttention,memorySize,batchSize,numberEpochs,minDistance,gamma,k1)
 
         if (
             self.prediction_method == "NN" or self.prediction_method == "Transformer"
@@ -165,6 +185,7 @@ class ParticleFilter:
         elif (
             self.prediction_method == "NN"
             or self.prediction_method == "KF"
+            or self.prediction_method == "DMMN"
             or self.prediction_method == "Transformer"
         ):
             local_particles = np.random.uniform(
@@ -200,7 +221,7 @@ class ParticleFilter:
         elif self.prediction_method == "Velocity":
             estimate_velocity = (
                 (self.measurement_history[-1, :] - self.measurement_history[-2, :])
-                * self.dt_history[-1],
+                * self.dt_history[-1]
             )
 
             self.particles = self.predict(

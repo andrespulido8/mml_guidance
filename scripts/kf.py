@@ -4,7 +4,7 @@ import numpy as np
 class KalmanFilter:
     """Multivariante Kalman Filter implementation."""
 
-    def __init__(self, H, Q, R, X=np.array([0, 0, -0.02, -0.01])):
+    def __init__(self, H, Q, R):
         """Initialize the Kalman Filter.
         Parameters
         :param H: Measurement matrix
@@ -19,7 +19,7 @@ class KalmanFilter:
         self.R = R
         self.K = np.zeros((np.shape(H)[1], np.shape(H)[0]))
         self.P = np.diag([0.5, 0.5, 0.05, 0.05])
-        self.X = X
+        self.X = None
 
     def predict(self, dt):
         """Function that predicts the state and covariance of the system.
