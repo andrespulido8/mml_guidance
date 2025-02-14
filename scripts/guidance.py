@@ -66,6 +66,10 @@ class Guidance:
         self.sampled_particles = self.filter.particles[:, : self.N_s, :]
         self.sampled_weights = np.ones(self.N_s) / self.N_s
         self.position_following = False
+        self.avg_time = None
+        self.max_time = 0.0
+        self.min_time = 10.
+        self.iteration = 0
 
         # Occlusions
         occ_widths = [1, 1]
@@ -337,7 +341,6 @@ class Guidance:
         Output:
             entropy (numpy.int64)
         """
-        # t = rospy.get_time() - self.initial_time
         if wgts.size > 0:
             # likelihod of measurement p(zt|xt)
             # (how likely is each of the particles in the gaussian of the measurement)
@@ -418,6 +421,10 @@ class Guidance:
             entropy = -np.nansum(prev_wgts * np.log(process_part_like))
 
         # return np.clip(entropy, -100, 1000)
+
+        # t_ftc = rospy.get_time() - self.initial_time - t
+
+        # self.print_time(t_ftc)
         return entropy
 
     @staticmethod
@@ -493,8 +500,8 @@ class Guidance:
         return fov
 
     def update_FOV_dims_and_measurement_cov(self):
-        """Update the FOV dimensions based on the camera angles and height of drone
-        as well as the measurement covariance based on the height of the drone
+        """ Update the FOV dimensions based on the camera angles and height of drone
+            as well as the measurement covariance based on the height of the drone
         """
         self.FOV_dims = np.tan(self.CAMERA_ANGLES) * self.height
         self.filter.update_measurement_covariance(self.height)
@@ -502,7 +509,7 @@ class Guidance:
     def lawnmower(self) -> np.ndarray:
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
-        If the rate of pub_desired_state changes, the POINTS_PER_SLICE
+        If the rate of pub_desired_state changes, the POINTS_PER_SLICE 
         variable needs to change
         """
         if self.filter.is_update:
@@ -836,8 +843,8 @@ class Guidance:
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
                 np.logical_and(
-                    self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                    ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
+                        self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                        ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
             # set weights of samples close to zero
@@ -892,10 +899,24 @@ class Guidance:
             # rospy.loginfo("MMN estimate: %s", etaHat)
             self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
 
+    def print_time(self, fn_time):
+        print("Fn time: ", fn_time, "\n")
+        if self.avg_time is None:
+            self.avg_time = fn_time
+        else:
+            self.avg_time = self.avg_time + (fn_time - self.avg_time) / (self.iteration + 1)
+        self.max_time = max(self.max_time, fn_time)
+        self.min_time = min(self.min_time, fn_time)
+        print("Fn time min: ", self.min_time)
+        print("Fn time average: ", self.avg_time)
+        print("Fn time max: ", self.max_time)
+        self.iteration += 1
+
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
         rospy.logfatal("Timer expired or user terminated. Stopping the node...")
-        self.filter.save_model() if self.prediction_method == "NN" or self.prediction_method == "Transformer" else None
+        if self.prediction_method in {"NN", "Transformer", "DMMN"}:
+            self.filter.save_model()  
         rospy.sleep(0.1)
         # rospy.signal_shutdown("Timer signal shutdown")
         os.system("rosnode kill /drone_guidance /robot0/markov_goal_pose")
