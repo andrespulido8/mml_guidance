@@ -201,7 +201,7 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
         )
 
     # Plot 3 paths
-    for i in range(min(3, features.shape[0])):
+    for i in range(-1, -1 * min(4, features.shape[0]), -1):
         ax.plot(
             features[i, 0::3],
             features[i, 1::3],
@@ -238,6 +238,7 @@ def plot_NN_output(features, predictions, true_label, is_velocities, title="Test
         )
     else:
         plt.show()
+    plt.close(fig)
 
 
 def initialize_weights(model):
@@ -354,21 +355,21 @@ def main():
     print("shape of Y: ", Y.shape)
 
     # split the data into training and testing sets
-    test_percent = 0.3
+    train_percent = 0.7
     epochs = 200
 
     def get_ordered_train_test(data):
         length = len(data)
         data_train, data_test = (
-            data[: math.floor(length * (1 - test_percent))],
-            data[math.floor(length * (1 - test_percent)) :],
+            data[math.floor(length * (1 - train_percent)):],
+            data[:math.floor(length * (1 - train_percent))],
         )
         return data_train, data_test
 
     X_train, X_test = get_ordered_train_test(X)
     y_train, y_test = get_ordered_train_test(Y)
     if is_occlusion or evaluate_model:
-        test_percent = 0.8
+        train_percent = 0.3
         _, X_test = get_ordered_train_test(
             df_no_occlusion.iloc[::get_every_n, :-3].values
         )
