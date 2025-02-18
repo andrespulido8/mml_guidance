@@ -23,10 +23,10 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Information"  # 'Information', 'WeightedMean', 'Lawnmower', or 'Estimator'
+            "Estimator"  # 'Information', 'WeightedMean', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = (
-            "Transformer"  # 'Transformer', 'NN', 'DMMN', 'KF', 'Velocity' or 'Unicycle'
+            "DMMN"  # 'Transformer', 'NN', 'DMMN', 'KF', 'Velocity' or 'Unicycle'
         )
 
         # Initialization of robot variables

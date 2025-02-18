@@ -17,7 +17,7 @@ import math
 
 devicecuda = torch.device("cuda:0")
 devicecpu = torch.device("cpu")
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
 
 Odom = namedtuple('Odom',('position','velocity'))
 
@@ -189,6 +189,12 @@ class MotionModel():
             'Phi_state_dict': self.PhiNetwork.motionModelBasis.state_dict(),
             'WHat': self.WHat,
             }, savePath)
+    
+    def loadModel(self,loadPath):
+        checkpoint = torch.load(loadPath)
+        self.PhiNetwork.motionModelBasis.load_state_dict(checkpoint['Phi_state_dict'])
+        self.WHat = checkpoint['WHat']
+        # self.lastTime = checkpoint['time']
 
     def predict(self,time):
         #if first call to learn, initialize
@@ -223,8 +229,8 @@ class MotionModel():
 
     def learn(self,targetPosxy,targetLinVelxy,time):
         #convert data to tensor and add to memory
-        eta = torch.tensor(targetPosxy, dtype=torch.double)
-        etaDot = torch.tensor(targetLinVelxy, dtype=torch.double)
+        eta = torch.tensor(targetPosxy, dtype=torch.float32)
+        etaDot = torch.tensor(targetLinVelxy, dtype=torch.float32)
         self.replayMemory.append(eta,etaDot)
 
         if torch.cuda.is_available():

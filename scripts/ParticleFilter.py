@@ -128,6 +128,10 @@ class ParticleFilter:
                 gamma,
                 k1,
             )
+            pkg_path = rospkg.RosPack().get_path("mml_guidance")
+            model_file = f"{pkg_path}/scripts/mml_network/models/online_model.pth"
+            # load weights
+            self.motion_model.loadModel(model_file)
 
         if self.prediction_method in {"NN", "Transformer"}:
             self.Nx = 2
