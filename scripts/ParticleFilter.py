@@ -29,7 +29,7 @@ class ParticleFilter:
             self.AVL_dims if not is_sim else np.array([[-1.7, -1.0], [0.9, 2.0]])
         )
 
-        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
+        if self.prediction_method in {"NN", "Transformer"}:
             self.N_th = 5  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             self.is_velocity = True
@@ -91,7 +91,7 @@ class ParticleFilter:
             self.Nx = 3
             self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
             self.process_covariance = np.diag([0.05, 0.05, 0.005])
-        elif self.prediction_method == "KF" or self.prediction_method == "DMMN":
+        elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
             self.best_measurement_covariance = np.diag([0.01, 0.01])
             self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
@@ -129,7 +129,7 @@ class ParticleFilter:
                 k1,
             )
 
-        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
+        if self.prediction_method in {"NN", "Transformer"}:
             self.Nx = 2
             self.best_measurement_covariance = np.diag([0.006, 0.006])
             self.process_covariance = np.diag([0.0005, 0.0005])
@@ -191,12 +191,7 @@ class ParticleFilter:
                 [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
                 (self.N_th, self.N, self.Nx),
             )
-        elif (
-            self.prediction_method == "NN"
-            or self.prediction_method == "KF"
-            or self.prediction_method == "DMMN"
-            or self.prediction_method == "Transformer"
-        ):
+        elif self.prediction_method in {"NN", "KF", "DMMN", "Transformer"}:
             local_particles = np.random.uniform(
                 [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
                 [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
@@ -217,7 +212,7 @@ class ParticleFilter:
         noisy_measurement = noisy_measurement[:2] if self.Nx > 2 else noisy_measurement
 
         # Prediction step
-        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
+        if self.prediction_method in {"NN", "Transformer"}:
             self.particles = self.predict_mml(np.copy(self.particles), self.dt_history)
         elif self.prediction_method == "Unicycle":
             self.particles = self.predict(
@@ -239,9 +234,7 @@ class ParticleFilter:
         # Update step
         if self.is_update:
             self.prev_weights = np.copy(self.weights)
-            self.weights = self.update(
-                self.weights, self.particles, noisy_measurement 
-            )
+            self.weights = self.update(self.weights, self.particles, noisy_measurement)
 
         # Resampling step
         outbounds = self.outside_bounds(self.particles[-1])
@@ -293,8 +286,10 @@ class ParticleFilter:
         stuck_threshold = 0.01 if self.prediction_method == "Velocity" else 0.03
         wm_pos_diff = np.linalg.norm(self.wm_history[0][:2] - self.wm_history[-1][:2])
         # print("Weighted mean position difference: ", wm_pos_diff)
-        if  wm_pos_diff < stuck_threshold or self.dt_wm_history[-1] > 3.:
-            rospy.logwarn("Particle filter stuck or lost measurement. Uniformly resampling.")
+        if wm_pos_diff < stuck_threshold or self.dt_wm_history[-1] > 3.0:
+            rospy.logwarn(
+                "Particle filter stuck or lost measurement. Uniformly resampling."
+            )
             self.particles = self.uniform_sample()
 
         # estimate mean and variance
@@ -313,9 +308,8 @@ class ParticleFilter:
             )
         # if measurement history buffer is full
         if (
-            filled_elements
-            > self.N_th + self.max_batch_size * 0.6
-            and (self.prediction_method == "NN" or self.prediction_method == "Transformer") 
+            filled_elements > self.N_th + self.max_batch_size * 0.6
+            and (self.prediction_method in {"NN", "Transformer"})
             # and False
         ):
             self.optimize_learned_model(filled_elements)
@@ -543,15 +537,12 @@ class ParticleFilter:
             self.wm_history = np.roll(self.wm_history, -1, axis=0)
             self.wm_history[-1, :2] = noisy_measurement[:2]
             update_dt = t - self.last_update_time
-            self.dt_wm_history[:-1] = (
-                self.dt_wm_history[1:] + update_dt
-            )
+            self.dt_wm_history[:-1] = self.dt_wm_history[1:] + update_dt
             self.dt_wm_history[-1] = update_dt
             self.last_update_time = t
 
     def update_measurement_covariance(self, height):
-        """ Update the measurement covariance matrix based on the height of the drone agent
-        """
+        """Update the measurement covariance matrix based on the height of the drone agent"""
         gain = 1 + (max(height, 1.1) - 1.1) / (
             2.0 - 1.1
         )  # start with 2 (h=2.) and decrease to 1 (h=1.1)
@@ -561,8 +552,8 @@ class ParticleFilter:
 
     def convert_wm_history_to_training_batches(self, filled_elements, all_data=False):
         """Convert the measurement history to training batches for the neural network
-            Input: filled_elements: number of elements in the measurement history buffer
-            Output: X_train: input training data, y_train: output training data
+        Input: filled_elements: number of elements in the measurement history buffer
+        Output: X_train: input training data, y_train: output training data
         """
         wm_history = self.wm_history[-filled_elements:]
         dt_wm_history = self.dt_wm_history[-filled_elements:]
@@ -595,7 +586,7 @@ class ParticleFilter:
             y_train[i] = wm_history[sampled_i + self.N_th].copy()
 
             # remove samples with dt > 4 seconds
-            if dt_time_features[i][0] < 4.:
+            if dt_time_features[i][0] < 4.0:
                 include_index.append(i)
 
         X_train = np.concatenate((X_train, dt_time_features[..., np.newaxis]), axis=2)
@@ -623,7 +614,9 @@ class ParticleFilter:
         # data transformation
         X_train, y_train = self.convert_wm_history_to_training_batches(filled_elements)
         if self.prediction_method == "NN":
-            X_train = X_train.reshape(X_train.shape[0], -1)  # flatten last two dimensions
+            X_train = X_train.reshape(
+                X_train.shape[0], -1
+            )  # flatten last two dimensions
 
         X_train = torch.from_numpy(X_train.astype(np.float32)).to(self.device)
         y_train = torch.from_numpy(y_train.astype(np.float32)).to(self.device)
@@ -648,12 +641,17 @@ class ParticleFilter:
             if not os.path.exists(csv_file):
                 os.makedirs(os.path.dirname(csv_file), exist_ok=True)
             filled_elements = np.count_nonzero(self.wm_history) // self.Nx
-            X_train, y_train = self.convert_wm_history_to_training_batches(filled_elements, all_data=True)
+            X_train, y_train = self.convert_wm_history_to_training_batches(
+                filled_elements, all_data=True
+            )
             if X_train is None:
                 rospy.logwarn("No data to save")
                 return
             X_train_flattened = X_train.reshape(X_train.shape[0], -1)
-            wm_history_flattened = np.concatenate((X_train_flattened, y_train, np.zeros((X_train_flattened.shape[0], 1))), axis=1)
+            wm_history_flattened = np.concatenate(
+                (X_train_flattened, y_train, np.zeros((X_train_flattened.shape[0], 1))),
+                axis=1,
+            )
             np.savetxt(csv_file, wm_history_flattened, delimiter=",")
             rospy.loginfo(f"Data saved to {csv_file}")
         elif self.prediction_method == "DMMN":

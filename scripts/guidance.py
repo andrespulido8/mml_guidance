@@ -55,7 +55,7 @@ class Guidance:
         # self.N_m = 1  # not implemented yet
         self.N_s = 25  # Number of sampled particles
         rospy.set_param("/num_sampled_particles", self.N_s)
-        self.K = 3  # Time steps to propagate in the future for EER
+        self.K = 4  # Time steps to propagate in the future for EER
         rospy.set_param("/predict_window", self.K)
         self.Hp_t = 1.0  # partial entropy
         self.prev_Hp = np.ones((5, 1))
@@ -68,7 +68,7 @@ class Guidance:
         self.position_following = False
         self.avg_time = None
         self.max_time = 0.0
-        self.min_time = 10.
+        self.min_time = 10.0
         self.iteration = 0
 
         # Occlusions
@@ -237,10 +237,7 @@ class Guidance:
 
         pred_msg = ParticleArray()
         for k in range(self.K):  # propagate k steps in the future
-            if (
-                self.prediction_method == "NN"
-                or self.prediction_method == "Transformer"
-            ):
+            if self.prediction_method in {"NN", "Transformer"}:
                 future_parts = self.filter.predict_mml(
                     np.copy(future_parts), np.ones(future_parts.shape[0]) * 0.33
                 )
@@ -500,8 +497,8 @@ class Guidance:
         return fov
 
     def update_FOV_dims_and_measurement_cov(self):
-        """ Update the FOV dimensions based on the camera angles and height of drone
-            as well as the measurement covariance based on the height of the drone
+        """Update the FOV dimensions based on the camera angles and height of drone
+        as well as the measurement covariance based on the height of the drone
         """
         self.FOV_dims = np.tan(self.CAMERA_ANGLES) * self.height
         self.filter.update_measurement_covariance(self.height)
@@ -509,7 +506,7 @@ class Guidance:
     def lawnmower(self) -> np.ndarray:
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
-        If the rate of pub_desired_state changes, the POINTS_PER_SLICE 
+        If the rate of pub_desired_state changes, the POINTS_PER_SLICE
         variable needs to change
         """
         if self.filter.is_update:
@@ -538,10 +535,7 @@ class Guidance:
             ).reshape((self.filter.N_th, 1, self.filter.Nx))
             last_future_time = np.copy(self.filter.last_time)
             for k in range(self.K):
-                if (
-                    self.prediction_method == "NN"
-                    or self.prediction_method == "Transformer"
-                ):
+                if self.prediction_method in {"NN", "Transformer"}:
                     future_part = self.filter.predict_mml(
                         future_part, np.ones(future_part.shape[0]) * 0.33
                     )
@@ -843,8 +837,8 @@ class Guidance:
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
                 np.logical_and(
-                        self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                        ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
+                    self.is_in_FOV(self.filter.particles[-1], self.FOV),
+                    ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
             # set weights of samples close to zero
@@ -859,15 +853,13 @@ class Guidance:
             self.filter.pf_loop(
                 self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             )
-        elif (
-            self.prediction_method == "Velocity"
-            or self.prediction_method == "NN"
-            or self.prediction_method == "Transformer"
-        ):
+        elif self.prediction_method in {"Velocity", "NN", "Transformer"}:
             self.filter.pf_loop(self.noisy_turtle_pose)
         elif self.prediction_method == "KF":
             if self.kf.X is None:
-                self.kf.X = np.array([self.actual_turtle_pose[0], self.actual_turtle_pose[1], 0.1, 0.1])
+                self.kf.X = np.array(
+                    [self.actual_turtle_pose[0], self.actual_turtle_pose[1], 0.1, 0.1]
+                )
             self.kf.predict(dt=0.333)
             self.kf.update(
                 self.noisy_turtle_pose[:2]
@@ -903,7 +895,9 @@ class Guidance:
         if self.avg_time is None:
             self.avg_time = fn_time
         else:
-            self.avg_time = self.avg_time + (fn_time - self.avg_time) / (self.iteration + 1)
+            self.avg_time = self.avg_time + (fn_time - self.avg_time) / (
+                self.iteration + 1
+            )
         self.max_time = max(self.max_time, fn_time)
         self.min_time = min(self.min_time, fn_time)
         print("Fn time min: ", self.min_time)
@@ -915,7 +909,7 @@ class Guidance:
         # Stop the node when shutdown is called
         rospy.logfatal("Timer expired or user terminated. Stopping the node...")
         if self.prediction_method in {"NN", "Transformer", "DMMN"}:
-            self.filter.save_model()  
+            self.filter.save_model()
         rospy.sleep(0.1)
         # rospy.signal_shutdown("Timer signal shutdown")
         os.system("rosnode kill /drone_guidance /robot0/markov_goal_pose")
@@ -976,15 +970,12 @@ if __name__ == "__main__":
     # Running functions at a certain rate
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.guidance_pf)
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
-    if guidance.guidance_mode == "Information" or guidance.guidance_mode == "Estimator":
+    if guidance.guidance_mode in {"Information", "Estimator"}:
         rospy.Timer(rospy.Duration(1.0 / 2.5), guidance.information_driven_guidance)
-    if (
-        guidance.prediction_method == "NN"
-        or guidance.prediction_method == "Transformer"
-    ):
+    if guidance.prediction_method in {"NN", "Transformer"}:
         rospy.Timer(
-            rospy.Duration(1.0 / 0.8), guidance.filter.optimize_learned_model_callback
-        )  # 1.1Hz is
+            rospy.Duration(1.0 / 0.5), guidance.filter.optimize_learned_model_callback
+        )  # 1.1Hz is the min rate
 
     # Publish topics
     if guidance.is_viz:
