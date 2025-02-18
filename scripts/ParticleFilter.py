@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import rospy
 import rospkg
@@ -289,7 +290,14 @@ class ParticleFilter:
                     # some are good but some are bad, resample
                     self.multinomial_resample()
 
-        # estimate for viz
+        stuck_threshold = 0.01 if self.prediction_method == "Velocity" else 0.03
+        wm_pos_diff = np.linalg.norm(self.wm_history[0][:2] - self.wm_history[-1][:2])
+        # print("Weighted mean position difference: ", wm_pos_diff)
+        if  wm_pos_diff < stuck_threshold or self.dt_wm_history[-1] > 3.:
+            rospy.logwarn("Particle filter stuck or lost measurement. Uniformly resampling.")
+            self.particles = self.uniform_sample()
+
+        # estimate mean and variance
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
 
         self.update_weighted_mean_and_dt_history(noisy_measurement)
