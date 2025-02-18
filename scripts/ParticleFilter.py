@@ -551,41 +551,71 @@ class ParticleFilter:
         self.measurement_covariance = gain * self.best_measurement_covariance
         # print("Measurement covariance: ", np.diag(self.measurement_covariance))
 
-    def optimize_learned_model(self, filled_elements):
-        """Optimize the neural network model with the particles and weights"""
-        rospy.loginfo("Optimizing the learned model")
-        measurement_history = self.measurement_history[-filled_elements:]
-        dt_measurement_history = self.dt_measurement_history[-filled_elements:]
-        # training parameters
-        epochs = 5
-        criterion = nn.MSELoss()
-        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
-        # data transformation
-        batch_size = np.min((self.max_batch_size, filled_elements - self.N_th))
+    def convert_wm_history_to_training_batches(self, filled_elements, all_data=False):
+        """Convert the measurement history to training batches for the neural network
+            Input: filled_elements: number of elements in the measurement history buffer
+            Output: X_train: input training data, y_train: output training data
+        """
+        wm_history = self.wm_history[-filled_elements:]
+        dt_wm_history = self.dt_wm_history[-filled_elements:]
+        if all_data:
+            batch_size = filled_elements - self.N_th
+        else:
+            batch_size = np.min((self.max_batch_size, filled_elements - self.N_th))
+            if batch_size <= 0:
+                return None, None
         X_train = np.zeros((batch_size, self.N_th, self.Nx))
         dt_time_features = np.zeros((batch_size, self.N_th))
         y_train = np.zeros((batch_size, self.Nx))
 
         # sample n_batches indexes from the data
-        idx = np.random.choice(
-            measurement_history.shape[0] - self.N_th, batch_size, replace=False
-        )
+        if all_data:
+            idx = np.arange(batch_size)
+        else:
+            idx = np.random.choice(
+                wm_history.shape[0] - self.N_th, batch_size, replace=False
+            )
 
         # TODO: avoid for loop
+        include_index = []
         for i, sampled_i in enumerate(idx):
-            X_train[i] = measurement_history[sampled_i : sampled_i + self.N_th].copy()
+            X_train[i] = wm_history[sampled_i : sampled_i + self.N_th].copy()
             dt_time_features[i] = (
-                dt_measurement_history[sampled_i : sampled_i + self.N_th].copy()
-                - dt_measurement_history[sampled_i + self.N_th]
+                dt_wm_history[sampled_i : sampled_i + self.N_th].copy()
+                - dt_wm_history[sampled_i + self.N_th]
             )
-            y_train[i] = measurement_history[sampled_i + self.N_th].copy()
+            y_train[i] = wm_history[sampled_i + self.N_th].copy()
+
+            # remove samples with dt > 4 seconds
+            if dt_time_features[i][0] < 4.:
+                include_index.append(i)
 
         X_train = np.concatenate((X_train, dt_time_features[..., np.newaxis]), axis=2)
+
+        include_index = np.array(include_index)
+        rospy.loginfo(f"eliminated samples: {batch_size - len(include_index)}")
+        X_train = X_train[include_index]
+        y_train = y_train[include_index]
 
         if self.is_velocity:
             y_train = (y_train - X_train[:, -1, :2]) / X_train[:, -1, 2].reshape(
                 -1, 1
             )  # vel = (x(t+1) - x(t)) / dt
+
+        return X_train, y_train
+
+    def optimize_learned_model(self, filled_elements):
+        """Optimize the neural network model with the particles and weights"""
+        print("\n")
+        rospy.loginfo("Optimizing the learned model")
+        # training parameters
+        epochs = 5
+        criterion = nn.MSELoss().to(torch.float32)
+        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
+        # data transformation
+        X_train, y_train = self.convert_wm_history_to_training_batches(filled_elements)
+        if self.prediction_method == "NN":
+            X_train = X_train.reshape(X_train.shape[0], -1)  # flatten last two dimensions
 
         X_train = torch.from_numpy(X_train.astype(np.float32)).to(self.device)
         y_train = torch.from_numpy(y_train.astype(np.float32)).to(self.device)
@@ -604,7 +634,22 @@ class ParticleFilter:
         """Save the model to a file"""
         pkg_path = rospkg.RosPack().get_path("mml_guidance")
         model_file = f"{pkg_path}/scripts/mml_network/models/online_model.pth"
-        torch.save(self.motion_model.state_dict(), model_file)
+        if self.prediction_method in {"NN", "Transformer"}:
+            torch.save(self.motion_model.state_dict(), model_file)
+            csv_file = f"{pkg_path}/sim_data/training_data/online_data.csv"
+            if not os.path.exists(csv_file):
+                os.makedirs(os.path.dirname(csv_file), exist_ok=True)
+            filled_elements = np.count_nonzero(self.wm_history) // self.Nx
+            X_train, y_train = self.convert_wm_history_to_training_batches(filled_elements, all_data=True)
+            if X_train is None:
+                rospy.logwarn("No data to save")
+                return
+            X_train_flattened = X_train.reshape(X_train.shape[0], -1)
+            wm_history_flattened = np.concatenate((X_train_flattened, y_train, np.zeros((X_train_flattened.shape[0], 1))), axis=1)
+            np.savetxt(csv_file, wm_history_flattened, delimiter=",")
+            rospy.loginfo(f"Data saved to {csv_file}")
+        elif self.prediction_method == "DMMN":
+            self.motion_model.saveModel(time=rospy.get_time(), savePath=model_file)
         rospy.loginfo(f"Model saved to {model_file}")
 
     @staticmethod
