@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+torch.set_default_dtype(torch.float32)
+
 
 class PositionalEncoding(nn.Module):
     """NOT USED currently"""
@@ -28,8 +30,6 @@ class PositionalEncoding(nn.Module):
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-torch.manual_seed(1337)
 
 
 class Head(nn.Module):
@@ -149,8 +149,8 @@ class ScratchTransformer(nn.Module):
 
         """
         super().__init__()
-        self.block_size = block_size
-        self.input_dim = input_dim
+        self.block_size = block_size  # T
+        self.input_dim = input_dim  # C
         print("Transformer input_dim: ", input_dim)
         print("Transformer block_size: ", block_size)
         # each token directly reads off the logits for the next token from a lookup table

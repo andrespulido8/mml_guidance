@@ -30,6 +30,8 @@ class SimpleDNN(nn.Module):
         else:
             raise ValueError("Invalid activation function")
         self.layers.to(device)
+        # for layer in self.layers:
+        # layer.float()
 
     def forward(self, x):
         for layer in self.layers[:-1]:

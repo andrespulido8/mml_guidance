@@ -14,12 +14,10 @@ import os
 try:
     # for running the script from the scripts directory
     from simple_dnn import SimpleDNN
-    from transformer_functions import TransAm
     from scratch_transformer import ScratchTransformer
 except ImportError:
     # for running the script with ROS
     from mml_network.simple_dnn import SimpleDNN
-    from mml_network.transformer_functions import TransAm
     from mml_network.scratch_transformer import ScratchTransformer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -253,15 +251,10 @@ def select_model(model_name, input_size, input_dim=2):
     if model_name == "SimpleDNN":
         model = SimpleDNN(
             input_size=input_size,
-            num_layers=2,
-            nodes_per_layer=80,
+            num_layers=4,
+            nodes_per_layer=40,
             output_size=2,
             activation_fn="relu",
-        )
-    elif model_name == "TransAm":
-        print("input size: ", input_size)
-        model = TransAm(
-            in_dim=input_dim, n_embed=10, num_layers=1, n_head=1, dropout=0.01
         )
     elif model_name == "ScratchTransformer":
         block_size = input_size // input_dim
@@ -275,7 +268,6 @@ def select_model(model_name, input_size, input_dim=2):
     model = model.to(device)
 
     # Set the random seed for reproducibility
-    torch.manual_seed(42)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
 
@@ -300,12 +292,6 @@ def select_parameters(model_name, input_size):
             "n_head": [2, 4],
             "n_layer": [2, 3],
         }
-    elif model_name == "TransAm":
-        param_grid = {
-            "n_embed": [3, 5, 10],
-            "num_layers": [1, 2],
-            "n_head": [1, 2],
-        }
     else:
         raise ValueError("Invalid model name")
 
@@ -314,14 +300,12 @@ def select_parameters(model_name, input_size):
 
 def main():
     is_velocities = True
-    is_occlusion = False
+    is_occlusion = True
     is_parameter_search = False
     evaluate_model = True
-    is_connected_graph = True
+    is_connected_graph = False
     get_every_n = 2
-    model_name = (
-        "ScratchTransformer"  # "TransAm"  # "ScratchTransformer"  # "SimpleDNN"
-    )
+    model_name = "ScratchTransformer"  # "ScratchTransformer"  # "SimpleDNN"
     prefix_name = "noisy_5_"
 
     print(
@@ -330,7 +314,7 @@ def main():
 
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
 
-    input_dim = 3
+    input_dim = 3  # 2 for positions, 1 for time
 
     prefix_name = (
         prefix_name + "velocities_" if is_velocities else prefix_name + "time_"
@@ -348,6 +332,7 @@ def main():
     )
 
     df = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
+    # df = pd.read_csv(path + "online_data.csv")
     print("df shape: ", df.shape)
     X = df.iloc[::get_every_n, :-3].values
     Y = df.iloc[::get_every_n, -3:-1].values
@@ -356,17 +341,17 @@ def main():
 
     # split the data into training and testing sets
     train_percent = 0.7
-    epochs = 200
+    epochs = 50
 
     def get_ordered_train_test(data):
         length = len(data)
         data_train, data_test = (
-            data[math.floor(length * (1 - train_percent)):],
-            data[:math.floor(length * (1 - train_percent))],
+            data[math.floor(length * (1 - train_percent)) :],
+            data[: math.floor(length * (1 - train_percent))],
         )
         return data_train, data_test
 
-    X_train, X_test = get_ordered_train_test(X)
+    X_train, X_test = get_ordered_train_test(X)  # (N, T*C)
     y_train, y_test = get_ordered_train_test(Y)
     if is_occlusion or evaluate_model:
         train_percent = 0.3
@@ -377,9 +362,7 @@ def main():
             df_no_occlusion.iloc[::get_every_n, -3:-1].values
         )
 
-    X_train = torch.from_numpy(X_train.astype(np.float32)).to(
-        device
-    )  # (N, T*C) = (N, 10*2)
+    X_train = torch.from_numpy(X_train.astype(np.float32)).to(device)
     X_test = torch.from_numpy(X_test.astype(np.float32)).to(device)
     y_train = torch.from_numpy(y_train.astype(np.float32)).to(device)
     y_test = torch.from_numpy(y_test.astype(np.float32)).to(device)
@@ -445,7 +428,7 @@ def main():
     y_test = y_test.to("cpu").detach().numpy()
     plot_NN_output(X_test, y_pred, y_test, is_velocities, "Test")
 
-    if evaluate_model:
+    if evaluate_model and False:
         # weights_filename = f"../../scripts/mml_network/models/best_connected_graph_noisy_velocities_ScratchTransformer.pth"
         weights_filename = f"../../scripts/mml_network/models/online_model.pth"
         model.load_state_dict(torch.load(weights_filename, weights_only=True))
