@@ -398,7 +398,7 @@ class Guidance:
                 # print('like_meas std: ', like_meas.std())
 
                 if np.isinf(np.log(np.nansum(like_meas * prev_wgts))):
-                    rospy.logwarn(
+                    rospy.loginfo(
                         "first term of entropy is -inf. Likelihood is very small"
                     )
         else:
@@ -866,9 +866,8 @@ class Guidance:
         ):
             self.filter.pf_loop(self.noisy_turtle_pose)
         elif self.prediction_method == "KF":
-            self.kf.X[:2] = (
-                self.actual_turtle_pose[:2] if not self.init_finished else self.kf.X[:2]
-            )
+            if self.kf.X is None:
+                self.kf.X = np.array([self.actual_turtle_pose[0], self.actual_turtle_pose[1], 0.1, 0.1])
             self.kf.predict(dt=0.333)
             self.kf.update(
                 self.noisy_turtle_pose[:2]
@@ -970,7 +969,7 @@ if __name__ == "__main__":
     rospy.init_node("guidance", anonymous=True)
     guidance = Guidance()
 
-    time_to_shutdown = 180  # 3 minutes
+    time_to_shutdown = 210  # 3.5 minutes
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
 

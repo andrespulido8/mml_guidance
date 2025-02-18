@@ -32,7 +32,7 @@ class ParticleFilter:
             self.N_th = 5  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             self.is_velocity = True
-            is_occlusions_weights = False
+            is_occlusions_weights = True
             input_dim = 3  # x, y, time
             self.nn_input_size = self.N_th * input_dim
             rospy.loginfo(f"Input dim and size: {input_dim}, {self.nn_input_size}")
@@ -145,14 +145,9 @@ class ParticleFilter:
         self.update_measurement_covariance(height=drone_height)
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
-        self.measurement_history = np.zeros(
-            (
-                self.N_th + buffer_size,
-                self.measurement_covariance.shape[0],
-            )
-        )
+        self.wm_history = np.zeros((self.N_th + buffer_size, 2))
         self.dt_history = np.ones(self.N_th) * 0.333
-        self.dt_measurement_history = np.zeros(self.measurement_history.shape[0])
+        self.dt_wm_history = np.zeros(self.wm_history.shape[0])
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles[-1,:, :2] = np.array([
@@ -218,13 +213,12 @@ class ParticleFilter:
         update, resample and estimate steps are called.
         """
         # t = rospy.get_time() - self.initial_time
-        self.update_measurement_and_dt_history(noisy_measurement)
+        noisy_measurement = noisy_measurement[:2] if self.Nx > 2 else noisy_measurement
 
         # Prediction step
         if self.prediction_method == "NN" or self.prediction_method == "Transformer":
             self.particles = self.predict_mml(np.copy(self.particles), self.dt_history)
         elif self.prediction_method == "Unicycle":
-            self.measurement_history[-1, 2] = noisy_measurement[2]
             self.particles = self.predict(
                 self.particles,
                 self.dt_history[-1],
@@ -233,7 +227,7 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             estimate_velocity = (
-                self.measurement_history[-1, :] - self.measurement_history[-2, :]
+                noisy_measurement - self.wm_history[-1, :]
             ) * self.dt_history[-1]
 
             self.particles = self.predict(
@@ -245,7 +239,7 @@ class ParticleFilter:
         if self.is_update:
             self.prev_weights = np.copy(self.weights)
             self.weights = self.update(
-                self.weights, self.particles, self.measurement_history[-1]
+                self.weights, self.particles, noisy_measurement 
             )
 
         # Resampling step
@@ -265,7 +259,7 @@ class ParticleFilter:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
-                            self.measurement_history[-1, :2],
+                            noisy_measurement,
                             self.measurement_covariance,
                             self.N,
                         )
@@ -277,44 +271,46 @@ class ParticleFilter:
                         )
                     else:
                         noise = np.random.multivariate_normal(
-                            np.zeros(self.measurement_history.shape[1]),
+                            np.zeros(self.Nx),
                             self.measurement_covariance,
                             size=(self.N_th, self.N),
                         )
                         # repeat the measurement history to be the same size as the particles
-                        measurement_history_repeated = np.tile(
-                            self.measurement_history[-self.N_th :].reshape(
+                        wm_history_repeated = np.tile(
+                            self.wm_history[-self.N_th :].reshape(
                                 self.N_th, 1, self.Nx
                             ),
                             (1, self.N, 1),
                         )
-                        self.particles = measurement_history_repeated + noise
+                        self.particles = wm_history_repeated + noise
 
                     self.weights = np.ones(self.N) / self.N
                 else:
                     # some are good but some are bad, resample
-                    self.resample()
+                    self.multinomial_resample()
 
         # estimate for viz
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
+
+        self.update_weighted_mean_and_dt_history(noisy_measurement)
+
         self.last_time = rospy.get_time() - self.initial_time
 
     def optimize_learned_model_callback(self, event=None):
         """Optimize the neural network model with the particles and weights"""
-        rospy.loginfo(f"shape of measurement history: {self.measurement_history.shape}")
-        filled_elements = np.count_nonzero(self.measurement_history) // self.Nx
-        if not np.all(self.measurement_history):
+        filled_elements = np.count_nonzero(self.wm_history) // self.Nx
+        if not np.all(self.wm_history):
             rospy.loginfo(
-                f"Iteration: {self.iteration}; Filled elements: {filled_elements} / {self.measurement_history.shape[0]}"
+                f"Filled elements: {filled_elements} / {self.wm_history.shape[0]}"
             )
         # if measurement history buffer is full
         if (
             filled_elements
-            > self.N_th + self.max_batch_size / 2
-            # and self.iteration % self.optimize_every_n_iterations == 0
+            > self.N_th + self.max_batch_size * 0.6
+            and (self.prediction_method == "NN" or self.prediction_method == "Transformer") 
+            # and False
         ):
             self.optimize_learned_model(filled_elements)
-        # self.iteration += 1
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief (weights) of the particle distribution.
@@ -452,7 +448,7 @@ class ParticleFilter:
 
         return particles
 
-    def resample(self):
+    def multinomial_resample(self):
         """Uses the multinomial resampling algorithm to update the belief in the system state.
         The particles are copied randomly with probability proportional to the weights plus
         some roughening based on the spread of the states.
@@ -526,7 +522,7 @@ class ParticleFilter:
             | (particles[:, 1] > self.AVL_dims[1, 1])
         )
 
-    def update_measurement_and_dt_history(self, noisy_measurement):
+    def update_weighted_mean_and_dt_history(self, noisy_measurement):
         """Update the measurement history and the time history"""
         t = rospy.get_time() - self.initial_time
 
@@ -536,17 +532,18 @@ class ParticleFilter:
         self.dt_history[-1] = dt
 
         if self.is_update:
-            self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
-            self.measurement_history[-1, :2] = noisy_measurement[:2]
+            self.wm_history = np.roll(self.wm_history, -1, axis=0)
+            self.wm_history[-1, :2] = noisy_measurement[:2]
             update_dt = t - self.last_update_time
-            self.dt_measurement_history[:-1] = (
-                self.dt_measurement_history[1:] + update_dt
+            self.dt_wm_history[:-1] = (
+                self.dt_wm_history[1:] + update_dt
             )
-            self.dt_measurement_history[-1] = update_dt
+            self.dt_wm_history[-1] = update_dt
             self.last_update_time = t
 
     def update_measurement_covariance(self, height):
-        """Update the measurement covariance matrix based on the height of the drone agent"""
+        """ Update the measurement covariance matrix based on the height of the drone agent
+        """
         gain = 1 + (max(height, 1.1) - 1.1) / (
             2.0 - 1.1
         )  # start with 2 (h=2.) and decrease to 1 (h=1.1)

@@ -29,6 +29,7 @@ class SimpleDNN(nn.Module):
             self.activation_fn = nn.Sigmoid()
         else:
             raise ValueError("Invalid activation function")
+        self.layers.to(device)
 
     def forward(self, x):
         for layer in self.layers[:-1]:
