@@ -72,8 +72,8 @@ class Guidance:
         self.iteration = 0
 
         # Occlusions
-        occ_widths = [1, 1]
-        occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
+        occ_widths = [0.9, 0.9, 0.9, 0.9]
+        occ_centers = [[0, -1], [-0.75, 0.], [1.1, 1], [1.5, 0.]]
         rospy.set_param("/occlusions", [occ_centers, occ_widths])
         self.occlusions = Occlusions(occ_centers, occ_widths)
 
@@ -81,10 +81,10 @@ class Guidance:
             # Lawnmower Method
             lawnmower = LawnmowerPath(POINTS_PER_SLICE=8)
             bounds = [
-                self.filter.AVL_dims[0],
-                np.array([self.filter.AVL_dims[1][0], self.filter.AVL_dims[0][1]]),
-                self.filter.AVL_dims[1],
-                np.array([self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][1]]),
+                self.filter.APRILab_dims[0],
+                np.array([self.filter.APRILab_dims[1][0], self.filter.APRILab_dims[0][1]]),
+                self.filter.APRILab_dims[1],
+                np.array([self.filter.APRILab_dims[0][0], self.filter.APRILab_dims[1][1]]),
             ]
             self.path, _ = lawnmower.generate_path(bounds, path_dist=0.4, angle=0)
             lawnmower.plot(bounds=bounds, path=self.path)
@@ -726,13 +726,12 @@ class Guidance:
                 ds.position_valid = True
                 ds.velocity_valid = False
             ds.pose.z = -self.height
-            # Given boundary of the lab flight space [[x_min, y_min], [x_max, y_,max]]
-            # clip the x and y position to the space self.filter.AVL_dims
+            # clip based on flight space
             ds.pose.x = np.clip(
-                ds.pose.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]
+                ds.pose.x, self.filter.APRILab_dims[0][0], self.filter.APRILab_dims[1][0]
             )
             ds.pose.y = np.clip(
-                ds.pose.y, -self.filter.AVL_dims[1][1], -self.filter.AVL_dims[0][1]
+                ds.pose.y, -self.filter.APRILab_dims[1][1], -self.filter.APRILab_dims[0][1]
             )  # remember y is negative for the quad
             self.pose_pub.publish(ds)
             # tracking err pub

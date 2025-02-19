@@ -24,10 +24,7 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])  # hardware
-        self.AVL_dims = (
-            self.AVL_dims if not is_sim else np.array([[-1.7, -1.0], [0.9, 2.0]])
-        )
+        self.APRILab_dims = np.array([[-1.7, -1.2], [2.2, 1.2]])  # hardware
 
         if self.prediction_method in {"NN", "Transformer"}:
             self.N_th = 5  # Number of time history particles
@@ -185,20 +182,20 @@ class ParticleFilter:
         """
         if self.prediction_method == "Velocity":
             local_particles = np.random.uniform(
-                [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -self.vmax, -self.vmax],
-                [self.AVL_dims[1, 0], self.AVL_dims[1, 1], self.vmax, self.vmax],
+                [self.APRILab_dims[0, 0], self.APRILab_dims[0, 1], -self.vmax, -self.vmax],
+                [self.APRILab_dims[1, 0], self.APRILab_dims[1, 1], self.vmax, self.vmax],
                 (self.N_th, self.N, self.Nx),
             )
         elif self.prediction_method == "Unicycle":
             local_particles = np.random.uniform(
-                [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-                [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
+                [self.APRILab_dims[0, 0], self.APRILab_dims[0, 1], -np.pi],
+                [self.APRILab_dims[1, 0], self.APRILab_dims[1, 1], np.pi],
                 (self.N_th, self.N, self.Nx),
             )
         elif self.prediction_method in {"NN", "KF", "DMMN", "Transformer"}:
             local_particles = np.random.uniform(
-                [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
-                [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
+                [self.APRILab_dims[0, 0], self.APRILab_dims[0, 1]],
+                [self.APRILab_dims[1, 0], self.APRILab_dims[1, 1]],
                 (self.N_th, self.N, self.Nx),
             )
         return local_particles
@@ -287,10 +284,10 @@ class ParticleFilter:
                     # some are good but some are bad, resample
                     self.multinomial_resample()
 
-        stuck_threshold = 0.01 if self.prediction_method == "Velocity" else 0.03
+        stuck_threshold = 0.02 if self.prediction_method == "Velocity" else 0.03
+        max_time_since_last_update = 4.
         wm_pos_diff = np.linalg.norm(self.wm_history[0][:2] - self.wm_history[-1][:2])
-        # print("Weighted mean position difference: ", wm_pos_diff)
-        if wm_pos_diff < stuck_threshold or self.dt_wm_history[-1] > 3.0:
+        if wm_pos_diff < stuck_threshold or self.dt_wm_history[-1] > max_time_since_last_update:
             rospy.logwarn(
                 "Particle filter stuck or lost measurement. Uniformly resampling."
             )
@@ -522,10 +519,10 @@ class ParticleFilter:
     def outside_bounds(self, particles):
         """returns the number of particles outside of the lab boundaries"""
         return np.sum(
-            (particles[:, 0] < self.AVL_dims[0, 0])
-            | (particles[:, 0] > self.AVL_dims[1, 0])
-            | (particles[:, 1] < self.AVL_dims[0, 1])
-            | (particles[:, 1] > self.AVL_dims[1, 1])
+            (particles[:, 0] < self.APRILab_dims[0, 0])
+            | (particles[:, 0] > self.APRILab_dims[1, 0])
+            | (particles[:, 1] < self.APRILab_dims[0, 1])
+            | (particles[:, 1] > self.APRILab_dims[1, 1])
         )
 
     def update_weighted_mean_and_dt_history(self, noisy_measurement):

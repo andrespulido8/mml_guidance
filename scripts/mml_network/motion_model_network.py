@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-""" Motion Model Network from paper: 
+""" Motion Model Network from paper:
     Z. I. Bell, R. Sun, K. Volle, P. Ganesh, S. A. Nivison, and W. E.
     Dixon, “Target Tracking Subject to Intermittent Measurements Using
     Attention Deep Neural Networks,” IEEE Control Systems Letters,
@@ -19,18 +19,18 @@ devicecuda = torch.device("cuda:0")
 devicecpu = torch.device("cpu")
 torch.set_default_dtype(torch.float32)
 
-Odom = namedtuple('Odom',('position','velocity'))
+Odom = namedtuple("Odom", ("position", "velocity"))
 
 # Attention model from AtLoc: Attention Guided Camera Localization
 class AttentionBlock(nn.Module):
-    def __init__(self, inputSize=16,outScale=2):
-        super(AttentionBlock, self).__init__()
+    def __init__(self, inputSize=16, outScale=2):
+        super().__init__()
         self.inputSize = inputSize
         self.outScale = outScale
-        self.gAtt = nn.Linear(inputSize,inputSize//outScale)
-        self.thetaAtt = nn.Linear(inputSize,inputSize//outScale)
-        self.phiAtt = nn.Linear(inputSize,inputSize//outScale)
-        self.alphaAtt = nn.Linear(inputSize//outScale,inputSize)
+        self.gAtt = nn.Linear(inputSize, inputSize // outScale)
+        self.thetaAtt = nn.Linear(inputSize, inputSize // outScale)
+        self.phiAtt = nn.Linear(inputSize, inputSize // outScale)
+        self.alphaAtt = nn.Linear(inputSize // outScale, inputSize)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x):
@@ -39,24 +39,24 @@ class AttentionBlock(nn.Module):
         if xlen > 1:
             batchSize = x.size()[0]
 
-        gAtt = self.gAtt(x).view(batchSize,self.inputSize//self.outScale,1)
+        gAtt = self.gAtt(x).view(batchSize, self.inputSize // self.outScale, 1)
         # print("gAtt\n"+str(gAtt))
 
-        thetaAtt = self.thetaAtt(x).view(batchSize,self.inputSize//self.outScale,1)
-        thetaAtt = thetaAtt.permute(0,2,1)
+        thetaAtt = self.thetaAtt(x).view(batchSize, self.inputSize // self.outScale, 1)
+        thetaAtt = thetaAtt.permute(0, 2, 1)
         # print("thetaAtt\n"+str(thetaAtt))
-        
-        phiAtt = self.phiAtt(x).view(batchSize,self.inputSize//self.outScale,1)
+
+        phiAtt = self.phiAtt(x).view(batchSize, self.inputSize // self.outScale, 1)
         # print("phiAtt\n"+str(phiAtt))
-        
-        SAtt = torch.matmul(phiAtt,thetaAtt)
+
+        SAtt = torch.matmul(phiAtt, thetaAtt)
         # print("SAtt\n"+str(SAtt))
 
         SAttC = self.softmax(SAtt)
         # print("SAttC\n"+str(SAttC))
 
         yAtt = torch.matmul(SAttC, gAtt)
-        yAtt = yAtt.view(batchSize,self.inputSize//self.outScale)
+        yAtt = yAtt.view(batchSize, self.inputSize // self.outScale)
         # print("yAtt\n"+str(yAtt))
 
         alphaAtt = self.alphaAtt(yAtt)
@@ -65,13 +65,14 @@ class AttentionBlock(nn.Module):
         # print("x\n"+str(x))
 
         zAtt = alphaAtt + x
-        
+
         # print("zAtt\n"+str(zAtt))
 
         return zAtt
 
-class ReplayMemory():
-    def __init__(self,memorySize=100,minDistance=0.01):
+
+class ReplayMemory:
+    def __init__(self, memorySize=100, minDistance=0.01):
         self.memorySize = memorySize
         self.memory = []
         self.memoryTensor = []
@@ -79,15 +80,15 @@ class ReplayMemory():
 
     def append(self, *args):
         newOdom = Odom(*args)
-        newOdomTensor = torch.cat(newOdom,-1)
+        newOdomTensor = torch.cat(newOdom, -1)
         # print(newOdom)
         # print(newOdomTensor)
 
-        #check if new data different enough from old data
+        # check if new data different enough from old data
         odomIsNew = True
         if len(self.memoryTensor) > 1:
             for odomTensor in self.memoryTensor:
-                odomDiff = torch.linalg.norm(newOdomTensor-odomTensor).item()
+                odomDiff = torch.linalg.norm(newOdomTensor - odomTensor).item()
                 # print(odomDiff)
                 if odomDiff < self.minDistance:
                     rospy.logwarn("ODOM NOT SAVED, TOO CLOSE TO MEMORY")
@@ -96,7 +97,7 @@ class ReplayMemory():
         if odomIsNew:
             self.memory.append(newOdom)
             self.memoryTensor.append(newOdomTensor)
-            rospy.loginfo("ODOM SAVED, MEMORY LENGTH "+str(len(self.memory)))
+            rospy.loginfo("ODOM SAVED, MEMORY LENGTH " + str(len(self.memory)))
         # print(self.memory)
 
     def isMemoryFull(self):
@@ -112,43 +113,53 @@ class ReplayMemory():
         self.memory.clear()
         self.memoryTensor.clear()
 
+
 class MotionModelBasis(nn.Module):
-    def __init__(self,alpha=0.001,numberHiddenLayers=4,inputSize=2,hiddenSize=64,outputSize=16,probHiddenDrop=0.1,useAttention=False):
-        super(MotionModelBasis, self).__init__()
+    def __init__(
+        self,
+        alpha=0.001,
+        numberHiddenLayers=4,
+        inputSize=2,
+        hiddenSize=64,
+        outputSize=16,
+        probHiddenDrop=0.1,
+        useAttention=False,
+    ):
+        super().__init__()
         self.inputSize = inputSize
 
-        #network with arbitrary number of hidden layers
+        # network with arbitrary number of hidden layers
         layers = []
-        
-        #first add input layer
-        layers.append(nn.Linear(self.inputSize,hiddenSize))
+
+        # first add input layer
+        layers.append(nn.Linear(self.inputSize, hiddenSize))
         layers.append(nn.ReLU())
-        
-        #add hidden layers
+
+        # add hidden layers
         for ii in range(numberHiddenLayers):
             layers.append(nn.Dropout(p=probHiddenDrop))
-            layers.append(nn.Linear(hiddenSize,hiddenSize))
+            layers.append(nn.Linear(hiddenSize, hiddenSize))
             layers.append(nn.ReLU())
 
-        #add output layer
+        # add output layer
         layers.append(nn.Dropout(p=probHiddenDrop))
-        layers.append(nn.Linear(hiddenSize,outputSize))
+        layers.append(nn.Linear(hiddenSize, outputSize))
         layers.append(nn.Tanh())
 
-        #create attention layer
+        # create attention layer
         if useAttention:
             layers.append(AttentionBlock(outputSize))
 
-        #create sequential network
+        # create sequential network
         self.motionModelBasis = nn.Sequential(*layers)
 
-        #move to cuda
+        # move to cuda
         if torch.cuda.is_available():
             self.motionModelBasis = self.motionModelBasis.to(devicecuda)
 
-        self.basisOptimizer = optim.Adam(self.motionModelBasis.parameters(),lr=alpha)
+        self.basisOptimizer = optim.Adam(self.motionModelBasis.parameters(), lr=alpha)
 
-    #implement forward pass
+    # implement forward pass
     def forward(self, x):
         xlen = len(x.shape)
         batchSize = 1
@@ -157,7 +168,7 @@ class MotionModelBasis(nn.Module):
             batchSize = x.size()[0]
 
         # x = x.to(devicecuda)
-        x = x.view(batchSize,self.inputSize)
+        x = x.view(batchSize, self.inputSize)
 
         Phi = self.motionModelBasis(x)
         Phi = torch.squeeze(Phi)
@@ -166,14 +177,38 @@ class MotionModelBasis(nn.Module):
 
         return Phi
 
-class MotionModel():
-    def __init__(self,alpha=0.001,numberHiddenLayers=4,inputSize=2,hiddenSize=64,outputSize=16,probHiddenDrop=0.1,useAttention=False,memorySize=100,batchSize=25,numberEpochs=10,minDistance=0.01,gamma=0.01,k1 = 0.1):
-        self.PhiNetwork = MotionModelBasis(alpha,numberHiddenLayers,inputSize,hiddenSize,outputSize,probHiddenDrop,useAttention)
+
+class MotionModel:
+    def __init__(
+        self,
+        alpha=0.001,
+        numberHiddenLayers=4,
+        inputSize=2,
+        hiddenSize=64,
+        outputSize=16,
+        probHiddenDrop=0.1,
+        useAttention=False,
+        memorySize=100,
+        batchSize=25,
+        numberEpochs=10,
+        minDistance=0.01,
+        gamma=0.01,
+        k1=0.1,
+    ):
+        self.PhiNetwork = MotionModelBasis(
+            alpha,
+            numberHiddenLayers,
+            inputSize,
+            hiddenSize,
+            outputSize,
+            probHiddenDrop,
+            useAttention,
+        )
         self.memorySize = memorySize
         self.batchSize = batchSize
         self.numberEpochs = numberEpochs
-        self.replayMemory = ReplayMemory(memorySize,minDistance)
-        self.WHat = torch.randn(inputSize,outputSize)
+        self.replayMemory = ReplayMemory(memorySize, minDistance)
+        self.WHat = torch.randn(inputSize, outputSize)
         self.etaHat = torch.zeros(inputSize)
         if torch.cuda.is_available():
             self.WHat = self.WHat.to(devicecuda)
@@ -183,55 +218,57 @@ class MotionModel():
         self.k1 = k1
         self.useIdx = -1
 
-    def saveModel(self,time,savePath):
-        torch.save({
-            'time': time,
-            'Phi_state_dict': self.PhiNetwork.motionModelBasis.state_dict(),
-            'WHat': self.WHat,
-            }, savePath)
-    
-    def loadModel(self,loadPath):
+    def saveModel(self, time, savePath):
+        torch.save(
+            {
+                "time": time,
+                "Phi_state_dict": self.PhiNetwork.motionModelBasis.state_dict(),
+                "WHat": self.WHat,
+            },
+            savePath,
+        )
+
+    def loadModel(self, loadPath):
         checkpoint = torch.load(loadPath)
-        self.PhiNetwork.motionModelBasis.load_state_dict(checkpoint['Phi_state_dict'])
-        self.WHat = checkpoint['WHat']
+        self.PhiNetwork.motionModelBasis.load_state_dict(checkpoint["Phi_state_dict"])
+        self.WHat = checkpoint["WHat"]
         # self.lastTime = checkpoint['time']
 
-    def predict(self,time):
-        #if first call to learn, initialize
+    def predict(self, time):
+        # if first call to learn, initialize
         if self.lastTime is None:
-            rospy.logerr("need observation to intialize")
+            rospy.logerr("need observation to initialize")
             return
 
-        #calculate time difference then update weight and state estimate
-        dt = (time-self.lastTime)
+        # calculate time difference then update weight and state estimate
+        dt = time - self.lastTime
         self.lastTime = time
 
         with torch.no_grad():
-            #basis
+            # basis
             Phi = self.PhiNetwork(self.etaHat)
             # rospy.loginfo("Phi "+str(Phi))
 
-            #prediction
-            etaDotHat = torch.matmul(self.WHat,Phi)
+            # prediction
+            etaDotHat = torch.matmul(self.WHat, Phi)
 
-            #state estimate derivative
+            # state estimate derivative
             etaHatDot = etaDotHat
             # rospy.loginfo("etaHatDot "+str(etaHatDot))
 
             # FIX THIS
-            #output layer estimate derivative
-            
-            self.etaHat += dt*etaHatDot
+            # output layer estimate derivative
+
+            self.etaHat += dt * etaHatDot
 
             # rospy.loginfo("self.WHat "+str(self.WHat))
             return self.etaHat.to(devicecpu).numpy(), etaDotHat.to(devicecpu).numpy()
 
-
-    def learn(self,targetPosxy,targetLinVelxy,time):
-        #convert data to tensor and add to memory
+    def learn(self, targetPosxy, targetLinVelxy, time):
+        # convert data to tensor and add to memory
         eta = torch.tensor(targetPosxy, dtype=torch.float32)
         etaDot = torch.tensor(targetLinVelxy, dtype=torch.float32)
-        self.replayMemory.append(eta,etaDot)
+        self.replayMemory.append(eta, etaDot)
 
         if torch.cuda.is_available():
             eta = eta.to(devicecuda)
@@ -241,63 +278,67 @@ class MotionModel():
         # rospy.loginfo("etaHat "+str(self.etaHat))
         # rospy.loginfo("etaDot "+str(etaDot))
 
-        #if first call to learn, initialize
+        # if first call to learn, initialize
         if self.lastTime is None:
             self.lastTime = time
             self.etaHat = eta.clone().detach()
-            # return 
+            # return
 
-        #calculate time difference then update weight and state estimate
-        dt = (time-self.lastTime)
+        # calculate time difference then update weight and state estimate
+        dt = time - self.lastTime
         self.lastTime = time
 
         # rospy.loginfo("dt "+str(dt))
 
-        #tracking error
+        # tracking error
         etaTilde = eta - self.etaHat
         # rospy.loginfo("etaTilde "+str(etaTilde))
 
         with torch.no_grad():
-            #basis
+            # basis
             Phi = self.PhiNetwork(eta)
             # rospy.loginfo("Phi "+str(Phi))
 
-            #prediction
-            etaDotHat = torch.matmul(self.WHat,Phi)
+            # prediction
+            etaDotHat = torch.matmul(self.WHat, Phi)
 
-            #state estimate derivative
-            etaHatDot = etaDotHat + self.k1*etaTilde
+            # state estimate derivative
+            etaHatDot = etaDotHat + self.k1 * etaTilde
             # etaHatDot = self.k1*etaTilde
             # rospy.loginfo("etaHatDot "+str(etaHatDot))
 
             # FIX THIS
-            #output layer estimate derivative
-            
-            WHatDot = self.gamma*torch.outer(Phi,etaTilde).t()
+            # output layer estimate derivative
+
+            WHatDot = self.gamma * torch.outer(Phi, etaTilde).t()
             # WHatDot = self.gamma*torch.matmul(Phi,etaTilde)
             # rospy.loginfo("WHatDot "+str(WHatDot))
 
             # rospy.loginfo("self.WHat "+str(self.WHat))
 
-            self.etaHat += dt*etaHatDot
-            self.WHat += dt*WHatDot
+            self.etaHat += dt * etaHatDot
+            self.WHat += dt * WHatDot
 
             # rospy.loginfo("self.WHat "+str(self.WHat))
-            return eta.to(devicecpu).numpy(), self.etaHat.to(devicecpu).numpy(), etaDot.to(devicecpu).numpy(), etaDotHat.to(devicecpu).numpy()
-
+            return (
+                eta.to(devicecpu).numpy(),
+                self.etaHat.to(devicecpu).numpy(),
+                etaDot.to(devicecpu).numpy(),
+                etaDotHat.to(devicecpu).numpy(),
+            )
 
     def optimize(self):
         if not self.replayMemory.isMemoryFull():
             rospy.logwarn(f"MEMORY NOT FILLED. SIZE {len(self.replayMemory.memory)}")
-            return -1,False
-        
+            return -1, False
+
         self.useIdx += 1
-        if self.useIdx%2==0:
+        if self.useIdx % 2 == 0:
             rospy.loginfo("USING DATA EVEN")
         else:
             rospy.loginfo("NOT USING DATA ODD")
             self.replayMemory.clear()
-            return -1,False
+            return -1, False
 
         rospy.loginfo("MEMORY FILLED OPTIMIZING BASIS")
         self.PhiNetwork.train()
@@ -309,45 +350,49 @@ class MotionModel():
         batch = Odom(*zip(*transitions))
         # rospy.logwarn("batch "+str(batch))
 
-        #get the position and velocity batch, push to cuda
+        # get the position and velocity batch, push to cuda
         positionBatch = torch.cat(batch.position)
         velocityBatch = torch.cat(batch.velocity)
 
         if torch.cuda.is_available():
             positionBatch = positionBatch.to(devicecuda)
             velocityBatch = velocityBatch.to(devicecuda)
-        
-        positionBatch = positionBatch.view(sampleSize,-1)
-        velocityBatch = velocityBatch.view(sampleSize,-1)
+
+        positionBatch = positionBatch.view(sampleSize, -1)
+        velocityBatch = velocityBatch.view(sampleSize, -1)
 
         # rospy.logwarn("positionBatch \n"+str(positionBatch))
         # rospy.logwarn("velocityBatch \n"+str(velocityBatch))
 
-        #train random batches over number of epochs using MSE
+        # train random batches over number of epochs using MSE
         velocityLosses = []
         for _ in range(self.numberEpochs):
             # generate random set of batches
-            batchStart = np.arange(0,sampleSize,self.batchSize,dtype=np.int64)
-            indices = np.arange(sampleSize,dtype=np.int64)
+            batchStart = np.arange(0, sampleSize, self.batchSize, dtype=np.int64)
+            indices = np.arange(sampleSize, dtype=np.int64)
             # np.random.shuffle(indices)
             np.random.shuffle(batchStart)
-            batches = [indices[ii:ii+self.batchSize] for ii in batchStart]
+            batches = [indices[ii : ii + self.batchSize] for ii in batchStart]
             # print(batches)
 
             for batch in batches:
                 if len(batch) == self.batchSize:
-                    positionBatchii = positionBatch[batch,:]
-                    velocityBatchii = velocityBatch[batch,:]
+                    positionBatchii = positionBatch[batch, :]
+                    velocityBatchii = velocityBatch[batch, :]
                     # rospy.logwarn("positionBatchii \n"+str(positionBatchii))
                     # rospy.logwarn("velocityBatchii \n"+str(velocityBatchii))
                     # rospy.logwarn("self.WHat \n"+str(self.WHat))
 
-                    velocityHatBatchii = torch.matmul(self.WHat,self.PhiNetwork(positionBatchii).t()).t()
+                    velocityHatBatchii = torch.matmul(
+                        self.WHat, self.PhiNetwork(positionBatchii).t()
+                    ).t()
                     # velocityHatBatchii = velocityHatBatchii.view(self.batchSize,-1)
                     # rospy.logwarn("velocityHatBatchii \n"+str(velocityHatBatchii))
 
-                    velocityLoss = ((velocityHatBatchii-velocityBatchii)**2.0).mean()
-                    rospy.loginfo("velocityLoss "+str(velocityLoss))
+                    velocityLoss = (
+                        (velocityHatBatchii - velocityBatchii) ** 2.0
+                    ).mean()
+                    rospy.loginfo("velocityLoss " + str(velocityLoss))
 
                     if math.isnan(velocityLoss.item()):
                         rospy.logerr("VELOCITY LOSS IS NAN, SHUTTINGDOWN")
@@ -365,4 +410,4 @@ class MotionModel():
         velocityLosses.clear()
         self.replayMemory.clear()
 
-        return velocityLossesAvg,True
+        return velocityLossesAvg, True
