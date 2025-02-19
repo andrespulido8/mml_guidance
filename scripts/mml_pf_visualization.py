@@ -142,9 +142,7 @@ class MML_PF_Visualization:
         plt.close(fig2)
 
         # set the map image boundaries and resize it to respect aspect ratio
-        self.fig_ax1.axis("equal")
-        self.limits = {"x": [-3.0, 2.0], "y": [-2, 2.5]}
-        self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
+        self.limits = {"x": [-2.5, 3.], "y": [-1.6, 1.6]}
 
         # initialize data structure
         # estimate error lists to plot respective to timestamp
@@ -206,6 +204,16 @@ class MML_PF_Visualization:
         # initialization flags
         self.plot_flag = False
         self.initialization_finished = True
+    
+    def is_inside_limits(self, position):
+        result = (
+            position[0] > self.limits["x"][0]
+            and position[0] < self.limits["x"][1]
+            and position[1] > self.limits["y"][0]
+            and position[1] < self.limits["y"][1]
+        )
+        # print("is_inside_limits: ", result) if not result else None
+        return result
 
     def joy_callback(self, msg):
 
@@ -349,8 +357,8 @@ class MML_PF_Visualization:
                 self.fig_ax3.set_title("Est y vs Real y")
                 self.fig_ax4.set_title("Est yaw vs Real yaw")
                 self.fig_ax5.set_title("Entropy")
-                self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
+                # self.fig_ax1.set_xlim(self.limits["x"])
+                # self.fig_ax1.set_ylim(self.limits["y"])
 
                 # plot the road network
                 self.fig_ax1.plot(
@@ -365,23 +373,13 @@ class MML_PF_Visualization:
 
                 # plot the particles
                 # TODO: change from only sampled to all particles
-                # check the particle is not outside of the map, if it is, remove that sampled index
-                self.sampled_index = np.array(
-                    [
-                        i
-                        for i in self.sampled_index
-                        if self.particles[i, 0] < self.limits["x"][1]
-                        and self.particles[i, 0] > self.limits["x"][0]
-                        and self.particles[i, 1] < self.limits["y"][1]
-                        and self.particles[i, 1] > self.limits["y"][0]
-                    ]
-                )
                 self.fig_ax1.scatter(
                     self.particles[self.sampled_index, 0],
                     self.particles[self.sampled_index, 1],
                     marker=".",
                     color="k",
                     label="Sampled !!! Particles ",
+                    clip_on=True
                 )
                 # plot the current estimate position
                 self.fig_ax1.plot(
@@ -391,12 +389,11 @@ class MML_PF_Visualization:
                     markersize=10.0,
                     color="g",
                     label="Estimated position ",
+                    clip_on=True
                 )
 
                 # plot spaguetti plots and scatter using the future particles and the sampled index
                 # TODO: change from blue to black
-                self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
                 if self.plot_prediction:
                     slope = (0.5 - 0.05) / (self.K - 1)
                     for k in range(self.K):
@@ -406,6 +403,7 @@ class MML_PF_Visualization:
                             marker=".",
                             color="b",
                             alpha=0.5 - slope * k,
+                            clip_on=True
                         )
                         counter = 0
                         for ii in self.sampled_index:
@@ -413,7 +411,7 @@ class MML_PF_Visualization:
                                 self.fig_ax1.plot(
                                     [
                                         self.particles[ii, 0],
-                                        self.future_parts[0, counter, 0],
+                                        self.future_parts[k, counter, 0],
                                     ],
                                     [
                                         self.particles[ii, 1],
@@ -421,6 +419,7 @@ class MML_PF_Visualization:
                                     ],
                                     color="b",
                                     alpha=0.2,
+                                    clip_on=True
                                 )
                             else:
                                 self.fig_ax1.plot(
@@ -434,12 +433,9 @@ class MML_PF_Visualization:
                                     ],
                                     color="b",
                                     alpha=0.2,
+                                    clip_on=True
                                 )
                             counter += 1
-                            # self.fig_ax1.axis("equal")
-                            self.fig_ax1.set(
-                                xlim=self.limits["x"], ylim=self.limits["y"]
-                            )
                     self.fig_ax1.scatter(
                         self.fov[0, 0],
                         self.fov[0, 1],
@@ -447,10 +443,9 @@ class MML_PF_Visualization:
                         color="b",
                         alpha=0.01,
                         label="Propagated Particles",
+                        clip_on=True
                     )  # fake for legend
 
-                self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=self.limits["x"], ylim=self.limits["y"])
                 # plot the real position
                 if self.is_sim:
                     self.fig_ax1.plot(
@@ -460,6 +455,7 @@ class MML_PF_Visualization:
                         markersize=10.0,
                         color="m",
                         label="True position ",
+                        clip_on=True
                     )
                 else:
                     self.fig_ax1.plot(
@@ -469,6 +465,7 @@ class MML_PF_Visualization:
                         markersize=10.0,
                         color="m",
                         label="True position ",
+                        clip_on=True
                     )
                 # plot the desired fov
                 self.fig_ax1.plot(
@@ -478,6 +475,7 @@ class MML_PF_Visualization:
                     markersize=1.0,
                     color="b",
                     label="Action FOV",
+                    clip_on=True
                 )
                 act_x = (self.des_fov[2, 0] - self.des_fov[0, 0]) / 2.0 + self.des_fov[
                     0, 0
@@ -486,7 +484,7 @@ class MML_PF_Visualization:
                     0, 1
                 ]
                 self.fig_ax1.scatter(
-                    act_x, act_y, marker="+", color="b", label="Action chosen"
+                    act_x, act_y, marker="+", color="b", label="Action chosen", clip_on=True
                 )
                 # plot the fov
                 self.fig_ax1.plot(
@@ -496,11 +494,12 @@ class MML_PF_Visualization:
                     markersize=1.0,
                     color="r",
                     label="Field of View ",
+                    clip_on=True
                 )
                 quad_x = (self.fov[2, 0] - self.fov[0, 0]) / 2.0 + self.fov[0, 0]
                 quad_y = (self.fov[1, 1] - self.fov[0, 1]) / 2.0 + self.fov[0, 1]
                 self.fig_ax1.scatter(
-                    quad_x, quad_y, marker="+", color="r", label="Quad position "
+                    quad_x, quad_y, marker="+", color="r", label="Quad position ", clip_on=True
                 )
                 # plot the occlusion
                 occlusions = rospy.get_param("/occlusions", None)
@@ -578,6 +577,7 @@ class MML_PF_Visualization:
                         markersize=10.0,
                         color="orange",
                         label="Noisy Measurements",
+                        clip_on=True
                     )
 
                 # plot particles covariances
@@ -646,6 +646,9 @@ class MML_PF_Visualization:
                 # for fig in [self.fig_ax2, self.fig_ax3]:
                 #    for t in self.update_t:
                 #        fig.plot([t,t], [-10,10], color="orange")
+            self.fig_ax1.autoscale(enable=False)
+            self.fig_ax1.set_xlim(left=self.limits["x"][0], right=self.limits["x"][1])
+            self.fig_ax1.set_ylim(bottom=self.limits["y"][0], top=self.limits["y"][1])
 
             # update all the plots and display them
             plt.show()
