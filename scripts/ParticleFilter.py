@@ -31,11 +31,13 @@ class ParticleFilter:
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             self.is_velocity = True
             is_occlusions_weights = True
-            input_dim = 3  # x, y, time
+            self.is_time_weights = False 
+            input_dim = 3 if self.is_time_weights else 2  # x, y, time
             self.nn_input_size = self.N_th * input_dim
             rospy.loginfo(f"Input dim and size: {input_dim}, {self.nn_input_size}")
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            prefix_name = "noisy_5_"  # "connected_graph_noisy_5_" or "noisy_5_" for pretrained on road network
+            prefix_name = "noisy_5_v2_"  # "connected_graph_noisy_5_" or "noisy_5_" for pretrained on road network
+            prefix_name = prefix_name + "time_" if self.is_time_weights else prefix_name
             prefix_name = (
                 prefix_name + "velocities_"
                 if self.is_velocity
@@ -147,9 +149,9 @@ class ParticleFilter:
         self.update_measurement_covariance(height=drone_height)
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
-        self.wm_history = np.zeros((self.N_th + buffer_size, 2))
+        self.state_history = np.zeros((self.N_th + buffer_size, 2))
         self.dt_history = np.ones(self.N_th) * 0.333
-        self.dt_wm_history = np.zeros(self.wm_history.shape[0])
+        self.dt_state_history = np.zeros(self.state_history.shape[0])
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles[-1,:, :2] = np.array([
@@ -171,7 +173,7 @@ class ParticleFilter:
         self.resample_index = np.arange(self.N)
         self.initial_time = rospy.get_time()
         self.last_time = 0.0
-        self.last_update_time = 0.0
+        self.t_since_last_update = 0.0
         self.iteration = 0
 
     def uniform_sample(self) -> np.ndarray:
@@ -224,7 +226,7 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             estimate_velocity = (
-                noisy_measurement - self.wm_history[-1, :]
+                noisy_measurement - self.state_history[-1, :]
             ) * self.dt_history[-1]
 
             self.particles = self.predict(
@@ -271,41 +273,44 @@ class ParticleFilter:
                             size=(self.N_th, self.N),
                         )
                         # repeat the measurement history to be the same size as the particles
-                        wm_history_repeated = np.tile(
-                            self.wm_history[-self.N_th :].reshape(
+                        state_history_repeated = np.tile(
+                            self.state_history[-self.N_th :].reshape(
                                 self.N_th, 1, self.Nx
                             ),
                             (1, self.N, 1),
                         )
-                        self.particles = wm_history_repeated + noise
+                        self.particles = state_history_repeated + noise
 
                     self.weights = np.ones(self.N) / self.N
                 else:
                     # some are good but some are bad, resample
                     self.multinomial_resample()
 
-        stuck_threshold = 0.02 if self.prediction_method == "Velocity" else 0.03
-        max_time_since_last_update = 4.
-        wm_pos_diff = np.linalg.norm(self.wm_history[0][:2] - self.wm_history[-1][:2])
-        if wm_pos_diff < stuck_threshold or self.dt_wm_history[-1] > max_time_since_last_update:
-            rospy.logwarn(
-                "Particle filter stuck or lost measurement. Uniformly resampling."
-            )
-            self.particles = self.uniform_sample()
-
         # estimate mean and variance
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
+        self.update_state_and_dt_buffer(noisy_measurement[:2])
 
-        self.update_weighted_mean_and_dt_history(noisy_measurement)
+        stuck_threshold = 0.03 if self.prediction_method == "Velocity" else 0.03
+        max_time_since_last_update = 10.
+        wm_pos_diff = np.linalg.norm(self.state_history[0][:2] - self.weighted_mean[:2])
+        # print("wm_pos_diff: ", wm_pos_diff)
+        # print("self.t_since_last_update: ", self.t_since_last_update)
+        time_condition = (np.floor(self.t_since_last_update) % max_time_since_last_update == 0)  and self.t_since_last_update > max_time_since_last_update
+        diff_position_condition = wm_pos_diff < stuck_threshold and not self.is_update
+        if diff_position_condition or time_condition:
+            rospy.logwarn(
+                f"Particle filter stuck: {diff_position_condition} or lost measurement: {time_condition}. Uniformly resampling."
+            )
+            self.particles = self.uniform_sample()
 
         self.last_time = rospy.get_time() - self.initial_time
 
     def optimize_learned_model_callback(self, event=None):
         """Optimize the neural network model with the particles and weights"""
-        filled_elements = np.count_nonzero(self.wm_history) // self.Nx
-        if not np.all(self.wm_history):
+        filled_elements = np.count_nonzero(self.state_history) // self.Nx
+        if not np.all(self.state_history):
             rospy.loginfo(
-                f"Filled elements: {filled_elements} / {self.wm_history.shape[0]}"
+                f"Filled elements: {filled_elements} / {self.state_history.shape[0]}"
             )
         # if measurement history buffer is full
         if (
@@ -359,10 +364,11 @@ class ParticleFilter:
         Input: N_th (number of time histories) sets of particles up to time k-1
         Output: N_th sets of propagated particles up to time k
         """
-        tiled_dt_hist = np.tile(
-            dt_history.reshape(-1, 1), (1, particles.shape[1])
-        ).reshape(-1, particles.shape[1], 1)
-        particles = np.concatenate((particles, tiled_dt_hist), axis=2)
+        if self.is_time_weights:
+            tiled_dt_hist = np.tile(
+                dt_history.reshape(-1, 1), (1, particles.shape[1])
+            ).reshape(-1, particles.shape[1], 1)
+            particles = np.concatenate((particles, tiled_dt_hist), axis=2)
 
         next_parts = self.motion_model.predict(
             np.transpose(particles[:, :, :], (1, 0, 2)).reshape(
@@ -535,12 +541,13 @@ class ParticleFilter:
         self.dt_history[-1] = dt
 
         if self.is_update:
-            self.wm_history = np.roll(self.wm_history, -1, axis=0)
-            self.wm_history[-1, :2] = noisy_measurement[:2]
-            update_dt = t - self.last_update_time
-            self.dt_wm_history[:-1] = self.dt_wm_history[1:] + update_dt
-            self.dt_wm_history[-1] = update_dt
-            self.last_update_time = t
+            self.state_history = np.roll(self.state_history, -1, axis=0)
+            self.state_history[-1, :2] = noisy_measurement[:2]
+            self.dt_state_history[:-1] = self.dt_state_history[1:] + self.t_since_last_update
+            self.dt_state_history[-1] = self.t_since_last_update 
+            self.t_since_last_update = 0.0
+        else:
+            self.t_since_last_update += dt
 
     def update_measurement_covariance(self, height):
         """Update the measurement covariance matrix based on the height of the drone agent"""
@@ -551,13 +558,13 @@ class ParticleFilter:
         self.measurement_covariance = gain * self.best_measurement_covariance
         # print("Measurement covariance: ", np.diag(self.measurement_covariance))
 
-    def convert_wm_history_to_training_batches(self, filled_elements, all_data=False):
+    def convert_state_history_to_training_batches(self, filled_elements, all_data=False):
         """Convert the measurement history to training batches for the neural network
         Input: filled_elements: number of elements in the measurement history buffer
         Output: X_train: input training data, y_train: output training data
         """
-        wm_history = self.wm_history[-filled_elements:]
-        dt_wm_history = self.dt_wm_history[-filled_elements:]
+        state_history = self.state_history[-filled_elements:]
+        dt_state_history = self.dt_state_history[-filled_elements:]
         if all_data:
             batch_size = filled_elements - self.N_th
         else:
@@ -573,18 +580,18 @@ class ParticleFilter:
             idx = np.arange(batch_size)
         else:
             idx = np.random.choice(
-                wm_history.shape[0] - self.N_th, batch_size, replace=False
+                state_history.shape[0] - self.N_th, batch_size, replace=False
             )
 
         # TODO: avoid for loop
         include_index = []
         for i, sampled_i in enumerate(idx):
-            X_train[i] = wm_history[sampled_i : sampled_i + self.N_th].copy()
+            X_train[i] = state_history[sampled_i : sampled_i + self.N_th].copy()
             dt_time_features[i] = (
-                dt_wm_history[sampled_i : sampled_i + self.N_th].copy()
-                - dt_wm_history[sampled_i + self.N_th]
+                dt_state_history[sampled_i : sampled_i + self.N_th].copy()
+                - dt_state_history[sampled_i + self.N_th]
             )
-            y_train[i] = wm_history[sampled_i + self.N_th].copy()
+            y_train[i] = state_history[sampled_i + self.N_th].copy()
 
             # remove samples with dt > 4 seconds
             if dt_time_features[i][0] < 4.0:
@@ -613,7 +620,7 @@ class ParticleFilter:
         criterion = nn.MSELoss().to(torch.float32)
         optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
         # data transformation
-        X_train, y_train = self.convert_wm_history_to_training_batches(filled_elements)
+        X_train, y_train = self.convert_state_history_to_training_batches(filled_elements)
         if self.prediction_method == "NN":
             X_train = X_train.reshape(
                 X_train.shape[0], -1
@@ -641,19 +648,19 @@ class ParticleFilter:
             csv_file = f"{pkg_path}/sim_data/training_data/online_data.csv"
             if not os.path.exists(csv_file):
                 os.makedirs(os.path.dirname(csv_file), exist_ok=True)
-            filled_elements = np.count_nonzero(self.wm_history) // self.Nx
-            X_train, y_train = self.convert_wm_history_to_training_batches(
+            filled_elements = np.count_nonzero(self.state_history) // self.Nx
+            X_train, y_train = self.convert_state_history_to_training_batches(
                 filled_elements, all_data=True
             )
             if X_train is None:
                 rospy.logwarn("No data to save")
                 return
             X_train_flattened = X_train.reshape(X_train.shape[0], -1)
-            wm_history_flattened = np.concatenate(
+            state_history_flattened = np.concatenate(
                 (X_train_flattened, y_train, np.zeros((X_train_flattened.shape[0], 1))),
                 axis=1,
             )
-            np.savetxt(csv_file, wm_history_flattened, delimiter=",")
+            np.savetxt(csv_file, state_history_flattened, delimiter=",")
             rospy.loginfo(f"Data saved to {csv_file}")
         elif self.prediction_method == "DMMN":
             self.motion_model.saveModel(time=rospy.get_time(), savePath=model_file)
