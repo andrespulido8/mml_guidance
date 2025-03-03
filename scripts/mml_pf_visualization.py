@@ -524,7 +524,7 @@ class MML_PF_Visualization:
                 # self.fig_ax1.plot([], [], marker=">",
                 #                   markersize=10., color="black", label="Measurement")
                 # add legend
-                # self.fig_ax1.legend(loc="upper right", bbox_to_anchor=(1.0, 1.0))
+                self.fig_ax1.legend(loc="upper right", bbox_to_anchor=(1.0, 1.0))
 
                 # shows the camera picture to indicate measurement
                 # if self.update_msg.data:

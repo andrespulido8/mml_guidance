@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import ParameterGrid
 import matplotlib.pyplot as plt
+from matplotlib.font_manager import FontProperties
 import seaborn as sns
 import os
 
@@ -23,7 +24,7 @@ except ImportError:
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def train(model, criterion, optimizer, X_train, y_train, epochs=100, online=False):
+def train(model, criterion, optimizer, X_train, y_train, epochs=100, online=False, is_velocities=False, is_time=False):
     losses = []
     for epoch in range(epochs):
         outputs = model(X_train)
@@ -43,7 +44,8 @@ def train(model, criterion, optimizer, X_train, y_train, epochs=100, online=Fals
             X_train.reshape(X_train.shape[0], -1),
             outputs.reshape(X_train.shape[0], -1),
             y_train.reshape(X_train.shape[0], -1),
-            is_velocities=True,
+            is_velocities=is_velocities,
+            is_time=is_time,
             title="Online",
         )
     return losses
@@ -82,6 +84,7 @@ def parameter_search(
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=0.001)
         losses = train(model, criterion, optimizer, X_train, y_train, epochs)
+        print("Training Loss: ", losses[-1])
         test_loss, _ = evaluate(model, criterion, X_test, y_test)
         print("Test Loss: ", test_loss, "\n")
         if test_loss < best_loss:
@@ -97,147 +100,167 @@ def parameter_search(
 
     print(f"\nBest parameters: {best_params}")
     print(f"Best test loss: {best_loss}")
+    print("Model saved to: ", weights_filename)
 
-    plt.legend(loc="upper right")
+    plt.legend(bbox_to_anchor=(1, 1))
     plt.show()
 
     return best_params
 
 
-def plot_NN_output(features, predictions, true_label, is_velocities, title="Test"):
+def plot_NN_output(features, predictions, true_label, is_velocities, is_time, title="Test"):
     # font sizes for the plot labels
-    font = {"family": "serif", "weight": "normal", "size": 40}
     sns.set_theme()
     sns.set_style("white")
-    sns.set_context("paper", font_scale=3)
+    sns.set_style({'font.family': 'Times New Roman'})
+    sns.set_context("paper", font_scale=2)
 
-    # figure with legends
-    fig, ax = plt.subplots()
+    num_plots = 2 if title == "Test" else 1
+    nx = 3 if is_time else 2
 
-    occ_widths = [1, 1]
-    occ_centers = [[-1.25, -0.6], [0.35, 0.2]]
-    # [x_min, x_max, y_min, y_max]
-    occlusions = [
-        [
-            occ_centers[i][0] - occ_widths[i] / 2,
-            occ_centers[i][0] + occ_widths[i] / 2,
-            occ_centers[i][1] - occ_widths[i] / 2,
-            occ_centers[i][1] + occ_widths[i] / 2,
+    for k in range(num_plots):
+
+        # figure with legends
+        fig, ax = plt.subplots()
+
+        occ_widths = [0.5, 0.6, 0.6, 0.6]
+        occ_centers = [[-1.5, 1], [-0.75, 0.], [1.1, 1], [1.5, 0.]]
+        # [x_min, x_max, y_min, y_max]
+        occlusions = [
+            [
+                occ_centers[i][0] - occ_widths[i] / 2,
+                occ_centers[i][0] + occ_widths[i] / 2,
+                occ_centers[i][1] - occ_widths[i] / 2,
+                occ_centers[i][1] + occ_widths[i] / 2,
+            ]
+            for i in range(len(occ_centers))
         ]
-        for i in range(len(occ_centers))
-    ]
-    # plot the squares representing occlusions
-    for occlusion in occlusions:
-        plt.plot(
-            [occlusion[0], occlusion[1], occlusion[1], occlusion[0], occlusion[0]],
-            [occlusion[2], occlusion[2], occlusion[3], occlusion[3], occlusion[2]],
-            color="black",
-        )
+        # plot the squares representing occlusions
+        for occlusion in occlusions:
+            plt.plot(
+                [occlusion[0], occlusion[1], occlusion[1], occlusion[0], occlusion[0]],
+                [occlusion[2], occlusion[2], occlusion[3], occlusion[3], occlusion[2]],
+                color="black",
+            )
+        # legend
+        plt.plot(occlusion[0], occlusion[2],color="black",label="Occlusion",)
 
-    clip_arrow = 2.0  # clip the arrow length
-    if is_velocities:
-        pos = features[:, -3:-1]
-        arrow_length = np.clip(features[:, -1], -clip_arrow, clip_arrow)  # time step
-        for i in range(pos.shape[0] - 1):
-            plt.arrow(
-                pos[i, -2],
-                pos[i, -1],
-                predictions[i, -2] * arrow_length[i],
-                predictions[i, -1] * arrow_length[i],
+        clip_arrow = 1  # clip the arrow length
+        if is_velocities:
+            pos = features[:, -3:-1] if is_time else features[:, -2:]
+            gain = 0.3
+            # time step
+            if is_time:
+                arrow_length = np.clip(features[:, -1] * gain, -clip_arrow, clip_arrow) 
+            else:
+                arrow_length = np.ones(features.shape[0]) * 0.333 * gain
+            for i in range(pos.shape[0] - 1):
+                plt.arrow(
+                    pos[i, -2],
+                    pos[i, -1],
+                    predictions[i, -2] * arrow_length[i],
+                    predictions[i, -1] * arrow_length[i],
+                    color="red",
+                    alpha=0.4,
+                    width=0.003,
+                    head_width=0.015,
+                )
+                if k == 0:
+                    plt.arrow(
+                        pos[i, -2],
+                        pos[i, -1],
+                        true_label[i, 0] * arrow_length[i],
+                        true_label[i, 1] * arrow_length[i],
+                        color="blue",
+                        alpha=0.4,
+                        width=0.003,
+                        head_width=0.015,
+                    )
+        else:
+            # Calculate arrow directions for predictions and actual values (position - prev_position)
+            gain = 0.2 
+            pred_dx = np.clip(
+                (predictions[:, 0] - features[:, -nx]) * gain, -clip_arrow / 10, clip_arrow / 10
+            )
+            pred_dy = np.clip(
+                (predictions[:, 1] - features[:, -nx + 1]) * gain, -clip_arrow / 10, clip_arrow / 10
+            )
+            actual_dx = np.clip(
+                (true_label[:, 0] - features[:, -nx]) * gain, -clip_arrow / 10, clip_arrow / 10
+            )
+            actual_dy = np.clip(
+                (true_label[:, 1] - features[:, -nx + 1]) * gain, -clip_arrow / 10, clip_arrow / 10
+            )
+
+            arrow_length = 2.5  # higher value means shorter arrows
+            if k == 0:
+                # Plot actual arrows
+                plt.quiver(
+                    features[:, -nx],
+                    features[:, -nx + 1],
+                    actual_dx,
+                    actual_dy,
+                    color="blue",
+                    alpha=0.7,
+                    scale=arrow_length,
+                    headwidth=1.5,  # Increase the width of the arrowhead
+                    width=0.0025,
+                )
+            # Plot predicted arrows
+            plt.quiver(
+                features[:, -nx],
+                features[:, -nx + 1],
+                pred_dx,
+                pred_dy,
                 color="red",
-                width=0.005,
-                head_width=0.02,
+                alpha=0.7,
+                scale=arrow_length,
+                headwidth=1.5,  # Increase the width of the arrowhead
+                width=0.0025,
             )
-            plt.arrow(
-                pos[i, -2],
-                pos[i, -1],
-                true_label[i, 0] * arrow_length[i],
-                true_label[i, 1] * arrow_length[i],
-                color="blue",
-                width=0.005,
-                head_width=0.02,
+
+        # Plot 3 paths
+        for i in range(-1, -1 * min(4, features.shape[0]), -1):
+            ax.plot(
+                features[i, 0:-nx+1:nx],
+                features[i, 1:-1:nx] if nx == 3 else features[i, 1::nx],
+                color="black",
+                marker="o",
+                linewidth=1,
+                alpha=0.5,
             )
-    else:
-        # Calculate arrow directions for predictions and actual values (position - prev_position)
-        pred_dx = np.clip(
-            predictions[:, 0] - features[:, -3], -clip_arrow / 10, clip_arrow / 10
-        )
-        pred_dy = np.clip(
-            predictions[:, 1] - features[:, -2], -clip_arrow / 10, clip_arrow / 10
-        )
-        actual_dx = np.clip(
-            true_label[:, 0] - features[:, -3], -clip_arrow / 10, clip_arrow / 10
-        )
-        actual_dy = np.clip(
-            true_label[:, 1] - features[:, -2], -clip_arrow / 10, clip_arrow / 10
-        )
-
-        arrow_length = 2.5  # higher value means shorter arrows
-        # Plot actual arrows
-        plt.quiver(
-            features[:, -3],
-            features[:, -2],
-            actual_dx,
-            actual_dy,
-            color="blue",
-            alpha=0.9,
-            scale=arrow_length,
-            headwidth=2,  # Increase the width of the arrowhead
-            width=0.0035,
-        )
-        # Plot predicted arrows
-        plt.quiver(
-            features[:, -3],
-            features[:, -2],
-            pred_dx,
-            pred_dy,
-            color="red",
-            alpha=0.9,
-            scale=arrow_length,
-            headwidth=2,  # Increase the width of the arrowhead
-            width=0.0035,
-        )
-
-    # Plot 3 paths
-    for i in range(-1, -1 * min(4, features.shape[0]), -1):
-        ax.plot(
-            features[i, 0::3],
-            features[i, 1::3],
+        # label for legend of path
+        plt.plot(
+            features[0, 0],
+            features[0, 1],
             color="black",
             marker="o",
+            label="Path History Sample",
             linewidth=1,
-            alpha=0.5,
         )
-    # label for legend of path
-    plt.plot(
-        features[0, 0],
-        features[0, 1],
-        color="black",
-        marker="o",
-        label="Path History Sample",
-        linewidth=1,
-    )
-    # for legend
-    plt.arrow(0, 0, 0, 0, color="red", label="Predicted")
-    plt.arrow(0, 0, 0, 0, color="blue", label="Actual")
+        # for legend
+        plt.arrow(0, 0, 0, 0, color="red", label="Predicted")
+        plt.arrow(0, 0, 0, 0, color="blue", label="Actual") if k == 0 else None
 
-    plt.title(title)
-    plt.xlabel("$x_g$ [m]")
-    plt.ylabel("$y_g$ [m]")
-    # plt.xlim([-2, 1.0])
-    # plt.ylim([-1.5, 2])
-    # equal aspect ratio
-    plt.gca().set_aspect("equal", adjustable="box")
-    plt.legend(bbox_to_anchor=(1, 1))
-    if title == "Online":
-        plt.savefig(
-            "/home/andres/mml_ws/src/mml_guidance/sim_data/online_network_test_output.png",
-            bbox_inches="tight",
-        )
-    else:
+        plt.title(title)
+        plt.xlabel("$x_g$ [m]")
+        plt.ylabel("$y_g$ [m]")
+        # equal aspect ratio
+        plt.gca().set_aspect("equal", adjustable="box")
+        # plt.legend(bbox_to_anchor=(1, 1))
+        font_properties = FontProperties()
+        font_properties.set_family('serif')
+        font_properties.set_name('Times New Roman')
+        ax.legend(prop=font_properties, bbox_to_anchor=(1, 1))
+
+        plt.legend(loc="lower left")
+        if title == "Online":
+            plt.savefig(
+                "/home/andres/mml_ws/src/mml_guidance/sim_data/online_network_test_output.png",
+                bbox_inches="tight",
+            )
         plt.show()
-    plt.close(fig)
-
+        plt.close(fig)
 
 def initialize_weights(model):
     for layer in model.modules():
@@ -259,7 +282,7 @@ def select_model(model_name, input_size, input_dim=2):
     elif model_name == "ScratchTransformer":
         block_size = input_size // input_dim
         model = ScratchTransformer(
-            input_dim=input_dim, block_size=block_size, n_embed=5, n_head=2, n_layer=2
+            input_dim=input_dim, block_size=block_size, n_embed=40, n_head=6, n_layer=1, hidden_dim=10
         )
     else:
         raise ValueError("Invalid model name")
@@ -277,20 +300,22 @@ def select_model(model_name, input_size, input_dim=2):
     return model
 
 
-def select_parameters(model_name, input_size):
+def select_parameters(model_name, input_size, input_dim=3):
     if model_name == "SimpleDNN":
         param_grid = {
             "input_size": [input_size],
             "output_size": [2],
             "activation_fn": ["relu"],
-            "num_layers": [2, 4, 8],
+            "num_layers": [2, 4, 8, 16],
             "nodes_per_layer": [20, 40, 80],
         }
     elif model_name == "ScratchTransformer":
         param_grid = {
-            "n_embed": [2, 5, 10],
-            "n_head": [2, 4],
-            "n_layer": [2, 3],
+            "hidden_dim": [20, 30],
+            "n_embed": [20, 40],  # 40 also good
+            "n_head": [6, 8],  # 8 also good
+            "n_layer": [1, 2],
+            "input_dim": [input_dim],
         }
     else:
         raise ValueError("Invalid model name")
@@ -301,12 +326,14 @@ def select_parameters(model_name, input_size):
 def main():
     is_velocities = True
     is_occlusion = True
-    is_parameter_search = False
-    evaluate_model = True
+    is_time = False
+    is_perfect = False
+    is_parameter_search = True
+    evaluate_model = False 
     is_connected_graph = False
-    get_every_n = 2
+    get_every_n = 1
     model_name = "ScratchTransformer"  # "ScratchTransformer"  # "SimpleDNN"
-    prefix_name = "noisy_5_"
+    prefix_name = "noisy_5_v2_" if not is_perfect else "perfect_5_v2_"
 
     print(
         f"Training NN w is_velocities: {is_velocities}, model: {model_name}, is_parameter_search: {is_parameter_search}, prefix_name: {prefix_name}"
@@ -314,10 +341,14 @@ def main():
 
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
 
-    input_dim = 3  # 2 for positions, 1 for time
+    if is_time:
+        prefix_name = prefix_name + "time_" 
+        input_dim = 3  # 2 for positions, 1 for time
+    else:
+        input_dim = 2  
 
     prefix_name = (
-        prefix_name + "velocities_" if is_velocities else prefix_name + "time_"
+        prefix_name + "velocities_" if is_velocities else prefix_name + "position_"
     )
 
     if is_occlusion or evaluate_model:
@@ -325,7 +356,7 @@ def main():
             path + "converted_" + prefix_name + "training_data.csv"
         )  # non-occluded
         prefix_name = prefix_name + "occlusions_" if is_occlusion else prefix_name
-        print("df shape: ", df_no_occlusion.shape)
+        print("no occlusion df shape: ", df_no_occlusion.shape)
 
     prefix_name = (
         "connected_graph_" + prefix_name if is_connected_graph else prefix_name
@@ -334,14 +365,17 @@ def main():
     df = pd.read_csv(path + "converted_" + prefix_name + "training_data.csv")
     # df = pd.read_csv(path + "online_data.csv")
     print("df shape: ", df.shape)
-    X = df.iloc[::get_every_n, :-3].values
-    Y = df.iloc[::get_every_n, -3:-1].values
+    X = df.iloc[::get_every_n, :-input_dim].values
+    if input_dim == 3:
+        slice_ = slice(-input_dim, -1)
+    else:
+        slice_ = slice(-input_dim, None)
+    Y = df.iloc[::get_every_n, slice_].values
     print("shape of X: ", X.shape)
     print("shape of Y: ", Y.shape)
 
-    # split the data into training and testing sets
     train_percent = 0.7
-    epochs = 50
+    epochs = 100
 
     def get_ordered_train_test(data):
         length = len(data)
@@ -354,14 +388,20 @@ def main():
     X_train, X_test = get_ordered_train_test(X)  # (N, T*C)
     y_train, y_test = get_ordered_train_test(Y)
     if is_occlusion or evaluate_model:
-        train_percent = 0.3
+        train_percent = 0.7
         _, X_test = get_ordered_train_test(
-            df_no_occlusion.iloc[::get_every_n, :-3].values
+            df_no_occlusion.iloc[::get_every_n, :-input_dim].values
         )
-        _, y_test = get_ordered_train_test(
-            df_no_occlusion.iloc[::get_every_n, -3:-1].values
-        )
+        if is_time:
+            _, y_test = get_ordered_train_test(
+                df_no_occlusion.iloc[::get_every_n, -input_dim:-1].values
+            )
+        else:
+            _, y_test = get_ordered_train_test(
+                df_no_occlusion.iloc[::get_every_n, -input_dim:].values
+            )
 
+    # split the data into training and testing sets
     X_train = torch.from_numpy(X_train.astype(np.float32)).to(device)
     X_test = torch.from_numpy(X_test.astype(np.float32)).to(device)
     y_train = torch.from_numpy(y_train.astype(np.float32)).to(device)
@@ -380,7 +420,7 @@ def main():
     )
     if is_parameter_search:
         param_grid = select_parameters(
-            model_name=model_name, input_size=X_train.shape[1]
+            model_name=model_name, input_size=X_train.shape[1], input_dim=input_dim
         )
 
         ModelClass = model.__class__
@@ -418,7 +458,8 @@ def main():
     y_train = y_train.to("cpu").detach().numpy()
     X_train = X_train.to("cpu").detach().numpy()
     print("Train Loss: ", train_loss)
-    plot_NN_output(X_train, y_pred_train, y_train, is_velocities, "Train")
+
+    plot_NN_output(X_train[::2], y_pred_train[::2], y_train[::2], is_velocities, is_time, "Train")
 
     # evaluate test data
     test_loss, y_pred = evaluate(model, criterion, X_test, y_test)
@@ -426,7 +467,7 @@ def main():
     X_test = X_test.to("cpu").detach().numpy()
     y_pred = y_pred.to("cpu").detach().numpy()
     y_test = y_test.to("cpu").detach().numpy()
-    plot_NN_output(X_test, y_pred, y_test, is_velocities, "Test")
+    plot_NN_output(X_test[::2], y_pred[::2], y_test[::2], is_velocities, is_time, "Test")
 
     if evaluate_model and False:
         # weights_filename = f"../../scripts/mml_network/models/best_connected_graph_noisy_velocities_ScratchTransformer.pth"
