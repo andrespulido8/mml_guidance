@@ -134,11 +134,10 @@ class Block(nn.Module):
 
 
 class ScratchTransformer(nn.Module):
-    def __init__(self, input_dim=3, block_size=5, n_embed=2, n_head=1, n_layer=1):
+    def __init__(self, input_dim=3, block_size=5, n_embed=2, n_head=1, n_layer=1, hidden_dim=2):
         """A simple transformer for time series forecasting.
         The transformer consists of a stack of blocks, each containing a multi-head self-attention
         mechanism and a simple feed-forward neural network at the end.
-
 
         Args:
             input_dim: number of features in the input
@@ -164,7 +163,9 @@ class ScratchTransformer(nn.Module):
             ]
         )
         self.ln_f = nn.LayerNorm(n_embed).to(device)  # final layer norm
-        self.lm_head = nn.Linear(n_embed, 2).to(device)
+        self.lm_hidden = nn.Linear(n_embed, hidden_dim).to(device)
+        self.activation_fn = nn.ReLU()
+        self.lm_head = nn.Linear(hidden_dim, 2).to(device)
 
         # better init
         self.apply(self._init_weights)
@@ -188,6 +189,7 @@ class ScratchTransformer(nn.Module):
         # x = self.position_embedding_table(src)
         x = self.blocks(x)  # (B,T,C)
         x = self.ln_f(x)  # (B,T,C)
+        x = self.activation_fn(self.lm_hidden(x))
         output = self.lm_head(x)  # (B,T,C)
 
         output = output[:, -1, :]  # only return the last time step
