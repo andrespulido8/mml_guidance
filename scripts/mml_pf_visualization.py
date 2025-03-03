@@ -142,7 +142,7 @@ class MML_PF_Visualization:
         plt.close(fig2)
 
         # set the map image boundaries and resize it to respect aspect ratio
-        self.limits = {"x": [-2.5, 3.], "y": [-1.6, 1.6]}
+        self.limits = {"x": [-2.5, 3.0], "y": [-1.6, 1.6]}
 
         # initialize data structure
         # estimate error lists to plot respective to timestamp
@@ -183,25 +183,25 @@ class MML_PF_Visualization:
         if self.road_network == None:
             self.road_network = np.array(
                 [
-                    (1.7, 0),   # 6
-                    (0.3, 0),   # 5
-                    (0, -1),    # 4
-                    (2, -1),    # 7
-                    (1.7, 0),   # 6
-                    (2, 1),     # 2
-                    (0, 1),     # 1
-                    (-1.5, -1), # 3
+                    (1.7, 0),  # 6
+                    (0.3, 0),  # 5
+                    (0, -1),  # 4
+                    (2, -1),  # 7
+                    (1.7, 0),  # 6
+                    (2, 1),  # 2
+                    (0, 1),  # 1
+                    (-1.5, -1),  # 3
                     (-1.5, 1),  # 0
-                    (0, 1),     # 1
+                    (0, 1),  # 1
                     (-1.5, 1),  # 0
-                    (0, -1),    # 4
+                    (0, -1),  # 4
                 ]
             )
 
         # initialization flags
         self.plot_flag = False
         self.initialization_finished = True
-    
+
     def is_inside_limits(self, position):
         result = (
             position[0] > self.limits["x"][0]
@@ -376,7 +376,7 @@ class MML_PF_Visualization:
                     marker=".",
                     color="k",
                     label="Sampled !!! Particles ",
-                    clip_on=True
+                    clip_on=True,
                 )
                 # plot the current estimate position
                 self.fig_ax1.plot(
@@ -386,7 +386,7 @@ class MML_PF_Visualization:
                     markersize=10.0,
                     color="g",
                     label="Estimated position ",
-                    clip_on=True
+                    clip_on=True,
                 )
 
                 # plot spaguetti plots and scatter using the future particles and the sampled index
@@ -400,7 +400,7 @@ class MML_PF_Visualization:
                             marker=".",
                             color="b",
                             alpha=0.5 - slope * k,
-                            clip_on=True
+                            clip_on=True,
                         )
                         counter = 0
                         for ii in self.sampled_index:
@@ -416,7 +416,7 @@ class MML_PF_Visualization:
                                     ],
                                     color="b",
                                     alpha=0.2,
-                                    clip_on=True
+                                    clip_on=True,
                                 )
                             else:
                                 self.fig_ax1.plot(
@@ -430,7 +430,7 @@ class MML_PF_Visualization:
                                     ],
                                     color="b",
                                     alpha=0.2,
-                                    clip_on=True
+                                    clip_on=True,
                                 )
                             counter += 1
                     self.fig_ax1.scatter(
@@ -440,7 +440,7 @@ class MML_PF_Visualization:
                         color="b",
                         alpha=0.01,
                         label="Propagated Particles",
-                        clip_on=True
+                        clip_on=True,
                     )  # fake for legend
 
                 # plot the real position
@@ -452,7 +452,7 @@ class MML_PF_Visualization:
                         markersize=10.0,
                         color="m",
                         label="True position ",
-                        clip_on=True
+                        clip_on=True,
                     )
                 else:
                     self.fig_ax1.plot(
@@ -462,7 +462,7 @@ class MML_PF_Visualization:
                         markersize=10.0,
                         color="m",
                         label="True position ",
-                        clip_on=True
+                        clip_on=True,
                     )
                 # plot the desired fov
                 self.fig_ax1.plot(
@@ -472,7 +472,7 @@ class MML_PF_Visualization:
                     markersize=1.0,
                     color="b",
                     label="Action FOV",
-                    clip_on=True
+                    clip_on=True,
                 )
                 act_x = (self.des_fov[2, 0] - self.des_fov[0, 0]) / 2.0 + self.des_fov[
                     0, 0
@@ -481,7 +481,12 @@ class MML_PF_Visualization:
                     0, 1
                 ]
                 self.fig_ax1.scatter(
-                    act_x, act_y, marker="+", color="b", label="Action chosen", clip_on=True
+                    act_x,
+                    act_y,
+                    marker="+",
+                    color="b",
+                    label="Action chosen",
+                    clip_on=True,
                 )
                 # plot the fov
                 self.fig_ax1.plot(
@@ -491,12 +496,17 @@ class MML_PF_Visualization:
                     markersize=1.0,
                     color="r",
                     label="Field of View ",
-                    clip_on=True
+                    clip_on=True,
                 )
                 quad_x = (self.fov[2, 0] - self.fov[0, 0]) / 2.0 + self.fov[0, 0]
                 quad_y = (self.fov[1, 1] - self.fov[0, 1]) / 2.0 + self.fov[0, 1]
                 self.fig_ax1.scatter(
-                    quad_x, quad_y, marker="+", color="r", label="Quad position ", clip_on=True
+                    quad_x,
+                    quad_y,
+                    marker="+",
+                    color="r",
+                    label="Quad position ",
+                    clip_on=True,
                 )
                 # plot the occlusion
                 occlusions = rospy.get_param("/occlusions", None)
@@ -574,7 +584,7 @@ class MML_PF_Visualization:
                         markersize=10.0,
                         color="orange",
                         label="Noisy Measurements",
-                        clip_on=True
+                        clip_on=True,
                     )
 
                 # plot particles covariances

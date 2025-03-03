@@ -20,7 +20,7 @@ class KalmanFilter:
         self.K = np.zeros((np.shape(H)[1], np.shape(H)[0]))
         self.P = np.diag([0.5, 0.5, 0.05, 0.05])
         self.X = None
-        self.t_since_last_update = 0.
+        self.t_since_last_update = 0.0
 
     def predict(self, dt):
         """Function that predicts the state and covariance of the system.

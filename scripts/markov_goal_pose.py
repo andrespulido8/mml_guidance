@@ -50,12 +50,12 @@ class MarkovChain:
         x_offset = -1.25  # change this to not crash to the net
         y_offset = 0.2
         node_positions = [
-            (x_offset + 0 * k, y_offset + 0 * k, 0),       #
-            (x_offset + 0 * k, y_offset + -1 * k, 270),    #
-            (x_offset + 2 * k, y_offset + -1 * k, 0),      #
-            (x_offset + 2 * k, y_offset + 1 * k, 90),      #
-            (x_offset + 1 * k, y_offset + 2 * k, 180),     #
-            (x_offset + 0 * k, y_offset + 1 * k, 180),     #
+            (x_offset + 0 * k, y_offset + 0 * k, 0),  #
+            (x_offset + 0 * k, y_offset + -1 * k, 270),  #
+            (x_offset + 2 * k, y_offset + -1 * k, 0),  #
+            (x_offset + 2 * k, y_offset + 1 * k, 90),  #
+            (x_offset + 1 * k, y_offset + 2 * k, 180),  #
+            (x_offset + 0 * k, y_offset + 1 * k, 180),  #
         ]
         self.node_positions_to_goal_list(node_positions)
 
@@ -84,44 +84,48 @@ class MarkovChain:
         """Generates a road network with 8 nodes"""
         # node positions in m and orientation in deg
         node_positions = [
-            (-1.5, 1, 180),   # Node 0
-            (0, 1, 180),      # Node 1
-            (2.1, 1, 90),       # Node 2
+            (-1.5, 1, 180),  # Node 0
+            (0, 1, 180),  # Node 1
+            (2.1, 1, 90),  # Node 2
             (-1.5, -1, 270),  # Node 3
-            (0, -1, 90),      # Node 4
-            (0.3, 0, 0),      # Node 5
-            (1.7, 0, 0),      # Node 6
-            (2.1, -1, 270),     # Node 7
+            (0, -1, 90),  # Node 4
+            (0.3, 0, 0),  # Node 5
+            (1.7, 0, 0),  # Node 6
+            (2.1, -1, 270),  # Node 7
         ]
         self.node_positions_to_goal_list(node_positions)
 
         # transition matrix:
-        self.trans_matrix = np.array([
-            # 0    1    2    3    4    5    6    7
-             [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 0
-             [0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0],  # Node 1
-             [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 2
-             [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 3
-             [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],  # Node 4
-             [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],  # Node 5
-             [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 6
-             [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 7
-       ])
+        self.trans_matrix = np.array(
+            [
+                # 0    1    2    3    4    5    6    7
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 0
+                [0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0],  # Node 1
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 2
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 3
+                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],  # Node 4
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],  # Node 5
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 6
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 7
+            ]
+        )
 
-    def node_positions_to_goal_list(self, node_positions: List[Tuple[float, float, float]]):
+    def node_positions_to_goal_list(
+        self, node_positions: List[Tuple[float, float, float]]
+    ):
         self.goal_list = []
         for node, pos in enumerate(node_positions):
             self.goal_list.append(
-            {
-                "curr_goal": node,
-                "x": pos[0],
-                "y": pos[1],
-                "z": 0,
-                "qx": 0,
-                "qy": 0,
-                "qz": np.sin(np.deg2rad(pos[2] / 2)),
-                "qw": np.cos(np.deg2rad(pos[2] / 2)),
-            }
+                {
+                    "curr_goal": node,
+                    "x": pos[0],
+                    "y": pos[1],
+                    "z": 0,
+                    "qx": 0,
+                    "qy": 0,
+                    "qz": np.sin(np.deg2rad(pos[2] / 2)),
+                    "qw": np.cos(np.deg2rad(pos[2] / 2)),
+                }
             )
         self.n_states = len(self.goal_list)
 

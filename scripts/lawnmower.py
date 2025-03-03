@@ -21,7 +21,10 @@ class LawnmowerPath:
         self.POINTS_PER_SLICE = POINTS_PER_SLICE
 
     def generate_path(
-        self, polygon_points: List[Tuple[float, float]], path_dist: float, angle: float = 0
+        self,
+        polygon_points: List[Tuple[float, float]],
+        path_dist: float,
+        angle: float = 0,
     ) -> Tuple[List[List[float]], float, bool, List[Polygon], Polygon]:
         """
         Generate an optimized path through the polygon.
@@ -41,9 +44,7 @@ class LawnmowerPath:
             [np.sin(np.deg2rad(angle)), np.cos(np.deg2rad(angle))],
         ]
         print("polygon_points", polygon_points)
-        rotated_points = [
-            list(np.dot(transform, point)) for point in polygon_points
-        ]
+        rotated_points = [list(np.dot(transform, point)) for point in polygon_points]
 
         # Generate grid and path
         geom = Polygon(rotated_points)
@@ -61,7 +62,8 @@ class LawnmowerPath:
 
         return path, geom
 
-    def _generate_path_for_grid(self,
+    def _generate_path_for_grid(
+        self,
         grid: List[Polygon],
     ) -> Tuple[List[List[float]], float, int]:
         """
@@ -96,7 +98,9 @@ class LawnmowerPath:
             if slice_cells:
                 num_turns += 1
                 start_end = self._get_slice_path(slice_cells, direction)
-                interpolation = np.linspace(start_end[0], start_end[1], self.POINTS_PER_SLICE)
+                interpolation = np.linspace(
+                    start_end[0], start_end[1], self.POINTS_PER_SLICE
+                )
                 for point in interpolation:
                     path.append(point)
                 direction *= -1
@@ -166,7 +170,7 @@ class LawnmowerPath:
         prepared_geom = prep(geom)
         grid = list(filter(prepared_geom.covers, self.grid_bounds(geom, delta)))
         return grid
-    
+
     @staticmethod
     def plot(bounds, path):
         fig = plt.figure()
@@ -180,6 +184,7 @@ class LawnmowerPath:
         ax1.scatter(xList, yList, c="green")
         plt.axis("equal")
         plt.show()
+
 
 def main():
     """
@@ -198,6 +203,7 @@ def main():
     my_planner = LawnmowerPath(POINTS_PER_SLICE=5)
     best_path, _ = my_planner.generate_path(bounds, path_dist=0.4, angle=0)
     my_planner.plot(bounds, best_path)
+
 
 if __name__ == "__main__":
     main()

@@ -8,6 +8,7 @@ rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
 folder_path = package_dir + "/sim_data/processed_iros"
 
+
 def main():
     outdir_all = folder_path + "/joined/summary/"
     if not os.path.exists(outdir_all):
@@ -30,9 +31,7 @@ def main():
     for filename in filenames:
         if filename.endswith(".csv"):
             first_word = "_".join(filename.split("_")[:2])
-            file_df = pd.read_csv(
-                folder_path + "/joined/" + filename, low_memory=False
-            )
+            file_df = pd.read_csv(folder_path + "/joined/" + filename, low_memory=False)
 
             if "xyTh estimate cov det data" in file_df.columns:
                 file_df = file_df.drop(columns=["xyTh estimate cov det"])

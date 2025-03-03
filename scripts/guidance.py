@@ -43,7 +43,7 @@ class Guidance:
         self.N = 500  # Number of particles
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
-        self.height = 1.1 # initial height of the quadcopter in meters
+        self.height = 1.1  # initial height of the quadcopter in meters
         self.CAMERA_ANGLES = np.array(
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
@@ -73,7 +73,7 @@ class Guidance:
 
         # Occlusions
         occ_widths = [0.6, 0.6, 0.6, 0.6]
-        occ_centers = [[-1.5, 1], [-0.75, 0.], [1.1, 1.1], [1.7, 0.]]
+        occ_centers = [[-1.5, 1], [-0.75, 0.0], [1.1, 1.1], [1.7, 0.0]]
         rospy.set_param("/occlusions", [occ_centers, occ_widths])
         self.occlusions = Occlusions(occ_centers, occ_widths)
 
@@ -82,9 +82,13 @@ class Guidance:
             lawnmower = LawnmowerPath(POINTS_PER_SLICE=8)
             bounds = [
                 self.filter.APRILab_dims[0],
-                np.array([self.filter.APRILab_dims[1][0], self.filter.APRILab_dims[0][1]]),
+                np.array(
+                    [self.filter.APRILab_dims[1][0], self.filter.APRILab_dims[0][1]]
+                ),
                 self.filter.APRILab_dims[1],
-                np.array([self.filter.APRILab_dims[0][0], self.filter.APRILab_dims[1][1]]),
+                np.array(
+                    [self.filter.APRILab_dims[0][0], self.filter.APRILab_dims[1][1]]
+                ),
             ]
             self.path, _ = lawnmower.generate_path(bounds, path_dist=0.4, angle=0)
             lawnmower.plot(bounds=bounds, path=self.path)
@@ -384,15 +388,13 @@ class Guidance:
             )
 
             # if np.abs(entropy) > 30:  # debugging
-                # print("\nEntropy term went bad :(")
-                # print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
-                # print("third term: ", np.nansum(wgts * np.log(like_meas)))
-                # print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
+            # print("\nEntropy term went bad :(")
+            # print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
+            # print("third term: ", np.nansum(wgts * np.log(like_meas)))
+            # print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
 
             if np.isinf(first_term):
-                rospy.loginfo(
-                    "first term of entropy is -inf. Likelihood is very small"
-                )
+                rospy.loginfo("first term of entropy is -inf. Likelihood is very small")
         else:
             # likelihood of particle p(xt|xt-1)
             part_len2, _ = prev_particles.shape
@@ -558,7 +560,7 @@ class Guidance:
         # set height depending on runtime
         is_height_constant = False
         if is_height_constant:
-            self.height = np.clip(self.height, 1.1, 1.8)  
+            self.height = np.clip(self.height, 1.1, 1.8)
         else:
             dheight = 0.02
             # print("\nfilter update: ", self.filter.is_update)
@@ -620,7 +622,7 @@ class Guidance:
                 )
                 self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
                 if self.prediction_method == "DMMN":
-                    # use this to give fast update measurements to DMMN 
+                    # use this to give fast update measurements to DMMN
                     t = rospy.get_time() - self.initial_time
                     if (
                         self.filter.is_update
@@ -723,10 +725,14 @@ class Guidance:
             ds.pose.z = -self.height
             # clip based on flight space
             ds.pose.x = np.clip(
-                ds.pose.x, self.filter.APRILab_dims[0][0], self.filter.APRILab_dims[1][0]
+                ds.pose.x,
+                self.filter.APRILab_dims[0][0],
+                self.filter.APRILab_dims[1][0],
             )
             ds.pose.y = np.clip(
-                ds.pose.y, -self.filter.APRILab_dims[1][1], -self.filter.APRILab_dims[0][1]
+                ds.pose.y,
+                -self.filter.APRILab_dims[1][1],
+                -self.filter.APRILab_dims[0][1],
             )  # remember y is negative for the quad
             self.pose_pub.publish(ds)
             # tracking err pub
@@ -835,7 +841,7 @@ class Guidance:
                     ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
-            if self.filter.t_since_last_update > 1.:
+            if self.filter.t_since_last_update > 1.0:
                 # set weights of samples close to zero
                 self.filter.weights[self.filter.resample_index] = 1e-10
                 # normalize weights
@@ -858,15 +864,13 @@ class Guidance:
                 )
             self.kf.predict(dt=0.333)
             if self.filter.is_update:
-                self.kf.update(
-                    self.noisy_turtle_pose[:2]
-                ) 
+                self.kf.update(self.noisy_turtle_pose[:2])
                 self.kf.t_since_last_update = 0.0
             else:
                 self.kf.t_since_last_update += 0.333
                 if self.kf.t_since_last_update > 9.0:
                     self.kf.t_since_last_update = 0.0
-                    self.kf.X = np.array([0., 0., 0.05, 0.])
+                    self.kf.X = np.array([0.0, 0.0, 0.05, 0.0])
             self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
         # DMMN with noisy updates
         # elif self.prediction_method == "DMMN":
@@ -962,7 +966,7 @@ if __name__ == "__main__":
     rospy.init_node("guidance", anonymous=True)
     guidance = Guidance()
 
-    time_to_shutdown = 180 # 3 minutes
+    time_to_shutdown = 180  # 3 minutes
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
 

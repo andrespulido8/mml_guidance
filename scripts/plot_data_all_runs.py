@@ -16,7 +16,10 @@ sns.set_theme()
 sns.set_style("white")
 sns.set_context("paper", font_scale=2)
 
-def plot_error_bars(error_df, outdir_all, title, ylabel, xlabel, figwidth, islegend=False):
+
+def plot_error_bars(
+    error_df, outdir_all, title, ylabel, xlabel, figwidth, islegend=False
+):
     ## PLOTS
     rms_estimator = lambda x: np.sqrt(np.mean(np.square(x)))
     dpi = 300
@@ -31,20 +34,23 @@ def plot_error_bars(error_df, outdir_all, title, ylabel, xlabel, figwidth, isleg
         estimator=rms_estimator,
         capsize=0.1,
         errorbar="sd",
-        width=1.,
+        width=1.0,
         legend=islegend,  # Suppress the legend
-        err_kws={'linewidth': 1.5}
+        err_kws={"linewidth": 1.5},
     )
     if islegend:
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles, labels, title="Guidance Methods", fontsize=16, title_fontsize=18)
+        ax.legend(
+            handles, labels, title="Guidance Methods", fontsize=16, title_fontsize=18
+        )
     ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
     ax.set_ylabel(ylabel=ylabel, fontdict=font)
     ax.set_xlabel(xlabel=xlabel, fontdict=font)
-    #ax.set_ylim([0, 5])
+    # ax.set_ylim([0, 5])
     sns.despine(right=True)
     plt.tight_layout()  # Automatically adjust subplot parameters to give specified padding
     plt.savefig(outdir_all + title + ".png", dpi=dpi)
+
 
 def main():
     outdir_all = folder_path + "/all_runs/figures/"
@@ -166,14 +172,19 @@ def main():
                         perc_df = pd.concat([perc_df, row], ignore_index=True)
                     elif col_name == "xyTh estimate cov det":
                         cov_df = pd.concat([cov_df, row], ignore_index=True)
-                    elif col_name == "err estimation norm" or col_name == "err tracking norm":
+                    elif (
+                        col_name == "err estimation norm"
+                        or col_name == "err tracking norm"
+                    ):
                         error_df = pd.concat([error_df, row], ignore_index=True)
 
     csv_df = pd.DataFrame.from_dict(csv_dict, orient="index")
     csv_df.T.to_csv(outdir_all + "all_runs_rms.csv", index=True)
     print("RMS values and Standard Deviation: \n", csv_df.T)
 
-    plot_error_bars(error_df, outdir_all, "errors", "Error [m]", "", figwidth=6, islegend=True)
+    plot_error_bars(
+        error_df, outdir_all, "errors", "Error [m]", "", figwidth=6, islegend=True
+    )
     plot_error_bars(perc_df, outdir_all, "percentage", "Percentage [%]", "", figwidth=3)
     plot_error_bars(cov_df, outdir_all, "cov", "[m ]", "", figwidth=3)
 

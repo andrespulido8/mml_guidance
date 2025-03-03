@@ -98,7 +98,7 @@ class ParticleFilter:
         if self.prediction_method == "DMMN":
             inputSize = 2  # number of inputs to NN
             gamma = 0.1  # a learning for online learning
-            k1 = 4.  # a learning for online learning
+            k1 = 4.0  # a learning for online learning
             # NN parameters
             numberHiddenLayers = 2  # number of hidden layers
             hiddenSize = 6  # size of each hidden layer
@@ -185,8 +185,18 @@ class ParticleFilter:
         """
         if self.prediction_method == "Velocity":
             local_particles = np.random.uniform(
-                [self.APRILab_dims[0, 0], self.APRILab_dims[0, 1], -self.vmax, -self.vmax],
-                [self.APRILab_dims[1, 0], self.APRILab_dims[1, 1], self.vmax, self.vmax],
+                [
+                    self.APRILab_dims[0, 0],
+                    self.APRILab_dims[0, 1],
+                    -self.vmax,
+                    -self.vmax,
+                ],
+                [
+                    self.APRILab_dims[1, 0],
+                    self.APRILab_dims[1, 1],
+                    self.vmax,
+                    self.vmax,
+                ],
                 (self.N_th, self.N, self.Nx),
             )
         elif self.prediction_method == "Unicycle":
@@ -292,11 +302,13 @@ class ParticleFilter:
         self.update_state_and_dt_buffer(noisy_measurement[:2])
 
         stuck_threshold = 0.03 if self.prediction_method == "Velocity" else 0.03
-        max_time_since_last_update = 12.
+        max_time_since_last_update = 12.0
         wm_pos_diff = np.linalg.norm(self.state_history[0][:2] - self.weighted_mean[:2])
         # print("wm_pos_diff: ", wm_pos_diff)
         # print("self.t_since_last_update: ", self.t_since_last_update)
-        time_condition = (np.floor(self.t_since_last_update) % max_time_since_last_update == 0)  and self.t_since_last_update > max_time_since_last_update
+        time_condition = (
+            np.floor(self.t_since_last_update) % max_time_since_last_update == 0
+        ) and self.t_since_last_update > max_time_since_last_update
         diff_position_condition = wm_pos_diff < stuck_threshold and not self.is_update
         if diff_position_condition or time_condition:
             rospy.logwarn(
@@ -544,8 +556,10 @@ class ParticleFilter:
         if self.is_update:
             self.state_history = np.roll(self.state_history, -1, axis=0)
             self.state_history[-1, :2] = noisy_measurement[:2]
-            self.dt_state_history[:-1] = self.dt_state_history[1:] + self.t_since_last_update
-            self.dt_state_history[-1] = self.t_since_last_update 
+            self.dt_state_history[:-1] = (
+                self.dt_state_history[1:] + self.t_since_last_update
+            )
+            self.dt_state_history[-1] = self.t_since_last_update
             self.t_since_last_update = 0.0
         else:
             self.t_since_last_update += dt
@@ -553,12 +567,14 @@ class ParticleFilter:
     def update_measurement_covariance(self, height):
         """Update the measurement covariance matrix based on the height of the drone agent"""
         gain = 1 + (max(height, 1.1) - 1.1) / (
-            3. - 1.1  
+            3.0 - 1.1
         )  # start with 2 (heght=1.8) and decrease to 1 (height=1.1)
         # print("height: ", height)
         self.measurement_covariance = gain * self.best_measurement_covariance
 
-    def convert_state_history_to_training_batches(self, filled_elements, all_data=False):
+    def convert_state_history_to_training_batches(
+        self, filled_elements, all_data=False
+    ):
         """Convert the measurement history to training batches for the neural network
         Input: filled_elements: number of elements in the measurement history buffer
         Output: X_train: input training data, y_train: output training data
@@ -620,7 +636,9 @@ class ParticleFilter:
         criterion = nn.MSELoss().to(torch.float32)
         optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
         # data transformation
-        X_train, y_train = self.convert_state_history_to_training_batches(filled_elements)
+        X_train, y_train = self.convert_state_history_to_training_batches(
+            filled_elements
+        )
         if self.prediction_method == "NN":
             X_train = X_train.reshape(
                 X_train.shape[0], -1
