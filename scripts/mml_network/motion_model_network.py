@@ -209,7 +209,7 @@ class MotionModel:
         self.numberEpochs = numberEpochs
         self.replayMemory = ReplayMemory(memorySize, minDistance)
         self.WHat = torch.randn(inputSize, outputSize)
-        self.etaHat = torch.zeros(inputSize)
+        self.reset()
         if torch.cuda.is_available():
             self.WHat = self.WHat.to(devicecuda)
             self.etaHat = self.etaHat.to(devicecuda)
@@ -411,3 +411,6 @@ class MotionModel:
         self.replayMemory.clear()
 
         return velocityLossesAvg, True
+
+    def reset(self):
+        self.etaHat = torch.tensor([0.3, 0], dtype=torch.float32, device=devicecuda)

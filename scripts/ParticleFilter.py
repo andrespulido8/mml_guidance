@@ -24,14 +24,14 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.APRILab_dims = np.array([[-1.7, -1.2], [2.2, 1.2]])  # hardware
+        self.APRILab_dims = np.array([[-1.7, -1.2], [2.2, 1.6]])  # hardware
 
         if self.prediction_method in {"NN", "Transformer"}:
             self.N_th = 5  # Number of time history particles
             pkg_path = rospkg.RosPack().get_path("mml_guidance")
             self.is_velocity = True
             is_occlusions_weights = True
-            self.is_time_weights = False 
+            self.is_time_weights = True
             input_dim = 3 if self.is_time_weights else 2  # x, y, time
             self.nn_input_size = self.N_th * input_dim
             rospy.loginfo(f"Input dim and size: {input_dim}, {self.nn_input_size}")
@@ -41,7 +41,7 @@ class ParticleFilter:
             prefix_name = (
                 prefix_name + "velocities_"
                 if self.is_velocity
-                else prefix_name + "time_"
+                else prefix_name + "position_"
             )
             prefix_name = (
                 prefix_name + "occlusions_" if is_occlusions_weights else prefix_name
@@ -86,19 +86,19 @@ class ParticleFilter:
             self.Nx = 4  # number of states
             self.vmax = 0.7  # m/s
             self.best_measurement_covariance = np.diag([0.01, 0.01])
-            self.process_covariance = np.diag([0.05, 0.05])
+            self.process_covariance = np.diag([0.1, 0.1])
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
             self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
             self.process_covariance = np.diag([0.05, 0.05, 0.005])
         elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
-            self.best_measurement_covariance = np.diag([0.01, 0.01])
+            self.best_measurement_covariance = np.diag([0.02, 0.01])
             self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
         if self.prediction_method == "DMMN":
             inputSize = 2  # number of inputs to NN
             gamma = 0.1  # a learning for online learning
-            k1 = 5.0  # a learning for online learning
+            k1 = 4.  # a learning for online learning
             # NN parameters
             numberHiddenLayers = 2  # number of hidden layers
             hiddenSize = 6  # size of each hidden layer
@@ -532,7 +532,7 @@ class ParticleFilter:
             | (particles[:, 1] > self.APRILab_dims[1, 1])
         )
 
-    def update_weighted_mean_and_dt_history(self, noisy_measurement):
+    def update_state_and_dt_buffer(self, noisy_measurement):
         """Update the measurement history and the time history"""
         t = rospy.get_time() - self.initial_time
 

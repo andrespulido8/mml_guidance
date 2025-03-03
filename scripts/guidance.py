@@ -43,7 +43,7 @@ class Guidance:
         self.N = 500  # Number of particles
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
-        self.height = 1.8  # initial height of the quadcopter in meters
+        self.height = 1.1 # initial height of the quadcopter in meters
         self.CAMERA_ANGLES = np.array(
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
@@ -72,8 +72,8 @@ class Guidance:
         self.iteration = 0
 
         # Occlusions
-        occ_widths = [0.9, 0.9, 0.9, 0.9]
-        occ_centers = [[0, -1], [-0.75, 0.], [1.1, 1], [1.5, 0.]]
+        occ_widths = [0.6, 0.6, 0.6, 0.6]
+        occ_centers = [[-1.5, 1], [-0.75, 0.], [1.1, 1.1], [1.7, 0.]]
         rospy.set_param("/occlusions", [occ_centers, occ_widths])
         self.occlusions = Occlusions(occ_centers, occ_widths)
 
@@ -383,21 +383,16 @@ class Guidance:
                 - np.nansum(wgts * np.log(process_part_like))
             )
 
-            if np.abs(entropy) > 30:  # debugging
-                print("\nEntropy term went bad :(")
-                print("first term: ", np.log(np.nansum(like_meas * prev_wgts)))
-                print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
-                print("third term: ", np.nansum(wgts * np.log(like_meas)))
-                print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
-                # print('like_meas min: ', like_meas.min())
-                # print('like_meas max: ', like_meas.max())
-                # print('like_meas mean: ', like_meas.mean())
-                # print('like_meas std: ', like_meas.std())
+            # if np.abs(entropy) > 30:  # debugging
+                # print("\nEntropy term went bad :(")
+                # print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
+                # print("third term: ", np.nansum(wgts * np.log(like_meas)))
+                # print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
 
-                if np.isinf(np.log(np.nansum(like_meas * prev_wgts))):
-                    rospy.loginfo(
-                        "first term of entropy is -inf. Likelihood is very small"
-                    )
+            if np.isinf(first_term):
+                rospy.loginfo(
+                    "first term of entropy is -inf. Likelihood is very small"
+                )
         else:
             # likelihood of particle p(xt|xt-1)
             part_len2, _ = prev_particles.shape
@@ -624,8 +619,8 @@ class Guidance:
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
                 self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
-                if self.prediction_method == "DMMN" and False:
-                    # use this to give fast update measurements to DMMN instead of guidance_pf
+                if self.prediction_method == "DMMN":
+                    # use this to give fast update measurements to DMMN 
                     t = rospy.get_time() - self.initial_time
                     if (
                         self.filter.is_update
@@ -634,8 +629,14 @@ class Guidance:
                         _, etaHat, _, _ = self.filter.motion_model.learn(
                             self.actual_turtle_pose[:2], self.linear_velocity, t
                         )
+                        self.filter.t_since_last_update = 0.0
                     else:
                         etaHat, _ = self.filter.motion_model.predict(t)
+                        self.filter.t_since_last_update += 0.0333
+                        if self.filter.t_since_last_update > 9.0:
+                            rospy.loginfo("Resetting the motion model")
+                            self.filter.t_since_last_update -= 3.0
+                            self.filter.motion_model.reset()
                     _, optimized = self.filter.motion_model.optimize()
                     self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
             else:
@@ -851,38 +852,39 @@ class Guidance:
             self.filter.pf_loop(self.noisy_turtle_pose)
         elif self.prediction_method == "KF":
             if self.kf.X is None:
+                # initialize the KF with the true position
                 self.kf.X = np.array(
                     [self.actual_turtle_pose[0], self.actual_turtle_pose[1], 0.1, 0.1]
                 )
             self.kf.predict(dt=0.333)
-            self.kf.update(
-                self.noisy_turtle_pose[:2]
-            ) if self.filter.is_update else None
-            self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
-        elif self.prediction_method == "DMMN":
-            # initialize the Kalman filter with true positions if it is the first time
-            t = rospy.get_time() - self.initial_time
-            if self.filter.motion_model.lastTime is None:
-                # self.kf.X = np.concatenate((self.actual_turtle_pose[:2], [0.1, 0.1]))
-                # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
-                _, etaHat, _, _ = self.filter.motion_model.learn(
-                    self.actual_turtle_pose[:2], self.linear_velocity, t
-                )
-
-            # self.kf.predict(dt=0.333)
             if self.filter.is_update:
-                # self.kf.update(self.noisy_turtle_pose[:2])
-                # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
-                _, etaHat, _, _ = self.filter.motion_model.learn(
-                    self.actual_turtle_pose[:2], self.linear_velocity, t
-                )
+                self.kf.update(
+                    self.noisy_turtle_pose[:2]
+                ) 
+                self.kf.t_since_last_update = 0.0
             else:
-                etaHat, _ = self.filter.motion_model.predict(t)
-
-            _, optimized = self.filter.motion_model.optimize()
-            # rospy.loginfo("actual: %s", self.actual_turtle_pose)
-            # rospy.loginfo("MMN estimate: %s", etaHat)
-            self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
+                self.kf.t_since_last_update += 0.333
+                if self.kf.t_since_last_update > 9.0:
+                    self.kf.t_since_last_update = 0.0
+                    self.kf.X = np.array([0., 0., 0.05, 0.])
+            self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
+        # DMMN with noisy updates
+        # elif self.prediction_method == "DMMN":
+        #     # initialize the Kalman filter with true positions if it is the first time
+        #     t = rospy.get_time() - self.initial_time
+        #     if self.filter.motion_model.lastTime is None:
+        #         _, etaHat, _, _ = self.filter.motion_model.learn(
+        #             self.actual_turtle_pose[:2], self.linear_velocity, t
+        #         )
+        #     if self.filter.is_update:
+        #         # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
+        #         _, etaHat, _, _ = self.filter.motion_model.learn(
+        #             self.actual_turtle_pose[:2], self.linear_velocity, t
+        #         )
+        #     else:
+        #         etaHat, _ = self.filter.motion_model.predict(t)
+        #     _, optimized = self.filter.motion_model.optimize()
+        #     self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
 
     def print_time(self, fn_time):
         print("Fn time: ", fn_time, "\n")
@@ -908,6 +910,9 @@ class Guidance:
         # rospy.signal_shutdown("Timer signal shutdown")
         os.system("rosnode kill /drone_guidance /robot0/markov_goal_pose")
         os.system("rosnode kill /mml_pf_visualization ")
+        # os.system("rosnode kill /robot0/robot_statepublisher")  # kill gazebo
+        # os.system("rosnode kill /gazebo")  # kill gazebo
+        # os.system("rosnode kill /record")  # kill gazebo
         # os.system("rosservice call /gazebo/reset_world")
 
 
@@ -957,7 +962,7 @@ if __name__ == "__main__":
     rospy.init_node("guidance", anonymous=True)
     guidance = Guidance()
 
-    time_to_shutdown = 210  # 3.5 minutes
+    time_to_shutdown = 180 # 3 minutes
     rospy.Timer(rospy.Duration(time_to_shutdown), guidance.shutdown, oneshot=True)
     rospy.on_shutdown(guidance.shutdown)
 
