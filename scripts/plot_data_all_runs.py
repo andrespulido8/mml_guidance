@@ -8,7 +8,7 @@ import seaborn as sns
 # Set the name of the input CSV directory
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/RAL_csv"
+folder_path = package_dir + "/sim_data/processed_iros"
 
 # Set the font sizes for the plot labels
 font = {"family": "serif", "weight": "normal", "size": 18}
@@ -61,14 +61,21 @@ def main():
     }
 
     guidance_method = {
-        "Information": "DNN",
-        "Particles": "PFWM",
-        "Lawnmower": "LAWN",
         "Velocity": "VEL",
-        "NN": "NN",
-        "Transformer": "TRANS",
         "KF": "KF",
+        "DMMN": "DMMN",
+        "VelTimNN": "DNN",
+        "PosTRA": "PFWM",
         "MeanKF": "KF",
+        "PosTRA": "PosTRA",
+        "PosNN": "PosNN",
+        "VelTRA": "VelTRA",
+        "VelNN": "VelNN",
+        "PosTimTRA": "PosTimTRA",
+        "PosTimNN": "PosTimNN",
+        "VelTimTRA": "VelTimTRA",
+        "VelTimNN": "VelTimNN",
+        "PFVelocity": "PFVelocity",
     }
 
     # empty dataframes to store the data for the bar plots
@@ -87,10 +94,7 @@ def main():
 
     filenames = os.listdir(folder_path + "/all_runs/")
     print("filenames: ", filenames)
-    filenames[0], filenames[1] = filenames[1], filenames[0]  # swap order of files
-    filenames[0], filenames[3] = filenames[3], filenames[0]  # swap order of files
-    filenames[4], filenames[2] = filenames[2], filenames[4]  # swap order of files
-    #filenames[2], filenames[4] = filenames[4], filenames[2]  # swap order of files
+    # filenames[0], filenames[1] = filenames[1], filenames[0]  # swap order of files for bar figure
     print("filenames: ", filenames)
     for filename in filenames:
         if filename.endswith(".csv"):
