@@ -23,10 +23,10 @@ class Guidance:
         self.is_viz = rospy.get_param("/is_viz", False)  # true to visualize plots
 
         self.guidance_mode = (
-            "Estimator"  # 'Information', 'WeightedMean', 'Lawnmower', or 'Estimator'
+            "Information"  # 'Information', 'WeightedMean', 'Lawnmower', or 'Estimator'
         )
         self.prediction_method = (
-            "DMMN"  # 'Transformer', 'NN', 'DMMN', 'KF', 'Velocity' or 'Unicycle'
+            "Transformer"  # 'Transformer', 'NN', 'DMMN', 'KF', 'Velocity' or 'Unicycle'
         )
 
         # Initialization of robot variables
@@ -561,13 +561,9 @@ class Guidance:
             self.goal_position = self.actual_turtle_pose
 
         # set height depending on runtime
-        time_based = False
-        if time_based:
-            self.runtime = rospy.get_time() - self.initial_time
-            self.height = 2.0 - (0.7 / 180) * min(
-                self.runtime, 180
-            )  # 2. to 1.1 meters after 180 seconds
-            # print("\nruntime: ", self.runtime)
+        is_height_constant = False
+        if is_height_constant:
+            self.height = np.clip(self.height, 1.1, 1.8)  
         else:
             dheight = 0.02
             # print("\nfilter update: ", self.filter.is_update)
@@ -575,8 +571,6 @@ class Guidance:
                 self.height -= dheight
             else:
                 self.height += dheight
-            self.height = np.clip(self.height, 1.1, 1.8)
-        # print("height: ", self.height)
         self.update_FOV_dims_and_measurement_cov()
 
     @staticmethod
@@ -840,10 +834,11 @@ class Guidance:
                     ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
-            # set weights of samples close to zero
-            self.filter.weights[self.filter.resample_index] = 1e-10
-            # normalize weights
-            self.filter.weights = self.filter.weights / np.sum(self.filter.weights)
+            if self.filter.t_since_last_update > 1.:
+                # set weights of samples close to zero
+                self.filter.weights[self.filter.resample_index] = 1e-10
+                # normalize weights
+                self.filter.weights = self.filter.weights / np.sum(self.filter.weights)
         else:
             self.filter.resample_index = np.arange(self.N)
 
@@ -907,8 +902,8 @@ class Guidance:
     def shutdown(self, event=None):
         # Stop the node when shutdown is called
         rospy.logfatal("Timer expired or user terminated. Stopping the node...")
-        if self.prediction_method in {"NN", "Transformer", "DMMN"}:
-            self.filter.save_model()
+        # if self.prediction_method in {"NN", "Transformer", "DMMN"}:
+        #     self.filter.save_model()
         rospy.sleep(0.1)
         # rospy.signal_shutdown("Timer signal shutdown")
         os.system("rosnode kill /drone_guidance /robot0/markov_goal_pose")
@@ -971,10 +966,10 @@ if __name__ == "__main__":
     rospy.Timer(rospy.Duration(1.0 / 3.0), guidance.current_entropy)
     if guidance.guidance_mode in {"Information", "Estimator"}:
         rospy.Timer(rospy.Duration(1.0 / 2.5), guidance.information_driven_guidance)
-    if guidance.prediction_method in {"NN", "Transformer"}:
-        rospy.Timer(
-            rospy.Duration(1.0 / 0.5), guidance.filter.optimize_learned_model_callback
-        )  # 1.1Hz is the min rate
+    # if guidance.prediction_method in {"NN", "Transformer"}:
+    #     rospy.Timer(
+    #         rospy.Duration(1.0 / 0.5), guidance.filter.optimize_learned_model_callback
+    #     )  # 1.1Hz is the min rate
 
     # Publish topics
     if guidance.is_viz:

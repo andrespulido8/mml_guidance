@@ -50,8 +50,8 @@ class ParticleFilter:
                 prefix_name = prefix_name + "SimpleDNN"
                 self.motion_model = SimpleDNN(
                     input_size=self.nn_input_size,
-                    num_layers=2,
                     nodes_per_layer=80,
+                    num_layers=2,
                     output_size=2,
                     activation_fn="relu",
                 )
@@ -60,9 +60,10 @@ class ParticleFilter:
                 self.motion_model = ScratchTransformer(
                     input_dim=input_dim,
                     block_size=self.N_th,
-                    n_embed=5,
-                    n_head=2,
-                    n_layer=2,
+                    n_embed=40,
+                    n_head=8,
+                    n_layer=1,
+                    hidden_dim=20,
                 )
 
             model_file = f"{pkg_path}/scripts/mml_network/models/best_{prefix_name}.pth"
@@ -135,7 +136,7 @@ class ParticleFilter:
         if self.prediction_method in {"NN", "Transformer"}:
             self.Nx = 2
             self.best_measurement_covariance = np.diag([0.006, 0.006])
-            self.process_covariance = np.diag([0.0005, 0.0005])
+            self.process_covariance = np.diag([0.001, 0.001])
             buffer_size = (
                 300  # large but not infinite to not have dynamic memory allocation
             )
@@ -291,7 +292,7 @@ class ParticleFilter:
         self.update_state_and_dt_buffer(noisy_measurement[:2])
 
         stuck_threshold = 0.03 if self.prediction_method == "Velocity" else 0.03
-        max_time_since_last_update = 10.
+        max_time_since_last_update = 12.
         wm_pos_diff = np.linalg.norm(self.state_history[0][:2] - self.weighted_mean[:2])
         # print("wm_pos_diff: ", wm_pos_diff)
         # print("self.t_since_last_update: ", self.t_since_last_update)
@@ -552,11 +553,10 @@ class ParticleFilter:
     def update_measurement_covariance(self, height):
         """Update the measurement covariance matrix based on the height of the drone agent"""
         gain = 1 + (max(height, 1.1) - 1.1) / (
-            2.0 - 1.1
-        )  # start with 2 (h=2.) and decrease to 1 (h=1.1)
-        # print("Gain: ", gain)
+            3. - 1.1  
+        )  # start with 2 (heght=1.8) and decrease to 1 (height=1.1)
+        # print("height: ", height)
         self.measurement_covariance = gain * self.best_measurement_covariance
-        # print("Measurement covariance: ", np.diag(self.measurement_covariance))
 
     def convert_state_history_to_training_batches(self, filled_elements, all_data=False):
         """Convert the measurement history to training batches for the neural network

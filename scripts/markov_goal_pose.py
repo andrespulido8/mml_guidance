@@ -12,10 +12,10 @@ class MarkovChain:
             False  # Change this to False if you want to use distance mode
         )
 
-        self.tolerance_radius = 0.2  # meters
+        self.tolerance_radius = 0.15  # meters
 
         self.init_time = np.array(rospy.get_time())
-        self.prev_goal_in = 1  # Start at the second state
+        self.prev_goal_in = 5  # Start at the sixth state (index 5)
         self.prev_mult = 0
         self.position = np.array([0, 0])
 
@@ -40,6 +40,7 @@ class MarkovChain:
             )
 
         self.road_network_V2()
+        # self.goal_pose_square()
 
     def goal_pose_square(self):
         """Generates an square of sides 2*k"""
@@ -83,29 +84,29 @@ class MarkovChain:
         """Generates a road network with 8 nodes"""
         # node positions in m and orientation in deg
         node_positions = [
-            (-1.5, 1, 180),   
-            (0, 1, 180),      
-            (2, 1, 90),      
-            (-1.5, -1, 270),  
-            (0, -1, 90),     
-            (0.8, 0, 0),    
-            (1.5, 0, 0),    
-            (2, -1, 270),     
+            (-1.5, 1, 180),   # Node 0
+            (0, 1, 180),      # Node 1
+            (2.1, 1, 90),       # Node 2
+            (-1.5, -1, 270),  # Node 3
+            (0, -1, 90),      # Node 4
+            (0.3, 0, 0),      # Node 5
+            (1.7, 0, 0),      # Node 6
+            (2.1, -1, 270),     # Node 7
         ]
         self.node_positions_to_goal_list(node_positions)
 
         # transition matrix:
         self.trans_matrix = np.array([
             # 0    1    2    3    4    5    6    7
-             [0.0, 0.0, 0.0, 0.7, 0.3, 0.0, 0.0, 0.0],  # Node 0
-             [1/3, 0.0, 0.0, 1/3, 0.0, 1/3, 0.0, 0.0],  # Node 1
+             [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 0
+             [0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0],  # Node 1
              [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 2
-             [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 3
+             [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 3
              [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],  # Node 4
              [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],  # Node 5
-             [0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0, 0.4],  # Node 6
+             [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 6
              [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 7
-        ])
+       ])
 
     def node_positions_to_goal_list(self, node_positions: List[Tuple[float, float, float]]):
         self.goal_list = []

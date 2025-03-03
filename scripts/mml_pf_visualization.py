@@ -183,21 +183,18 @@ class MML_PF_Visualization:
         if self.road_network == None:
             self.road_network = np.array(
                 [
-                    (-1.5, 1),  # 0
-                    (0, 1),     # 1
-                    (2, 1),     # 2
-                    (1.5, 0),   # 6
+                    (1.7, 0),   # 6
+                    (0.3, 0),   # 5
+                    (0, -1),    # 4
                     (2, -1),    # 7
-                    (0, -1),    # 4
-                    (-1.5, -1), # 3
-                    (-1.5, 1),  # 0
-                    (0, -1),    # 4
-                    (0.8, 0),   # 5
+                    (1.7, 0),   # 6
+                    (2, 1),     # 2
                     (0, 1),     # 1
                     (-1.5, -1), # 3
+                    (-1.5, 1),  # 0
+                    (0, 1),     # 1
+                    (-1.5, 1),  # 0
                     (0, -1),    # 4
-                    (0.8, 0),   # 5
-                    (1.5, 0),   # 6
                 ]
             )
 
@@ -527,7 +524,7 @@ class MML_PF_Visualization:
                 # self.fig_ax1.plot([], [], marker=">",
                 #                   markersize=10., color="black", label="Measurement")
                 # add legend
-                self.fig_ax1.legend(loc="upper right", bbox_to_anchor=(1.0, 1.0))
+                # self.fig_ax1.legend(loc="upper right", bbox_to_anchor=(1.0, 1.0))
 
                 # shows the camera picture to indicate measurement
                 # if self.update_msg.data:
