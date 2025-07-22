@@ -1,10 +1,16 @@
+import os
 import numpy as np
 from rclpy.clock import Clock, ClockType
 from ament_index_python.packages import get_package_share_directory
 import torch
+import torch.nn as nn
+import torch.optim as optim
 
+from .mml_network.motion_model_network import MotionModel
 from .mml_network.simple_dnn import SimpleDNN
 from .mml_network.scratch_transformer import ScratchTransformer
+from .mml_network.train import train
+import logging
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
@@ -12,43 +18,59 @@ ANG_VEL = 0.0
 clock = Clock(clock_type=ClockType.ROS_TIME)
 
 class ParticleFilter:
-    def __init__(self, num_particles=10, prediction_method="NN", is_sim=False):
+    def __init__(
+        self, num_particles=10, prediction_method="NN", is_sim=False, drone_height=2.0
+    ):
 
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        #self.AVL_dims = np.array([[-1.7, -1.0], [1.5, 1.6]])  # AVL
-        self.AVL_dims = np.array([[-1.5, -1.0], [0.8, 1.9]])  # APRILab
-        self.AVL_dims = (
-            self.AVL_dims if not is_sim else np.array([[-3.0, -1.2], [1.0, 2.0]])
-        )
-        if self.prediction_method == "NN" or self.prediction_method == "Transformer": 
-            self.N_th = 10  # Number of time history particles
+        self.APRILab_dims = np.array([[-1.7, -1.2], [2.2, 1.6]])  # hardware
+
+        if self.prediction_method in {"NN", "Transformer"}:
+            self.N_th = 5  # Number of time history particles
             pkg_path = get_package_share_directory('mml_guidance')
-            self.is_velocity = False
-            self.nn_input_size = (
-                self.N_th * 2 - 2 if self.is_velocity else self.N_th * 2
+            self.is_velocity = True
+            is_occlusions_weights = True
+            self.is_time_weights = True
+            input_dim = 3 if self.is_time_weights else 2  # x, y, time
+            self.nn_input_size = self.N_th * input_dim
+            logging.getLogger("mml_guidance.ParticleFilter").info(f"Input dim and size: {input_dim}, {self.nn_input_size}")
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            prefix_name = "noisy_5_v2_"  # "connected_graph_noisy_5_" or "noisy_5_" for pretrained on road network
+            prefix_name = prefix_name + "time_" if self.is_time_weights else prefix_name
+            prefix_name = (
+                prefix_name + "velocities_"
+                if self.is_velocity
+                else prefix_name + "position_"
             )
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            prefix_name = (
+                prefix_name + "occlusions_" if is_occlusions_weights else prefix_name
+            )
             if self.prediction_method == "NN":
-                model_file = "/home/basestation/base_ws/src/mml_guidance/mml_guidance/mml_network/models/best_noisy_SimpleDNN.pth"
+                prefix_name = prefix_name + "SimpleDNN"
                 self.motion_model = SimpleDNN(
                     input_size=self.nn_input_size,
-                    num_layers=2,
                     nodes_per_layer=80,
+                    num_layers=2,
                     output_size=2,
                     activation_fn="relu",
                 )
             elif self.prediction_method == "Transformer":
-                model_file = "/home/basestation/base_ws/src/mml_guidance/mml_guidance/mml_network/models/best_noisy_ScratchTransformer.pth"
+                prefix_name = prefix_name + "ScratchTransformer"
                 self.motion_model = ScratchTransformer(
-                    input_dim=2, block_size=10, n_embed=5, n_head=4, n_layer=2
+                    input_dim=input_dim,
+                    block_size=self.N_th,
+                    n_embed=40,
+                    n_head=8,
+                    n_layer=1,
+                    hidden_dim=20,
                 )
             try:
                 # Attempt to load the model parameters from the file
                 self.motion_model.load_state_dict(
-                    torch.load(model_file, map_location=device)
+                    torch.load(model_file, map_location=self.device)
                 )
             except FileNotFoundError:
                     print(f"Error: The file '{model_file}' does not exist. Please make sure to change the directory to point to the correct file.")
@@ -66,27 +88,73 @@ class ParticleFilter:
         if self.prediction_method == "Velocity":
             self.Nx = 4  # number of states
             self.vmax = 0.7  # m/s
+            self.best_measurement_covariance = np.diag([0.01, 0.01])
+            self.process_covariance = np.diag([0.1, 0.1])
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
-            self.measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
-            self.process_covariance = np.diag([0.01, 0.01, 0.001])
-        elif self.prediction_method == "KF":
+            self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
+            self.process_covariance = np.diag([0.05, 0.05, 0.005])
+        elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
-            self.measurement_covariance = np.diag([0.01, 0.01])
-            self.process_covariance = np.diag([0.01, 0.01, 0.001, 0.001])
-        elif self.prediction_method == "NN" or self.prediction_method == "Transformer":
-            self.Nx = 2
+            self.best_measurement_covariance = np.diag([0.02, 0.01])
+            self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
+        if self.prediction_method == "DMMN":
+            inputSize = 2  # number of inputs to NN
+            gamma = 0.1  # a learning for online learning
+            k1 = 4.0  # a learning for online learning
+            # NN parameters
+            numberHiddenLayers = 2  # number of hidden layers
+            hiddenSize = 6  # size of each hidden layer
+            outputSize = 5  # size of the output of the NN
+            probHiddenDrop = 0.0  # dropout probability for hidden layers
+            useAttention = False  # use attention at output layer
 
-        if (
-            self.prediction_method != "Unicycle" and self.prediction_method != "KF"
-        ):  # NN and Velocity
-            self.measurement_covariance = np.diag([0.01, 0.01])
+            # learning parameters
+            alpha = 0.001  # learning rate for SGD
+            memorySize = 150  # number of data points to save for each training
+            batchSize = 20  # size of a batch for each training epoch, should be multiple of memory size
+            numberEpochs = 25  # 25  # number of iterations for each training
+            minDistance = 0.005  # minimum distance between any two data points
+
+            self.motion_model = MotionModel(
+                alpha,
+                numberHiddenLayers,
+                inputSize,
+                hiddenSize,
+                outputSize,
+                probHiddenDrop,
+                useAttention,
+                memorySize,
+                batchSize,
+                numberEpochs,
+                minDistance,
+                gamma,
+                k1,
+            )
+            model_file = f"/home/basestation/base_ws/src/mml_guidance/mml_guidance/mml_network/models/online_model.pth"
+            # load weights
+            self.motion_model.loadModel(model_file)
+
+        if self.prediction_method in {"NN", "Transformer"}:
+            self.Nx = 2
+            self.best_measurement_covariance = np.diag([0.006, 0.006])
             self.process_covariance = np.diag([0.001, 0.001])
+            buffer_size = (
+                300  # large but not infinite to not have dynamic memory allocation
+            )
+            self.max_batch_size = 64
+            assert (
+                self.N_th + self.max_batch_size < buffer_size
+            ), "Buffer size too small"
+        else:
+            buffer_size = 1
+
+        self.update_measurement_covariance(height=drone_height)
 
         self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
-        self.measurement_history = np.zeros(
-            (self.N_th, self.measurement_covariance.shape[0])
-        )
+        self.state_history = np.zeros((self.N_th + buffer_size, 2))
+        self.dt_history = np.ones(self.N_th) * 0.333
+        self.dt_state_history = np.zeros(self.state_history.shape[0])
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
         # self.particles[-1,:, :2] = np.array([
@@ -108,6 +176,8 @@ class ParticleFilter:
         self.resample_index = np.arange(self.N)
         self.initial_time = clock.now().seconds_nanoseconds()[0] 
         self.last_time = 0.0
+        self.t_since_last_update = 0.0
+        self.iteration = 0
 
     def uniform_sample(self) -> np.ndarray:
         """Uniformly samples the particles between min and max values per state.
@@ -117,24 +187,30 @@ class ParticleFilter:
         """
         if self.prediction_method == "Velocity":
             local_particles = np.random.uniform(
-                [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -self.vmax, -self.vmax],
-                [self.AVL_dims[1, 0], self.AVL_dims[1, 1], self.vmax, self.vmax],
+                [
+                    self.APRILab_dims[0, 0],
+                    self.APRILab_dims[0, 1],
+                    -self.vmax,
+                    -self.vmax,
+                ],
+                [
+                    self.APRILab_dims[1, 0],
+                    self.APRILab_dims[1, 1],
+                    self.vmax,
+                    self.vmax,
+                ],
                 (self.N_th, self.N, self.Nx),
             )
         elif self.prediction_method == "Unicycle":
             local_particles = np.random.uniform(
-                [self.AVL_dims[0, 0], self.AVL_dims[0, 1], -np.pi],
-                [self.AVL_dims[1, 0], self.AVL_dims[1, 1], np.pi],
+                [self.APRILab_dims[0, 0], self.APRILab_dims[0, 1], -np.pi],
+                [self.APRILab_dims[1, 0], self.APRILab_dims[1, 1], np.pi],
                 (self.N_th, self.N, self.Nx),
             )
-        elif (
-            self.prediction_method == "NN"
-            or self.prediction_method == "KF"
-            or self.prediction_method == "Transformer"
-        ):
+        elif self.prediction_method in {"NN", "KF", "DMMN", "Transformer"}:
             local_particles = np.random.uniform(
-                [self.AVL_dims[0, 0], self.AVL_dims[0, 1]],
-                [self.AVL_dims[1, 0], self.AVL_dims[1, 1]],
+                [self.APRILab_dims[0, 0], self.APRILab_dims[0, 1]],
+                [self.APRILab_dims[1, 0], self.APRILab_dims[1, 1]],
                 (self.N_th, self.N, self.Nx),
             )
         return local_particles
@@ -151,49 +227,44 @@ class ParticleFilter:
         t = clock.now().seconds_nanoseconds()[0] - self.initial_time
 
         # update measurement history with noisy_measurement
+        noisy_measurement = noisy_measurement[:2] if self.Nx > 2 else noisy_measurement
         self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
         self.measurement_history[-1, :2] = noisy_measurement[:2]
 
         # Prediction step
-        if self.prediction_method == "NN" or self.prediction_method == "Transformer":
-            self.particles = self.predict_mml(np.copy(self.particles))
+        if self.prediction_method in {"NN", "Transformer"}:
+            self.particles = self.predict_mml(np.copy(self.particles), self.dt_history)
         elif self.prediction_method == "Unicycle":
-            self.measurement_history[-1, 2] = noisy_measurement[2]
-            self.particles, self.last_time = self.predict(
+            self.particles = self.predict(
                 self.particles,
-                self.last_time,
+                self.dt_history[-1],
                 angular_velocity=ang_vel,
                 linear_velocity=lin_vel,
             )
         elif self.prediction_method == "Velocity":
-            dt = t - self.last_time
             estimate_velocity = (
-                self.measurement_history[-1, :] - self.measurement_history[-2, :]
-            ) * dt
+                noisy_measurement - self.state_history[-1, :]
+            ) * self.dt_history[-1]
 
-            self.particles, self.last_time = self.predict(
+            self.particles = self.predict(
                 self.particles,
-                self.last_time,
+                self.dt_history[-1],
             )
 
         # Update step
         if self.is_update:
             self.prev_weights = np.copy(self.weights)
-            self.weights = self.update(
-                self.weights, self.particles, self.measurement_history[-1]
-            )
+            self.weights = self.update(self.weights, self.particles, noisy_measurement)
 
         # Resampling step
         outbounds = self.outside_bounds(self.particles[-1])
         self.neff = self.nEff(self.weights)
-        if outbounds > self.N * 0.5:
+        if outbounds > self.N * 0.8:
             print(
                 f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
             )
             self.particles = self.uniform_sample()
-        if (
-            not self.is_occlusion
-        ):  # agent can only tell if it is occluded, not the shape of occlusion
+        else:
             if (
                 self.neff < self.N * 0.99
             ):  # nEff is only infinity when something went wrong
@@ -201,36 +272,72 @@ class ParticleFilter:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
-                            self.measurement_history[-1, :2],
+                            noisy_measurement,
                             self.measurement_covariance,
                             self.N,
                         )
                         # backwards difference for velocities
                         self.particles[-1, :, 2:] = np.random.multivariate_normal(
                             estimate_velocity,
-                            dt * self.measurement_covariance,
+                            self.dt_history[-1] * self.measurement_covariance,
                             self.N,
                         )
                     else:
                         noise = np.random.multivariate_normal(
-                            np.zeros(self.measurement_history.shape[1]),
+                            np.zeros(self.Nx),
                             self.measurement_covariance,
                             size=(self.N_th, self.N),
                         )
                         # repeat the measurement history to be the same size as the particles
-                        measurement_history_repeated = np.tile(
-                            self.measurement_history.reshape(self.N_th, 1, self.Nx),
+                        state_history_repeated = np.tile(
+                            self.state_history[-self.N_th :].reshape(
+                                self.N_th, 1, self.Nx
+                            ),
                             (1, self.N, 1),
                         )
-                        self.particles = measurement_history_repeated + noise
+                        self.particles = state_history_repeated + noise
 
                     self.weights = np.ones(self.N) / self.N
                 else:
                     # some are good but some are bad, resample
-                    self.resample()
+                    self.multinomial_resample()
 
+        # estimate mean and variance
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
-        # print("PF time: ", self.get_clock().now().seconds_nanoseconds()[0] - t - self.initial_time)
+        self.update_state_and_dt_buffer(noisy_measurement[:2])
+
+        stuck_threshold = 0.03 if self.prediction_method == "Velocity" else 0.03
+        max_time_since_last_update = 12.0
+        wm_pos_diff = np.linalg.norm(self.state_history[0][:2] - self.weighted_mean[:2])
+        # print("wm_pos_diff: ", wm_pos_diff)
+        # print("self.t_since_last_update: ", self.t_since_last_update)
+        time_condition = (
+            np.floor(self.t_since_last_update) % max_time_since_last_update == 0
+        ) and self.t_since_last_update > max_time_since_last_update
+        diff_position_condition = wm_pos_diff < stuck_threshold and not self.is_update
+        if diff_position_condition or time_condition:
+            print(
+                f"Particle filter stuck: {diff_position_condition} or lost measurement: {time_condition}. Uniformly resampling."
+            )
+            self.particles = self.uniform_sample()
+
+        # print("PF time: ", clock.now().seconds_nanoseconds()[0] - t - self.initial_time)
+        self.last_time = clock.now().seconds_nanoseconds()[0] - self.initial_time
+
+    def optimize_learned_model_callback(self, event=None):
+        """Optimize the neural network model with the particles and weights"""
+        filled_elements = np.count_nonzero(self.state_history) // self.Nx
+        if not np.all(self.state_history):
+            print(
+                f"Filled elements: {filled_elements} / {self.state_history.shape[0]}"
+            )
+        # if measurement history buffer is full
+        if (
+            filled_elements > self.N_th + self.max_batch_size * 0.6
+            and (self.prediction_method in {"NN", "Transformer"})
+            # and False
+        ):
+            self.optimize_learned_model(filled_elements)
 
     def update(self, weights, particles, noisy_turtle_pose):
         """Updates the belief (weights) of the particle distribution.
@@ -270,29 +377,32 @@ class ParticleFilter:
         # )
         return like
 
-    def predict_mml(self, particles):
+    def predict_mml(self, particles, dt_history):
         """Propagates the current particles through the motion model learned with the
         neural network.
         Input: N_th (number of time histories) sets of particles up to time k-1
         Output: N_th sets of propagated particles up to time k
         """
-        # print("particles: ", particles.shape)
-        if self.is_velocity:
-            current_parts = np.copy(particles[:, :, :2])
-            particles = (particles[1:, :, :2] - particles[:-1, :, :2]) / 0.333  # 3 Hz
+        if self.is_time_weights:
+            tiled_dt_hist = np.tile(
+                dt_history.reshape(-1, 1), (1, particles.shape[1])
+            ).reshape(-1, particles.shape[1], 1)
+            particles = np.concatenate((particles, tiled_dt_hist), axis=2)
 
         next_parts = self.motion_model.predict(
-            np.transpose(particles[:, :, :2], (1, 0, 2)).reshape(
+            np.transpose(particles[:, :, :], (1, 0, 2)).reshape(
                 particles.shape[1], self.nn_input_size
             )
         )
-        # print("next_parts: ", next_parts)
+
+        # print("shape of next_parts: ", next_parts.shape)
+        # print("next_parts: ", next_parts[0])
         if self.is_velocity:
             next_parts = (
-                current_parts[-1] + next_parts * 0.333
+                particles[-1, :, :2] + next_parts * dt_history[-1]
             )  # x(t+1) = x(t) + v(t) * dt
-            particles = current_parts
 
+        # roll particles in time, add latest prediction
         particles = np.concatenate(
             (
                 particles[1:, :, :2],
@@ -300,6 +410,7 @@ class ParticleFilter:
             ),
             axis=0,
         )
+        # important: will not work without this
         particles[-1, :, :] = self.add_noise(
             particles[-1, :, :], 2 * self.process_covariance
         )
@@ -308,7 +419,7 @@ class ParticleFilter:
     def predict(
         self,
         particles,
-        last_time,
+        dt,
         linear_velocity=np.zeros(2),
         angular_velocity=np.zeros(1),
     ):
@@ -320,7 +431,7 @@ class ParticleFilter:
         Output: Predicted (propagated) state of the particles up to time k
         """
         t = clock.now().seconds_nanoseconds()[0] - self.initial_time
-        dt = t - last_time
+        dt = t - self.last_time
 
         particles[:-1, :, :] = particles[1:, :, :]  # shift particles in time
         if self.prediction_method == "Unicycle":
@@ -366,11 +477,9 @@ class ParticleFilter:
                 particles[-2, :, :2] + delta_distance * particles[-1, :, :2]
             )
 
-        last_time = t
+        return particles
 
-        return particles, last_time
-
-    def resample(self):
+    def multinomial_resample(self):
         """Uses the multinomial resampling algorithm to update the belief in the system state.
         The particles are copied randomly with probability proportional to the weights plus
         some roughening based on the spread of the states.
@@ -438,11 +547,151 @@ class ParticleFilter:
     def outside_bounds(self, particles):
         """returns the number of particles outside of the lab boundaries"""
         return np.sum(
-            (particles[:, 0] < self.AVL_dims[0, 0])
-            | (particles[:, 0] > self.AVL_dims[1, 0])
-            | (particles[:, 1] < self.AVL_dims[0, 1])
-            | (particles[:, 1] > self.AVL_dims[1, 1])
+            (particles[:, 0] < self.APRILab_dims[0, 0])
+            | (particles[:, 0] > self.APRILab_dims[1, 0])
+            | (particles[:, 1] < self.APRILab_dims[0, 1])
+            | (particles[:, 1] > self.APRILab_dims[1, 1])
         )
+
+    def update_state_and_dt_buffer(self, noisy_measurement):
+        """Update the measurement history and the time history"""
+        t = clock.now().seconds_nanoseconds()[0] - self.initial_time
+
+        dt = t - self.last_time
+        # pf dt history
+        self.dt_history[:-1] = self.dt_history[1:] + dt  # delta time from index i to -1
+        self.dt_history[-1] = dt
+
+        if self.is_update:
+            self.state_history = np.roll(self.state_history, -1, axis=0)
+            self.state_history[-1, :2] = noisy_measurement[:2]
+            self.dt_state_history[:-1] = (
+                self.dt_state_history[1:] + self.t_since_last_update
+            )
+            self.dt_state_history[-1] = self.t_since_last_update
+            self.t_since_last_update = 0.0
+        else:
+            self.t_since_last_update += dt
+
+    def update_measurement_covariance(self, height):
+        """Update the measurement covariance matrix based on the height of the drone agent"""
+        gain = 1 + (max(height, 1.1) - 1.1) / (
+            3.0 - 1.1
+        )  # start with 2 (heght=1.8) and decrease to 1 (height=1.1)
+        # print("height: ", height)
+        self.measurement_covariance = gain * self.best_measurement_covariance
+
+    def convert_state_history_to_training_batches(
+        self, filled_elements, all_data=False
+    ):
+        """Convert the measurement history to training batches for the neural network
+        Input: filled_elements: number of elements in the measurement history buffer
+        Output: X_train: input training data, y_train: output training data
+        """
+        state_history = self.state_history[-filled_elements:]
+        dt_state_history = self.dt_state_history[-filled_elements:]
+        if all_data:
+            batch_size = filled_elements - self.N_th
+        else:
+            batch_size = np.min((self.max_batch_size, filled_elements - self.N_th))
+            if batch_size <= 0:
+                return None, None
+        X_train = np.zeros((batch_size, self.N_th, self.Nx))
+        dt_time_features = np.zeros((batch_size, self.N_th))
+        y_train = np.zeros((batch_size, self.Nx))
+
+        # sample n_batches indexes from the data
+        if all_data:
+            idx = np.arange(batch_size)
+        else:
+            idx = np.random.choice(
+                state_history.shape[0] - self.N_th, batch_size, replace=False
+            )
+
+        # TODO: avoid for loop
+        include_index = []
+        for i, sampled_i in enumerate(idx):
+            X_train[i] = state_history[sampled_i : sampled_i + self.N_th].copy()
+            dt_time_features[i] = (
+                dt_state_history[sampled_i : sampled_i + self.N_th].copy()
+                - dt_state_history[sampled_i + self.N_th]
+            )
+            y_train[i] = state_history[sampled_i + self.N_th].copy()
+
+            # remove samples with dt > 4 seconds
+            if dt_time_features[i][0] < 4.0:
+                include_index.append(i)
+
+        X_train = np.concatenate((X_train, dt_time_features[..., np.newaxis]), axis=2)
+
+        include_index = np.array(include_index)
+        print(f"eliminated samples: {batch_size - len(include_index)}")
+        X_train = X_train[include_index]
+        y_train = y_train[include_index]
+
+        if self.is_velocity:
+            y_train = (y_train - X_train[:, -1, :2]) / X_train[:, -1, 2].reshape(
+                -1, 1
+            )  # vel = (x(t+1) - x(t)) / dt
+
+        return X_train, y_train
+
+    def optimize_learned_model(self, filled_elements):
+        """Optimize the neural network model with the particles and weights"""
+        print("\n")
+        print("Optimizing the learned model")
+        # training parameters
+        epochs = 5
+        criterion = nn.MSELoss().to(torch.float32)
+        optimizer = optim.Adam(self.motion_model.parameters(), lr=0.001)
+        # data transformation
+        X_train, y_train = self.convert_state_history_to_training_batches(
+            filled_elements
+        )
+        if self.prediction_method == "NN":
+            X_train = X_train.reshape(
+                X_train.shape[0], -1
+            )  # flatten last two dimensions
+
+        X_train = torch.from_numpy(X_train.astype(np.float32)).to(self.device)
+        y_train = torch.from_numpy(y_train.astype(np.float32)).to(self.device)
+
+        losses = train(
+            self.motion_model,
+            criterion,
+            optimizer,
+            X_train,
+            y_train,
+            epochs,
+            online=True,
+        )
+
+    def save_model(self):
+        """Save the model to a file"""
+        pkg_path = get_package_share_directory('mml_guidance')
+        model_file = f"{pkg_path}/scripts/mml_network/models/online_model.pth"
+        if self.prediction_method in {"NN", "Transformer"}:
+            torch.save(self.motion_model.state_dict(), model_file)
+            csv_file = f"{pkg_path}/sim_data/training_data/online_data.csv"
+            if not os.path.exists(csv_file):
+                os.makedirs(os.path.dirname(csv_file), exist_ok=True)
+            filled_elements = np.count_nonzero(self.state_history) // self.Nx
+            X_train, y_train = self.convert_state_history_to_training_batches(
+                filled_elements, all_data=True
+            )
+            if X_train is None:
+                print("No data to save")
+                return
+            X_train_flattened = X_train.reshape(X_train.shape[0], -1)
+            state_history_flattened = np.concatenate(
+                (X_train_flattened, y_train, np.zeros((X_train_flattened.shape[0], 1))),
+                axis=1,
+            )
+            np.savetxt(csv_file, state_history_flattened, delimiter=",")
+            print(f"Data saved to {csv_file}")
+        elif self.prediction_method == "DMMN":
+            self.motion_model.saveModel(time=clock.now().seconds_nanoseconds()[0], savePath=model_file)
+        print(f"Model saved to {model_file}")
 
     @staticmethod
     def add_noise(mean, covariance, size=1):

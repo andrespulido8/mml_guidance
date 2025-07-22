@@ -1,4 +1,4 @@
-scripts/mml_network/models/*.pth*
+scripts/mml_network/models/*
 *.pyc
 *.csv
 data/data*

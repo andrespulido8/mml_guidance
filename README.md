@@ -9,10 +9,9 @@ Code for the letter: Uncertainty-Aware Guidance for Target Tracking subject to I
 	- To track master for all submodules, type `git submodule foreach --recursive git checkout master`
 	- Note: to automatically change the number of turtlebots, inside the `sim_helper` repo, type `git remote set-url origin https://github.com/andrespulido8/sim_helper.git. Then `git checkout mml`
 	- If you want to run only hardware then you only need reef_estimator
-- [Turtlebot packages](https://automaticaddison.com/how-to-launch-the-turtlebot3-simulation-with-ros/#gazebo) for the turtlebot simulation.
-- [mag_pf](http://10.251.72.180/magnav/mag_pf) and [mag_pf_visualization](http://10.251.72.180/magnav/mag_pf_visualization) for visualization of the particle filter.
-- [Andres turtlebot PID controller](http://10.251.72.180/andres/andres_turtlebot_pid) for turtlebot controller.
-- [RosFlight](https://github.com/uf-reef-avl/torque_flight) for quadcopter autopilot.
+- [Turtlebot packages](https://automaticaddison.com/how-to-launch-the-turtlebot3-simulation-with-ros/#gazebo) for the turtlebot simulation. For both the turtlebot3 and the turtlebot3_msgs, checkout the noetic branch. 
+- [Andres turtlebot PID controller](https://github.com/andrespulido8/turtlebot_pid) for turtlebot controller.
+- [RosFlight](https://github.com/uf-reef-avl/torque_flight) (included in the Reef estimator simulator) for quadcopter autopilot.
 
 ## Sim Usage
 

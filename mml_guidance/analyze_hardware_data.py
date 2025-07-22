@@ -11,7 +11,7 @@ import numpy as np
 
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/RAL_csv"
+folder_path = package_dir + "/sim_data/processed_iros"
 
 is_multiple_runs = True
 

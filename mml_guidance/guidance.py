@@ -29,9 +29,11 @@ class Guidance(Node):
         )  # true to visualize plots
 
         self.guidance_mode = (
-            "Information"  # 'Information', 'Particles', 'Lawnmower', or 'Estimator'
+            "Information"  # 'Information', 'WeightedMean', 'Lawnmower', or 'Estimator'
         )
-        self.prediction_method = "Transformer"  # 'KF', 'NN', 'Velocity' or 'Unicycle'
+        self.prediction_method = (
+            "Transformer"  # 'Transformer', 'NN', 'DMMN', 'KF', 'Velocity' or 'Unicycle'
+        )
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -47,11 +49,11 @@ class Guidance(Node):
         self.N = 500  # Number of particles
         self.filter = ParticleFilter(self.N, self.prediction_method, self.is_sim)
         # Camera Model
-        self.height = 1.2  # height of the quadcopter in meters
-        camera_angle = np.array(
+        self.height = 1.1  # initial height of the quadcopter in meters
+        self.CAMERA_ANGLES = np.array(
             [deg2rad(35), deg2rad(35)]
         )  # camera angle in radians (horizontal, vertical)
-        self.FOV_dims = np.tan(camera_angle) * self.height
+        self.update_FOV_dims_and_measurement_cov()
         self.FOV = self.construct_FOV(self.quad_position)
 
         ## INFO-DRIVEN GUIDANCE ##
@@ -66,10 +68,15 @@ class Guidance(Node):
         self.EER_range = np.array([0, 0, 0])
         self.t_EER = 0.0
         self.eer_particle = 0  # initialize future particle to follow
-        self.sampled_index = np.arange(self.N)
+        self.sampled_index = np.arange(self.N_s)
         self.sampled_particles = self.filter.particles[:, : self.N_s, :]
         self.sampled_weights = np.ones(self.N_s) / self.N_s
         self.position_following = True
+        self.avg_time = None
+        self.max_time = 0.0
+        self.min_time = 10.0
+        self.iteration = 0
+
 
         # Occlusions
         occ_widths = [1, 1]
@@ -84,8 +91,19 @@ class Guidance(Node):
 
         if self.guidance_mode == "Lawnmower":
             # Lawnmower Method
-            lawnmower = LawnmowerPath([0, 0], [3.5, 3.5], 1.5, is_sim=self.is_sim)
-            self.path = lawnmower.trajectory()
+            lawnmower = LawnmowerPath(POINTS_PER_SLICE=8)
+            bounds = [
+                self.filter.APRILab_dims[0],
+                np.array(
+                    [self.filter.APRILab_dims[1][0], self.filter.APRILab_dims[0][1]]
+                ),
+                self.filter.APRILab_dims[1],
+                np.array(
+                    [self.filter.APRILab_dims[0][0], self.filter.APRILab_dims[1][1]]
+                ),
+            ]
+            self.path, _ = lawnmower.generate_path(bounds, path_dist=0.4, angle=0)
+            lawnmower.plot(bounds=bounds, path=self.path)
             self.lawnmower_idx = 0
             self.increment = 1
         if self.prediction_method == "KF":
@@ -232,26 +250,24 @@ class Guidance(Node):
         Hp_k = np.zeros(self.N_s)  # partial entropy
         EER = np.zeros(self.N_s)  # Expected Entropy Reduction
         future_parts = np.copy(self.sampled_particles)
-        last_future_time = np.copy(self.filter.last_time)
 
         pred_msg = ParticleArray()
         for k in range(self.K):  # propagate k steps in the future
-            if (
-                self.prediction_method == "NN"
-                or self.prediction_method == "Transformer"
-            ):
-                future_parts = self.filter.predict_mml(np.copy(future_parts))
+            if self.prediction_method in {"NN", "Transformer"}:
+                future_parts = self.filter.predict_mml(
+                    np.copy(future_parts), np.ones(future_parts.shape[0]) * 0.33
+                )
             elif self.prediction_method == "Unicycle":
-                future_parts, last_future_time = self.filter.predict(
+                future_parts = self.filter.predict(
                     future_parts,
-                    last_future_time + 0.3,
+                    0.33,
                     angular_velocity=self.angular_velocity,
                     linear_velocity=self.linear_velocity,
                 )
             elif self.prediction_method == "Velocity":
-                future_parts, last_future_time = self.filter.predict(
+                future_parts = self.filter.predict(
                     future_parts,
-                    last_future_time + 0.3,
+                    0.33,
                 )
 
             if self.is_viz:
@@ -291,7 +307,9 @@ class Guidance(Node):
         for jj in range(self.N_s):
             k_fov = self.construct_FOV(z_hat[jj])
             # checking for measurement outside of fov or in occlusion
-            if self.is_in_FOV(z_hat[jj], k_fov) and not self.in_occlusion(z_hat[jj]):
+            if self.is_in_FOV(z_hat[jj], k_fov) and not self.occlusions.in_occlusion(
+                z_hat[jj]
+            ):
                 future_weight[:, jj] = self.filter.update(
                     self.sampled_weights, future_parts, z_hat[jj]
                 )
@@ -386,21 +404,16 @@ class Guidance(Node):
                 - np.nansum(wgts * np.log(process_part_like))
             )
 
-            if np.abs(entropy) > 30:  # debugging
-                print("\nEntropy term went bad :(")
-                print("first term: ", np.log(np.nansum(like_meas * prev_wgts)))
-                print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
-                print("third term: ", np.nansum(wgts * np.log(like_meas)))
-                print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
-                # print('like_meas min: ', like_meas.min())
-                # print('like_meas max: ', like_meas.max())
-                # print('like_meas mean: ', like_meas.mean())
-                # print('like_meas std: ', like_meas.std())
+            # if np.abs(entropy) > 30:  # debugging
+            # print("\nEntropy term went bad :(")
+            # print("second term: ", np.nansum(np.log(prev_wgts) * wgts))
+            # print("third term: ", np.nansum(wgts * np.log(like_meas)))
+            # print("fourth term: ", np.nansum(wgts * np.log(process_part_like)))
 
-                if np.isinf(np.log(np.nansum(like_meas * prev_wgts))):
-                    self.get_logger().warn(
-                        "first term of entropy is -inf. Likelihood is very small"
-                    )
+            if np.isinf(first_term):
+                self.get_logger().warn(
+                    "first term of entropy is -inf. Likelihood is very small"
+                )
         else:
             # likelihood of particle p(xt|xt-1)
             part_len2, _ = prev_particles.shape
@@ -421,6 +434,10 @@ class Guidance(Node):
             entropy = -np.nansum(prev_wgts * np.log(process_part_like))
 
         # return np.clip(entropy, -100, 1000)
+
+        # t_ftc = rospy.get_time() - self.initial_time - t
+
+        # self.print_time(t_ftc)
         return entropy
 
     @staticmethod
@@ -495,15 +512,29 @@ class Guidance(Node):
         )
         return fov
 
+    def update_FOV_dims_and_measurement_cov(self):
+        """Update the FOV dimensions based on the camera angles and height of drone
+        as well as the measurement covariance based on the height of the drone
+        """
+        self.FOV_dims = np.tan(self.CAMERA_ANGLES) * self.height
+        self.filter.update_measurement_covariance(self.height)
+
     def lawnmower(self) -> np.ndarray:
         """Return the position of the measurement if there is one,
         else return the next position in the lawnmower path.
-        If the rate of pub_desired_state changes, the increment
+        If the rate of pub_desired_state changes, the POINTS_PER_SLICE
         variable needs to change
         """
         if self.filter.is_update:
             return self.noisy_turtle_pose[:2]
         else:
+            if (
+                np.linalg.norm(self.quad_position - self.path[self.lawnmower_idx, :2])
+                > 1.0
+            ):
+                self.lawnmower_idx = np.argmin(
+                    np.linalg.norm(self.path[:, :2] - self.quad_position, axis=1)
+                )
             if self.lawnmower_idx <= 0:
                 self.increment = 1
             if self.lawnmower_idx >= self.path.shape[0] - 1:
@@ -511,43 +542,7 @@ class Guidance(Node):
             self.lawnmower_idx += self.increment
             return self.path[int(np.floor(self.lawnmower_idx)), :2]
 
-    def in_occlusion(self, pos):
-        """Return true if the position measurement is in occlusion zones for a single
-        position but if it is an array of positions, return an array of booleans for
-        particles inside occlusion
-        Inputs: pos: position to check - numpy.array of shape (2,)
-        """
-        if pos.ndim == 1:
-            in_occ = False
-            for occlusion in self.occlusions:
-                if np.all(
-                    [
-                        pos[0] > occlusion.positions[0] - occlusion.widths / 2,
-                        pos[0] < occlusion.positions[0] + occlusion.widths / 2,
-                        pos[1] > occlusion.positions[1] - occlusion.widths / 2,
-                        pos[1] < occlusion.positions[1] + occlusion.widths / 2,
-                    ]
-                ):
-                    in_occ = True
-            return in_occ
-        else:
-            # array of false values of size pos
-            prev_check = np.zeros(pos.shape[0], dtype=bool)
-            for occlusion in self.occlusions:
-                prev_check = np.logical_or(
-                    prev_check,
-                    np.logical_and.reduce(
-                        [
-                            pos[:, 0] > occlusion.positions[0] - occlusion.widths / 2,
-                            pos[:, 0] < occlusion.positions[0] + occlusion.widths / 2,
-                            pos[:, 1] > occlusion.positions[1] - occlusion.widths / 2,
-                            pos[:, 1] < occlusion.positions[1] + occlusion.widths / 2,
-                        ]
-                    ),
-                )
-            return prev_check
-
-    def get_goal_position(self, event=None):
+    def update_goal_position(self, event=None):
         """Get the goal position based on the guidance mode.
         Output: goal_position (numpy.array of shape (2,))"""
         if self.guidance_mode == "Information":
@@ -556,11 +551,10 @@ class Guidance(Node):
             ).reshape((self.filter.N_th, 1, self.filter.Nx))
             last_future_time = np.copy(self.filter.last_time)
             for k in range(self.K):
-                if (
-                    self.prediction_method == "NN"
-                    or self.prediction_method == "Transformer"
-                ):
-                    future_part = self.filter.predict_mml(future_part)
+                if self.prediction_method in {"NN", "Transformer"}:
+                    future_part = self.filter.predict_mml(
+                        future_part, np.ones(future_part.shape[0]) * 0.33
+                    )
                 if self.prediction_method == "Unicycle":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
@@ -574,13 +568,26 @@ class Guidance(Node):
                         last_future_time + 0.3,
                     )
             self.goal_position = future_part[-1][0]
-        elif self.guidance_mode == "Particles":
+        elif self.guidance_mode == "WeightedMean":
             self.goal_position = self.filter.weighted_mean
         elif self.guidance_mode == "Lawnmower":
             mower_position = self.lawnmower()
             self.goal_position = mower_position
         elif self.guidance_mode == "Estimator":
             self.goal_position = self.actual_turtle_pose
+
+        # set height depending on runtime
+        is_height_constant = False
+        if is_height_constant:
+            self.height = np.clip(self.height, 1.1, 1.8)
+        else:
+            dheight = 0.02
+            # print("\nfilter update: ", self.filter.is_update)
+            if self.filter.is_update:
+                self.height -= dheight
+            else:
+                self.height += dheight
+        self.update_FOV_dims_and_measurement_cov()
 
     @staticmethod
     def euler_from_quaternion(q):
@@ -633,10 +640,27 @@ class Guidance(Node):
                     [turtle_position[0], turtle_position[1], theta_z]
                 )
                 self.noisy_turtle_pose[2] = self.actual_turtle_pose[2]
-                self.noisy_turtle_pose[:2] = self.filter.add_noise(
-                    self.actual_turtle_pose[:2],
-                    self.filter.measurement_covariance[:2, :2],
+                t = (
+                    self.get_clock().now().seconds_nanoseconds()[0] - t - self.initial_time
                 )
+                if self.prediction_method == "DMMN":
+                    # use this to give fast update measurements to DMMN
+                    if (
+                        self.filter.is_update
+                        or self.filter.motion_model.lastTime is None
+                    ):
+                        _, etaHat, _, _ = self.filter.motion_model.learn(
+                            self.actual_turtle_pose[:2], self.linear_velocity, t
+                        )
+                        self.filter.t_since_last_update = 0.0
+                    else:
+                        etaHat, _ = self.filter.motion_model.predict(t)
+                        self.filter.t_since_last_update += 0.0333
+                        if self.filter.t_since_last_update > 9.0:
+                            self.filter.t_since_last_update -= 3.0
+                            self.filter.motion_model.reset()
+                    _, optimized = self.filter.motion_model.optimize()
+                    self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
             else:
                 turtle_orientation = np.array(
                    [
@@ -650,12 +674,23 @@ class Guidance(Node):
                 self.actual_turtle_pose = np.array(
                    [msg.pose.position.x, msg.pose.position.y, theta_z]
                 )
-
-                # in hardware we assume the pose is already noisy
-                self.noisy_turtle_pose = np.copy(self.actual_turtle_pose)
+                # In the current network we do not use the orientation of the turtlebot
+                # turtle_orientation = np.array(
+                #    [
+                #        msg.pose.orientation.x,
+                #        msg.pose.orientation.y,
+                #        msg.pose.orientation.z,
+                #        msg.pose.orientation.w,
+                #    ]
+                # )
+                # _, _, theta_z = self.euler_from_quaternion(turtle_orientation)
+            self.noisy_turtle_pose[:2] = self.filter.add_noise(
+                self.actual_turtle_pose[:2],
+                self.filter.measurement_covariance[:2, :2],
+            )
 
             # Only update if the turtle is not in occlusion and in the FOV
-            if self.in_occlusion(self.actual_turtle_pose[:2]):
+            if self.occlusions.in_occlusion(self.actual_turtle_pose[:2]):
                 self.filter.is_occlusion = True
                 self.filter.is_update = False  # no update
             else:
@@ -703,6 +738,7 @@ class Guidance(Node):
     def pub_desired_state(self, event=None):
         """Publishes messages related to desired state"""
         if self.init_finished:
+            self.update_goal_position()
             ds = PoseStamped()
             if self.position_following or self.is_sim:
                 ds.pose.position.x = self.goal_position[0]
@@ -714,13 +750,13 @@ class Guidance(Node):
                 #ds.pose.orientation.z = 1.571
             ds.pose.position.z = self.height
             # Given boundary of the lab flight space [[x_min, y_min], [x_max, y_,max]]
-            # clip the x and y position to the space self.filter.AVL_dims
+            # clip the x and y position to the space self.filter.APRILab_dims
             ds.pose.position.x = np.clip(
-                ds.pose.position.x, self.filter.AVL_dims[0][0], self.filter.AVL_dims[1][0]
+                ds.pose.position.x, self.filter.APRILab_dims[0][0], self.filter.APRILab_dims[1][0]
             )
             ds.pose.position.y = np.clip(
-                ds.pose.position.y, self.filter.AVL_dims[0][1], self.filter.AVL_dims[1][1]
-            )  
+                ds.pose.position.y, self.filter.APRILab_dims[0][1], self.filter.APRILab_dims[1][1]
+            )
             self.pose_pub.publish(ds)
             # tracking err pub
             self.FOV_err = self.quad_position - self.actual_turtle_pose[:2]
@@ -825,13 +861,14 @@ class Guidance(Node):
             self.filter.resample_index = np.where(
                 np.logical_and(
                     self.is_in_FOV(self.filter.particles[-1], self.FOV),
-                    ~self.in_occlusion(self.filter.particles[-1, :, :2]),
+                    ~self.occlusions.in_occlusion(self.filter.particles[-1, :, :2]),
                 )
             )[0]
-            # set weights of samples close to zero
-            self.filter.weights[self.filter.resample_index] = 1e-10
-            # normalize weights
-            self.filter.weights = self.filter.weights / np.sum(self.filter.weights)
+            if self.filter.t_since_last_update > 1.0:
+                # set weights of samples close to zero
+                self.filter.weights[self.filter.resample_index] = 1e-10
+                # normalize weights
+                self.filter.weights = self.filter.weights / np.sum(self.filter.weights)
         else:
             self.filter.resample_index = np.arange(self.N)
 
@@ -840,21 +877,56 @@ class Guidance(Node):
             self.filter.pf_loop(
                 self.noisy_turtle_pose, self.angular_velocity, self.linear_velocity
             )
-        elif (
-            self.prediction_method == "Velocity"
-            or self.prediction_method == "NN"
-            or self.prediction_method == "Transformer"
-        ):
+        elif self.prediction_method in {"Velocity", "NN", "Transformer"}:
             self.filter.pf_loop(self.noisy_turtle_pose)
         elif self.prediction_method == "KF":
-            self.kf.X[:2] = (
-                self.actual_turtle_pose[:2] if not self.init_finished else self.kf.X[:2]
-            )
+            if self.kf.X is None:
+                # initialize the KF with the true position
+                self.kf.X = np.array(
+                    [self.actual_turtle_pose[0], self.actual_turtle_pose[1], 0.1, 0.1]
+                )
             self.kf.predict(dt=0.333)
-            self.kf.update(
-                self.noisy_turtle_pose[:2]
-            ) if self.filter.is_update else None
+            if self.filter.is_update:
+                self.kf.update(self.noisy_turtle_pose[:2])
+                self.kf.t_since_last_update = 0.0
+            else:
+                self.kf.t_since_last_update += 0.333
+                if self.kf.t_since_last_update > 9.0:
+                    self.kf.t_since_last_update = 0.0
+                    self.kf.X = np.array([0.0, 0.0, 0.05, 0.0])
             self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
+        # DMMN with noisy updates
+        # elif self.prediction_method == "DMMN":
+        #     # initialize the Kalman filter with true positions if it is the first time
+        #     t = rospy.get_time() - self.initial_time
+        #     if self.filter.motion_model.lastTime is None:
+        #         _, etaHat, _, _ = self.filter.motion_model.learn(
+        #             self.actual_turtle_pose[:2], self.linear_velocity, t
+        #         )
+        #     if self.filter.is_update:
+        #         # _, etaHat, _, _ = self.filter.motion_model.learn(self.kf.X[:2], self.kf.X[2:], t)
+        #         _, etaHat, _, _ = self.filter.motion_model.learn(
+        #             self.actual_turtle_pose[:2], self.linear_velocity, t
+        #         )
+        #     else:
+        #         etaHat, _ = self.filter.motion_model.predict(t)
+        #     _, optimized = self.filter.motion_model.optimize()
+        #     self.filter.weighted_mean = np.array([etaHat[0], etaHat[1]])
+
+    def print_time(self, fn_time):
+        print("Fn time: ", fn_time, "\n")
+        if self.avg_time is None:
+            self.avg_time = fn_time
+        else:
+            self.avg_time = self.avg_time + (fn_time - self.avg_time) / (
+                self.iteration + 1
+            )
+        self.max_time = max(self.max_time, fn_time)
+        self.min_time = min(self.min_time, fn_time)
+        print("Fn time min: ", self.min_time)
+        print("Fn time average: ", self.avg_time)
+        print("Fn time max: ", self.max_time)
+        self.iteration += 1
 
     def shutdown(self):
         # Stop the node when shutdown is called
@@ -873,11 +945,44 @@ class Guidance(Node):
 
 class Occlusions:
     def __init__(self, positions, widths):
-        """All occlusions are defined as squares with
-        some position (x and y) and some width. The attributes are
-        the arrays of positions and widths of the occlusions."""
-        self.positions = positions
-        self.widths = widths
+        """List of occlusions with helper functions"""
+        self.occlusions = [(positions[ii], widths[ii]) for ii in range(len(positions))]
+
+    def in_occlusion(self, pos):
+        """Return true if the position measurement is in occlusion zones for a single
+        position but if it is an array of positions, return an array of booleans for
+        particles inside occlusion
+        Inputs: pos: position to check - numpy.array of shape (2,)
+        """
+        if pos.ndim == 1:
+            for position, width in self.occlusions:
+                if np.all(
+                    [
+                        pos[0] > position[0] - width / 2,
+                        pos[0] < position[0] + width / 2,
+                        pos[1] > position[1] - width / 2,
+                        pos[1] < position[1] + width / 2,
+                    ]
+                ):
+                    return True
+            return False
+        else:
+            return np.array(
+                [
+                    any(
+                        np.all(
+                            [
+                                pos[ii, 0] > position[0] - width / 2,
+                                pos[ii, 0] < position[0] + width / 2,
+                                pos[ii, 1] > position[1] - width / 2,
+                                pos[ii, 1] < position[1] + width / 2,
+                            ]
+                        )
+                        for position, width in self.occlusions
+                    )
+                    for ii in range(pos.shape[0])
+                ]
+            )
 
 
 def main(args=None):

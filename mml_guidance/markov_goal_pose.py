@@ -5,6 +5,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Pose, PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from typing import List, Tuple
 
 
 class MarkovChain(Node):
@@ -14,10 +15,11 @@ class MarkovChain(Node):
         self.is_time_mode = (
             False  # Change this to False if you want to use distance mode
         )
-        self.tolerance_radius = 0.2  # meters
+
+        self.tolerance_radius = 0.15  # meters
 
         self.init_time = self.get_clock().now().nanoseconds / 1e9
-        self.prev_goal_in = 1  # Start at the second state
+        self.prev_goal_in = 5  # Start at the sixth state (index 5)
         self.prev_mult = 0
         self.position = np.array([0, 0])
 
@@ -51,7 +53,8 @@ class MarkovChain(Node):
                 qos_profile=1,
             )
 
-        self.goal_pose_square()
+        self.road_network_V2()
+        # self.goal_pose_square()
         node_freq = 10  # Hz
         self.timer = self.create_timer(1 / node_freq, self.pub_goal_pose)  # 10 Hz
 
@@ -59,84 +62,18 @@ class MarkovChain(Node):
         """Generates a square of sides 2*k"""
         self.goal_list = []
 
-        z = 0.  # turtlebot on the ground
-        qx = qy = 0.  # no roll or pitch
         k = 0.8  # Multiplier  change this to make square bigger or smaller
         x_offset = -1.25  # change this to not crash to the net
         y_offset = 0.2
-        self.goal_list.append(
-            {
-                "curr_goal": 0,
-                "x": x_offset + 0 * k,
-                "y": y_offset + 0 * k,
-                "z": z,
-                "qx": qx,
-                "qy": qy,
-                "qz": 0.,
-                "qw": 1.,
-            }
-        )
-        self.goal_list.append(
-            {
-                "curr_goal": 1,
-                "x": x_offset + 0 * k,
-                "y": y_offset + -1 * k,
-                "z": z,
-                "qx": qx,
-                "qy": qy,
-                "qz": 0.707,
-                "qw": 0.707,
-            }
-        )  # -90 degrees orientation
-        self.goal_list.append(
-            {
-                "curr_goal": 2,
-                "x": x_offset + 2 * k,
-                "y": y_offset + -1 * k,
-                "z": z,
-                "qx": qx,
-                "qy": qy,
-                "qz": 0.,
-                "qw": 1.,
-            }
-        )  # 0 degrees orientation
-        self.goal_list.append(
-            {
-                "curr_goal": 3,
-                "x": x_offset + 2 * k,
-                "y": y_offset + 1 * k,
-                "z": z,
-                "qx": qx,
-                "qy": qy,
-                "qz": 0.707,
-                "qw": -0.707,
-            }
-        )  # 90 degrees orientation
-        self.goal_list.append(
-            {
-                "curr_goal": 4,
-                "x": x_offset + 1 * k,
-                "y": y_offset + 2 * k,
-                "z": z,
-                "qx": qx,
-                "qy": qy,
-                "qz": 1.,
-                "qw": 0.,
-            }
-        )  # 180 degrees orientation
-        self.goal_list.append(
-            {
-                "curr_goal": 5,
-                "x": x_offset + 0 * k,
-                "y": y_offset + 1 * k,
-                "z": z,
-                "qx": qx,
-                "qy": qy,
-                "qz": 1.,
-                "qw": 0.,
-            }
-        )  # 180 degrees orientation
-        self.n_states = len(self.goal_list)
+        node_positions = [
+            (x_offset + 0 * k, y_offset + 0 * k, 0),  #
+            (x_offset + 0 * k, y_offset + -1 * k, 270),  #
+            (x_offset + 2 * k, y_offset + -1 * k, 0),  #
+            (x_offset + 2 * k, y_offset + 1 * k, 90),  #
+            (x_offset + 1 * k, y_offset + 2 * k, 180),  #
+            (x_offset + 0 * k, y_offset + 1 * k, 180),  #
+        ]
+        self.node_positions_to_goal_list(node_positions)
 
         # transition matrix:
         # prob of going from state i to state j
@@ -150,8 +87,63 @@ class MarkovChain(Node):
                 [0.0, 0.0, 0.0, 0.0, 0.6, 0.4],
                 [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
                 [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                # for connected graph
+                # [0.2, 0.0, 0.2, 0.2, 0.2, 0.2],
+                # [0.2, 0.2, 0.0, 0.2, 0.2, 0.2],
+                # [0.2, 0.2, 0.2, 0.0, 0.2, 0.2],
+                # [0.2, 0.2, 0.2, 0.2, 0.0, 0.2],
+                # [0.2, 0.2, 0.2, 0.2, 0.2, 0.0],
             ]
         )
+
+    def road_network_V2(self):
+        """Generates a road network with 8 nodes"""
+        # node positions in m and orientation in deg
+        node_positions = [
+            (-1.5, 1, 180),  # Node 0
+            (0, 1, 180),  # Node 1
+            (2.1, 1, 90),  # Node 2
+            (-1.5, -1, 270),  # Node 3
+            (0, -1, 90),  # Node 4
+            (0.3, 0, 0),  # Node 5
+            (1.7, 0, 0),  # Node 6
+            (2.1, -1, 270),  # Node 7
+        ]
+        self.node_positions_to_goal_list(node_positions)
+
+        # transition matrix:
+        self.trans_matrix = np.array(
+            [
+                # 0    1    2    3    4    5    6    7
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 0
+                [0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0],  # Node 1
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 2
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 3
+                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],  # Node 4
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],  # Node 5
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # Node 6
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # Node 7
+            ]
+        )
+
+    def node_positions_to_goal_list(
+        self, node_positions: List[Tuple[float, float, float]]
+    ):
+        self.goal_list = []
+        for node, pos in enumerate(node_positions):
+            self.goal_list.append(
+                {
+                    "curr_goal": node,
+                    "x": pos[0],
+                    "y": pos[1],
+                    "z": 0,
+                    "qx": 0,
+                    "qy": 0,
+                    "qz": np.sin(np.deg2rad(pos[2] / 2)),
+                    "qw": np.cos(np.deg2rad(pos[2] / 2)),
+                }
+            )
+        self.n_states = len(self.goal_list)
 
     def odom_cb(self, msg):
         if self.is_sim:

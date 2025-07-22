@@ -119,9 +119,10 @@ class MMLPFVisualization(Node):
         self.fig_ax4.set_title("Est yaw vs Real yaw")
         self.fig_ax5 = self.fig2.add_subplot(gs[:, 2])
         self.fig_ax5.set_title("Entropy")
+        plt.close(self.fig2)
 
-        self.fig_ax1.axis("equal")
-        self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+        # set the map image boundaries and resize it to respect aspect ratio
+        self.limits = {"x": [-2.5, 3.0], "y": [-1.6, 1.6]}
 
         self.xErrList = []
         self.yErrList = []
@@ -157,19 +158,33 @@ class MMLPFVisualization(Node):
         if self.road_network is None:
             self.road_network = np.array(
                 [
-                    [-1.25, 1.0],
-                    [0.35, 1],
-                    [-0.45, 1.8],
-                    [-1.25, 1],
-                    [-1.25, -0.6],
-                    [0.35, 1.0],
-                    [0.35, -0.6],
-                    [-1.25, -0.6],
+                    (1.7, 0),  # 6
+                    (0.3, 0),  # 5
+                    (0, -1),  # 4
+                    (2, -1),  # 7
+                    (1.7, 0),  # 6
+                    (2, 1),  # 2
+                    (0, 1),  # 1
+                    (-1.5, -1),  # 3
+                    (-1.5, 1),  # 0
+                    (0, 1),  # 1
+                    (-1.5, 1),  # 0
+                    (0, -1),  # 4
                 ]
             )
 
         self.plot_flag = False
         self.initialization_finished = True
+
+    def is_inside_limits(self, position):
+        result = (
+            position[0] > self.limits["x"][0]
+            and position[0] < self.limits["x"][1]
+            and position[1] > self.limits["y"][0]
+            and position[1] < self.limits["y"][1]
+        )
+        # print("is_inside_limits: ", result) if not result else None
+        return result
 
     def joy_callback(self, msg):
         # Not used in ROS2
@@ -302,8 +317,8 @@ class MMLPFVisualization(Node):
                 self.fig_ax3.set_title("Est y vs Real y")
                 self.fig_ax4.set_title("Est yaw vs Real yaw")
                 self.fig_ax5.set_title("Entropy")
-                self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
+                # self.fig_ax1.set_xlim(self.limits["x"])
+                # self.fig_ax1.set_ylim(self.limits["y"])
 
                 # plot the road network
                 self.fig_ax1.plot(
@@ -318,23 +333,13 @@ class MMLPFVisualization(Node):
 
                 # plot the particles
                 # TODO: change from only sampled to all particles
-                # check the particle is not outside of the map, if it is, remove that sampled index
-                self.sampled_index = np.array(
-                    [
-                        i
-                        for i in self.sampled_index
-                        if self.particles[i, 0] < 5.5
-                        and self.particles[i, 0] > -5.5
-                        and self.particles[i, 1] < 7
-                        and self.particles[i, 1] > -7
-                    ]
-                )
                 self.fig_ax1.scatter(
                     self.particles[self.sampled_index, 0],
                     self.particles[self.sampled_index, 1],
                     marker=".",
                     color="k",
                     label="Sampled !!! Particles ",
+                    clip_on=True,
                 )
                 # plot the current estimate position
                 self.fig_ax1.plot(
@@ -344,12 +349,11 @@ class MMLPFVisualization(Node):
                     markersize=10.0,
                     color="g",
                     label="Estimated position ",
+                    clip_on=True,
                 )
 
                 # plot spaguetti plots and scatter using the future particles and the sampled index
                 # TODO: change from blue to black
-                self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                 if self.plot_prediction:
                     slope = (0.5 - 0.05) / (self.K - 1)
                     for k in range(self.K):
@@ -359,6 +363,7 @@ class MMLPFVisualization(Node):
                             marker=".",
                             color="b",
                             alpha=0.5 - slope * k,
+                            clip_on=True,
                         )
                         counter = 0
                         for ii in self.sampled_index:
@@ -366,7 +371,7 @@ class MMLPFVisualization(Node):
                                 self.fig_ax1.plot(
                                     [
                                         self.particles[ii, 0],
-                                        self.future_parts[0, counter, 0],
+                                        self.future_parts[k, counter, 0],
                                     ],
                                     [
                                         self.particles[ii, 1],
@@ -374,6 +379,7 @@ class MMLPFVisualization(Node):
                                     ],
                                     color="b",
                                     alpha=0.2,
+                                    clip_on=True,
                                 )
                             else:
                                 self.fig_ax1.plot(
@@ -387,21 +393,19 @@ class MMLPFVisualization(Node):
                                     ],
                                     color="b",
                                     alpha=0.2,
+                                    clip_on=True,
                                 )
                             counter += 1
-                            self.fig_ax1.axis("equal")
-                            self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                     self.fig_ax1.scatter(
                         self.fov[0, 0],
                         self.fov[0, 1],
                         marker=".",
                         color="b",
-                        alpha=0.3,
+                        alpha=0.01,
                         label="Propagated Particles",
+                        clip_on=True,
                     )  # fake for legend
 
-                self.fig_ax1.axis("equal")
-                self.fig_ax1.set(xlim=(-5.5, 5.5), ylim=(-7, 7))
                 # plot the real position
                 if self.is_sim:
                     self.fig_ax1.plot(
@@ -411,6 +415,7 @@ class MMLPFVisualization(Node):
                         markersize=10.0,
                         color="m",
                         label="True position ",
+                        clip_on=True,
                     )
                 else:
                     self.fig_ax1.plot(
@@ -420,6 +425,7 @@ class MMLPFVisualization(Node):
                         markersize=10.0,
                         color="m",
                         label="True position ",
+                        clip_on=True,
                     )
                 # plot the desired fov
                 self.fig_ax1.plot(
@@ -429,6 +435,7 @@ class MMLPFVisualization(Node):
                     markersize=1.0,
                     color="b",
                     label="Action FOV",
+                    clip_on=True,
                 )
                 # [bottom left, top left, top right, bottom right, bottom left]
                 act_x = (self.des_fov[2, 0] - self.des_fov[0, 0]) / 2.0 + self.des_fov[
@@ -438,7 +445,12 @@ class MMLPFVisualization(Node):
                     0, 1
                 ]
                 self.fig_ax1.scatter(
-                    act_x, act_y, marker="+", color="b", label="Action chosen"
+                    act_x,
+                    act_y,
+                    marker="+",
+                    color="b",
+                    label="Action chosen",
+                    clip_on=True,
                 )
                 # plot the fov
                 self.fig_ax1.plot(
@@ -448,11 +460,17 @@ class MMLPFVisualization(Node):
                     markersize=1.0,
                     color="r",
                     label="Field of View ",
+                    clip_on=True,
                 )
                 quad_x = (self.fov[2, 0] - self.fov[0, 0]) / 2.0 + self.fov[0, 0]
                 quad_y = (self.fov[1, 1] - self.fov[0, 1]) / 2.0 + self.fov[0, 1]
                 self.fig_ax1.scatter(
-                    quad_x, quad_y, marker="+", color="r", label="Quad position "
+                    quad_x,
+                    quad_y,
+                    marker="+",
+                    color="r",
+                    label="Quad position ",
+                    clip_on=True,
                 )
                 # plot the occlusion
                 occ_centers = list(self.get_parameter('occlusion_centers').get_parameter_value().double_array_value)
@@ -499,15 +517,15 @@ class MMLPFVisualization(Node):
                         self.mocap_msg.pose.pose.orientation.z,
                         self.mocap_msg.pose.pose.orientation.w,
                     )[2]
-                    self.fig_ax1.arrow(
-                        self.mocap_msg.pose.pose.position.x,
-                        self.mocap_msg.pose.pose.position.y,
-                        0.25 * math.cos(real_theta),
-                        0.25 * math.sin(real_theta),
-                        width=0.05,
-                        color="magenta",
-                        label="Estimated yaw",
-                    )
+                    # self.fig_ax1.arrow(
+                    #     self.mocap_msg.pose.pose.position.x,
+                    #     self.mocap_msg.pose.pose.position.y,
+                    #     0.25 * math.cos(real_theta),
+                    #     0.25 * math.sin(real_theta),
+                    #     width=0.05,
+                    #     color="magenta",
+                    #     label="Estimated yaw",
+                    # )
                 else:
                     real_theta = euler_from_quaternion(
                         self.mocap_msg.pose.orientation.x,
@@ -533,6 +551,7 @@ class MMLPFVisualization(Node):
                         markersize=10.0,
                         color="orange",
                         label="Noisy Measurements",
+                        clip_on=True,
                     )
 
                 # plot particles covariances
@@ -600,6 +619,9 @@ class MMLPFVisualization(Node):
                 # for fig in [self.fig_ax2, self.fig_ax3]:
                 #    for t in self.update_t:
                 #        fig.plot([t,t], [-10,10], color="orange")
+            self.fig_ax1.autoscale(enable=False)
+            self.fig_ax1.set_xlim(left=self.limits["x"][0], right=self.limits["x"][1])
+            self.fig_ax1.set_ylim(bottom=self.limits["y"][0], top=self.limits["y"][1])
 
             # update all the plots and display them
             plt.show()

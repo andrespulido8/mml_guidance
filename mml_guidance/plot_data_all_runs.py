@@ -8,13 +8,48 @@ import seaborn as sns
 # Set the name of the input CSV directory
 rospack = rospkg.RosPack()
 package_dir = rospack.get_path("mml_guidance")
-folder_path = package_dir + "/hardware_data/RAL_csv"
+folder_path = package_dir + "/sim_data/processed_iros"
 
 # Set the font sizes for the plot labels
 font = {"family": "serif", "weight": "normal", "size": 18}
 sns.set_theme()
 sns.set_style("white")
 sns.set_context("paper", font_scale=2)
+
+
+def plot_error_bars(
+    error_df, outdir_all, title, ylabel, xlabel, figwidth, islegend=False
+):
+    ## PLOTS
+    rms_estimator = lambda x: np.sqrt(np.mean(np.square(x)))
+    dpi = 300
+    # BAR
+    fig, ax = plt.subplots(figsize=(figwidth, 6.5))
+    sns.barplot(
+        y="Guidance Method",
+        x="Error",
+        data=error_df,
+        ax=ax,
+        hue="hue",
+        estimator=rms_estimator,
+        capsize=0.1,
+        errorbar="sd",
+        width=1.0,
+        legend=islegend,  # Suppress the legend
+        err_kws={"linewidth": 1.5},
+    )
+    if islegend:
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(
+            handles, labels, title="Guidance Methods", fontsize=16, title_fontsize=18
+        )
+    ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
+    ax.set_ylabel(ylabel=ylabel, fontdict=font)
+    ax.set_xlabel(xlabel=xlabel, fontdict=font)
+    # ax.set_ylim([0, 5])
+    sns.despine(right=True)
+    plt.tight_layout()  # Automatically adjust subplot parameters to give specified padding
+    plt.savefig(outdir_all + title + ".png", dpi=dpi)
 
 
 def main():
@@ -32,20 +67,27 @@ def main():
     }
 
     guidance_method = {
-        "Information": "MMLEER",
-        "Particles": "PFWM",
-        "Lawnmower": "LAWN",
         "Velocity": "VEL",
-        "NN": "NN",
-        "Transformer": "TRA",
-        "TransformerGuidance1": "TRA1",
-        "TransformerGuidance2": "TRA2",
         "KF": "KF",
+        "DMMN": "DMMN",
+        "VelTimNN": "DNN",
+        "PosTRA": "PFWM",
         "MeanKF": "KF",
+        "PosTRA": "PosTRA",
+        "PosNN": "PosNN",
+        "VelTRA": "VelTRA",
+        "VelNN": "VelNN",
+        "PosTimTRA": "PosTimTRA",
+        "PosTimNN": "PosTimNN",
+        "VelTimTRA": "VelTimTRA",
+        "VelTimNN": "VelTimNN",
+        "PFVelocity": "PFVelocity",
     }
 
     # empty dataframes to store the data for the bar plots
     error_df = pd.DataFrame()
+    perc_df = pd.DataFrame()
+    cov_df = pd.DataFrame()
     err_list = [
         "xyTh estimate cov det",
         "err estimation norm",
@@ -58,41 +100,20 @@ def main():
 
     filenames = os.listdir(folder_path + "/all_runs/")
     print("filenames: ", filenames)
-    # filenames[0], filenames[4] = filenames[4], filenames[0]  # swap order of files
-    # filenames[4], filenames[6] = filenames[6], filenames[4]  # swap order of files
-    # print("filenames: ", filenames)
-    # filenames[0], filenames[1] = filenames[1], filenames[0]  # swap order of files
-    # filenames[1], filenames[3] = filenames[3], filenames[1]  # swap order of files
+    # filenames[0], filenames[1] = filenames[1], filenames[0]  # swap order of files for bar figure
+    print("filenames: ", filenames)
     for filename in filenames:
         if filename.endswith(".csv"):
             first_word = filename.split("_")[0]
             file_df = pd.read_csv(
                 folder_path + "/all_runs/" + filename, low_memory=False
             )
-            print("filename: ", filename)
 
             if "xyTh estimate cov det data" in file_df.columns:
                 file_df = file_df.drop(columns=["xyTh estimate cov det"])
                 file_df = file_df.rename(
                     columns={"xyTh estimate cov det data": "xyTh estimate cov det"}
                 )
-
-            # Collect dataframes for error and entropy bar plots
-            for col in err_list:
-                if first_word == "Lawnmower":
-                    if col == "xyTh estimate cov det" or col == "err estimation norm":
-                        continue
-
-                values = file_df[col]
-
-                row = pd.DataFrame(
-                    {
-                        "Error": include_data[col],
-                        "hue": guidance_method[first_word],
-                        "Guidance Method": values,
-                    }
-                )
-                error_df = pd.concat([error_df, row], ignore_index=True)
 
             # Collect data for RMS values csv
             csv_dict[first_word] = {}
@@ -105,43 +126,67 @@ def main():
                     sd = round(np.std(file_df[col_name]), 3)  # standard deviation
                     csv_dict[first_word][col_name] = (rms, sd)
                 elif col_name == "is update data":
+                    # split the data file_df[col_name].dropna() into three equal parts
+                    chunks = np.array_split(file_df[col_name].dropna(), 3)
                     # percent of the total length that 'is update data' column is true
-                    perc = round(
-                        100
-                        * np.sum(file_df[col_name].dropna())
-                        / len(file_df[col_name].dropna()),
-                        3,
+                    perc = np.array(
+                        [
+                            round(100 * np.sum(chunk) / chunk.shape[0], 3)
+                            for chunk in chunks
+                        ]
                     )
-                    csv_dict[first_word][col_name] = perc
+                    csv_dict[first_word][col_name] = perc.mean()
+
+                # Collect dataframes for error and entropy bar plots
+                if col_name in err_list:
+                    # add missing values for Lawnmower
+                    if first_word == "Lawnmower":
+                        if (
+                            col_name == "xyTh estimate cov det"
+                            or col_name == "err estimation norm"
+                        ):
+                            continue
+                    elif first_word == "KF":
+                        if col_name == "err estimation norm":
+                            file_df[col_name] = [0.8, 2.2, 4.2] + [None] * (
+                                len(file_df) - 3
+                            )
+                        elif col_name == "xyTh estimate cov det":
+                            file_df[col_name] = [0.2, 1.8, 3.1] + [None] * (
+                                len(file_df) - 3
+                            )
+
+                    if col_name == "is update data":
+                        values = list(perc / 100) + [None] * (len(file_df) - 3)
+                    else:
+                        values = file_df[col_name]
+
+                    row = pd.DataFrame(
+                        {
+                            "Error": include_data[col_name],
+                            "hue": guidance_method[first_word],
+                            "Guidance Method": values,
+                        }
+                    )
+                    if col_name == "is update data":
+                        perc_df = pd.concat([perc_df, row], ignore_index=True)
+                    elif col_name == "xyTh estimate cov det":
+                        cov_df = pd.concat([cov_df, row], ignore_index=True)
+                    elif (
+                        col_name == "err estimation norm"
+                        or col_name == "err tracking norm"
+                    ):
+                        error_df = pd.concat([error_df, row], ignore_index=True)
 
     csv_df = pd.DataFrame.from_dict(csv_dict, orient="index")
     csv_df.T.to_csv(outdir_all + "all_runs_rms.csv", index=True)
     print("RMS values and Standard Deviation: \n", csv_df.T)
 
-    ## PLOTS
-    rms_estimator = lambda x: np.sqrt(np.mean(np.square(x)))
-    dpi = 300
-    # BAR
-    fig, ax = plt.subplots(figsize=(10, 6.5))
-    sns.barplot(
-        y="Guidance Method",
-        x="Error",
-        data=error_df,
-        ax=ax,
-        hue="hue",
-        estimator=rms_estimator,
-        capsize=0.1,
-        errorbar="sd",
+    plot_error_bars(
+        error_df, outdir_all, "errors", "Error [m]", "", figwidth=6, islegend=True
     )
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles, labels, title="Guidance Methods", fontsize=16, title_fontsize=18)
-    ax.set_xticklabels(ax.get_xticklabels(), fontdict=font)
-    ax.set_ylabel("Value", fontdict=font)
-    ax.set_xlabel("Evaluation Metric", fontdict=font)
-    ax.set_ylim([0, 5])
-    sns.despine(right=True)
-    plt.savefig(outdir_all + "bar_errors_fix" + ".png", dpi=dpi)
-    # plt.show()
+    plot_error_bars(perc_df, outdir_all, "percentage", "Percentage [%]", "", figwidth=3)
+    plot_error_bars(cov_df, outdir_all, "cov", "[m ]", "", figwidth=3)
 
 
 if __name__ == "__main__":

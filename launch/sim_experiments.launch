@@ -10,4 +10,11 @@
 	<node pkg="mml_guidance" type="mml_pf_visualization.py" name="mml_pf_visualization" output="screen">
 		<remap from="odom" to="/robot0/odom"/>
 	</node>
+
+	<group ns="robot0">
+		<node pkg="mml_guidance" name="markov_goal_pose" type="markov_goal_pose.py" output="screen">
+			<remap from="/odom" to="/robot0/odom"/>
+			<remap from="/goal_pose" to="/robot0/goal_pose"/>
+		</node>
+	</group>
 </launch>

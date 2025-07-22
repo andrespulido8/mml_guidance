@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+torch.set_default_dtype(torch.float32)
+
 
 class PositionalEncoding(nn.Module):
     """NOT USED currently"""
@@ -28,8 +30,6 @@ class PositionalEncoding(nn.Module):
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-torch.manual_seed(1337)
 
 
 class Head(nn.Module):
@@ -75,10 +75,13 @@ class Head(nn.Module):
 class MultiHeadAttention(nn.Module):
     """multiple heads of self-attention in parallel"""
 
-    def __init__(self, num_heads, head_size, input_dim=2, dropout=0.2):
+    def __init__(self, num_heads, head_size, input_dim=2, dropout=0.2, block_size=10):
         super().__init__()
         self.heads = nn.ModuleList(
-            [Head(head_size=head_size, input_dim=input_dim) for _ in range(num_heads)]
+            [
+                Head(head_size=head_size, input_dim=input_dim, block_size=block_size)
+                for _ in range(num_heads)
+            ]
         )
         self.proj = nn.Linear(head_size * num_heads, input_dim)
         self.dropout = nn.Dropout(dropout)
@@ -113,11 +116,13 @@ class Block(nn.Module):
     feed-forward network have residual connections around them.
     """
 
-    def __init__(self, input_dim, n_head):
+    def __init__(self, input_dim, n_head, block_size=10):
         # input_dim: embedding dimension, n_head: the number of heads we'd like
         super().__init__()
         head_size = input_dim // n_head
-        self.sa = MultiHeadAttention(n_head, head_size, input_dim=input_dim)
+        self.sa = MultiHeadAttention(
+            n_head, head_size, input_dim=input_dim, block_size=block_size
+        )
         self.ffwd = FeedFoward(input_dim)
         self.ln1 = nn.LayerNorm(input_dim)
         self.ln2 = nn.LayerNorm(input_dim)
@@ -129,11 +134,10 @@ class Block(nn.Module):
 
 
 class ScratchTransformer(nn.Module):
-    def __init__(self, input_dim=2, block_size=10, n_embed=2, n_head=1, n_layer=1):
+    def __init__(self, input_dim=3, block_size=5, n_embed=2, n_head=1, n_layer=1, hidden_dim=2):
         """A simple transformer for time series forecasting.
         The transformer consists of a stack of blocks, each containing a multi-head self-attention
         mechanism and a simple feed-forward neural network at the end.
-
 
         Args:
             input_dim: number of features in the input
@@ -144,17 +148,24 @@ class ScratchTransformer(nn.Module):
 
         """
         super().__init__()
+        self.block_size = block_size  # T
+        self.input_dim = input_dim  # C
+        print("Transformer input_dim: ", input_dim)
+        print("Transformer block_size: ", block_size)
         # each token directly reads off the logits for the next token from a lookup table
-        self.embed = nn.Linear(input_dim, n_embed).to(device)
+        self.embed = nn.Linear(self.input_dim, n_embed).to(device)
         self.position_embedding_table = nn.Embedding(block_size, n_embed).to(device)
         # self.position_embedding_table  = PositionalEncoding(n_embed, 0.2, max_len=10)
         self.blocks = nn.Sequential(
-            *[Block(n_embed, n_head=n_head).to(device) for _ in range(n_layer)]
+            *[
+                Block(n_embed, n_head=n_head, block_size=block_size).to(device)
+                for _ in range(n_layer)
+            ]
         )
         self.ln_f = nn.LayerNorm(n_embed).to(device)  # final layer norm
-        self.lm_head = nn.Linear(n_embed, 2).to(
-            device
-        )  # output dim is same of input dim
+        self.lm_hidden = nn.Linear(n_embed, hidden_dim).to(device)
+        self.activation_fn = nn.ReLU()
+        self.lm_head = nn.Linear(hidden_dim, 2).to(device)
 
         # better init
         self.apply(self._init_weights)
@@ -167,8 +178,8 @@ class ScratchTransformer(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, src, targets=None):
-        src = src.view(-1, 10, 2)
+    def forward(self, src):
+        src = src.reshape(-1, self.block_size, self.input_dim)
 
         # src and targets are both (B,T,C) tensors
         src = self.embed(src)
@@ -178,6 +189,7 @@ class ScratchTransformer(nn.Module):
         # x = self.position_embedding_table(src)
         x = self.blocks(x)  # (B,T,C)
         x = self.ln_f(x)  # (B,T,C)
+        x = self.activation_fn(self.lm_hidden(x))
         output = self.lm_head(x)  # (B,T,C)
 
         output = output[:, -1, :]  # only return the last time step
