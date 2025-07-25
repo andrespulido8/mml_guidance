@@ -14,8 +14,8 @@ import os
 
 try:
     # for running the script from the scripts directory
-    from simple_dnn import SimpleDNN
-    from scratch_transformer import ScratchTransformer
+    from .simple_dnn import SimpleDNN
+    from .scratch_transformer import ScratchTransformer
 except ImportError:
     # for running the script with ROS
     from mml_network.simple_dnn import SimpleDNN
@@ -24,7 +24,17 @@ except ImportError:
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def train(model, criterion, optimizer, X_train, y_train, epochs=100, online=False, is_velocities=False, is_time=False):
+def train(
+    model,
+    criterion,
+    optimizer,
+    X_train,
+    y_train,
+    epochs=100,
+    online=False,
+    is_velocities=False,
+    is_time=False,
+):
     losses = []
     for epoch in range(epochs):
         outputs = model(X_train)
@@ -108,11 +118,13 @@ def parameter_search(
     return best_params
 
 
-def plot_NN_output(features, predictions, true_label, is_velocities, is_time, title="Test"):
+def plot_NN_output(
+    features, predictions, true_label, is_velocities, is_time, title="Test"
+):
     # font sizes for the plot labels
     sns.set_theme()
     sns.set_style("white")
-    sns.set_style({'font.family': 'Times New Roman'})
+    sns.set_style({"font.family": "Times New Roman"})
     sns.set_context("paper", font_scale=2)
 
     num_plots = 2 if title == "Test" else 1
@@ -124,7 +136,7 @@ def plot_NN_output(features, predictions, true_label, is_velocities, is_time, ti
         fig, ax = plt.subplots()
 
         occ_widths = [0.5, 0.6, 0.6, 0.6]
-        occ_centers = [[-1.5, 1], [-0.75, 0.], [1.1, 1], [1.5, 0.]]
+        occ_centers = [[-1.5, 1], [-0.75, 0.0], [1.1, 1], [1.5, 0.0]]
         # [x_min, x_max, y_min, y_max]
         occlusions = [
             [
@@ -143,7 +155,12 @@ def plot_NN_output(features, predictions, true_label, is_velocities, is_time, ti
                 color="black",
             )
         # legend
-        plt.plot(occlusion[0], occlusion[2],color="black",label="Occlusion",)
+        plt.plot(
+            occlusion[0],
+            occlusion[2],
+            color="black",
+            label="Occlusion",
+        )
 
         clip_arrow = 1  # clip the arrow length
         if is_velocities:
@@ -151,7 +168,7 @@ def plot_NN_output(features, predictions, true_label, is_velocities, is_time, ti
             gain = 0.3
             # time step
             if is_time:
-                arrow_length = np.clip(features[:, -1] * gain, -clip_arrow, clip_arrow) 
+                arrow_length = np.clip(features[:, -1] * gain, -clip_arrow, clip_arrow)
             else:
                 arrow_length = np.ones(features.shape[0]) * 0.333 * gain
             for i in range(pos.shape[0] - 1):
@@ -178,18 +195,26 @@ def plot_NN_output(features, predictions, true_label, is_velocities, is_time, ti
                     )
         else:
             # Calculate arrow directions for predictions and actual values (position - prev_position)
-            gain = 0.2 
+            gain = 0.2
             pred_dx = np.clip(
-                (predictions[:, 0] - features[:, -nx]) * gain, -clip_arrow / 10, clip_arrow / 10
+                (predictions[:, 0] - features[:, -nx]) * gain,
+                -clip_arrow / 10,
+                clip_arrow / 10,
             )
             pred_dy = np.clip(
-                (predictions[:, 1] - features[:, -nx + 1]) * gain, -clip_arrow / 10, clip_arrow / 10
+                (predictions[:, 1] - features[:, -nx + 1]) * gain,
+                -clip_arrow / 10,
+                clip_arrow / 10,
             )
             actual_dx = np.clip(
-                (true_label[:, 0] - features[:, -nx]) * gain, -clip_arrow / 10, clip_arrow / 10
+                (true_label[:, 0] - features[:, -nx]) * gain,
+                -clip_arrow / 10,
+                clip_arrow / 10,
             )
             actual_dy = np.clip(
-                (true_label[:, 1] - features[:, -nx + 1]) * gain, -clip_arrow / 10, clip_arrow / 10
+                (true_label[:, 1] - features[:, -nx + 1]) * gain,
+                -clip_arrow / 10,
+                clip_arrow / 10,
             )
 
             arrow_length = 2.5  # higher value means shorter arrows
@@ -222,7 +247,7 @@ def plot_NN_output(features, predictions, true_label, is_velocities, is_time, ti
         # Plot 3 paths
         for i in range(-1, -1 * min(4, features.shape[0]), -1):
             ax.plot(
-                features[i, 0:-nx+1:nx],
+                features[i, 0 : -nx + 1 : nx],
                 features[i, 1:-1:nx] if nx == 3 else features[i, 1::nx],
                 color="black",
                 marker="o",
@@ -249,8 +274,8 @@ def plot_NN_output(features, predictions, true_label, is_velocities, is_time, ti
         plt.gca().set_aspect("equal", adjustable="box")
         # plt.legend(bbox_to_anchor=(1, 1))
         font_properties = FontProperties()
-        font_properties.set_family('serif')
-        font_properties.set_name('Times New Roman')
+        font_properties.set_family("serif")
+        font_properties.set_name("Times New Roman")
         ax.legend(prop=font_properties, bbox_to_anchor=(1, 1))
 
         plt.legend(loc="lower left")
@@ -261,6 +286,7 @@ def plot_NN_output(features, predictions, true_label, is_velocities, is_time, ti
             )
         plt.show()
         plt.close(fig)
+
 
 def initialize_weights(model):
     for layer in model.modules():
@@ -282,7 +308,12 @@ def select_model(model_name, input_size, input_dim=2):
     elif model_name == "ScratchTransformer":
         block_size = input_size // input_dim
         model = ScratchTransformer(
-            input_dim=input_dim, block_size=block_size, n_embed=40, n_head=6, n_layer=1, hidden_dim=10
+            input_dim=input_dim,
+            block_size=block_size,
+            n_embed=40,
+            n_head=6,
+            n_layer=1,
+            hidden_dim=10,
         )
     else:
         raise ValueError("Invalid model name")
@@ -329,7 +360,7 @@ def main():
     is_time = False
     is_perfect = False
     is_parameter_search = True
-    evaluate_model = False 
+    evaluate_model = False
     is_connected_graph = False
     get_every_n = 1
     model_name = "ScratchTransformer"  # "ScratchTransformer"  # "SimpleDNN"
@@ -342,10 +373,10 @@ def main():
     path = os.path.expanduser("~/mml_ws/src/mml_guidance/sim_data/training_data/")
 
     if is_time:
-        prefix_name = prefix_name + "time_" 
+        prefix_name = prefix_name + "time_"
         input_dim = 3  # 2 for positions, 1 for time
     else:
-        input_dim = 2  
+        input_dim = 2
 
     prefix_name = (
         prefix_name + "velocities_" if is_velocities else prefix_name + "position_"
@@ -459,7 +490,9 @@ def main():
     X_train = X_train.to("cpu").detach().numpy()
     print("Train Loss: ", train_loss)
 
-    plot_NN_output(X_train[::2], y_pred_train[::2], y_train[::2], is_velocities, is_time, "Train")
+    plot_NN_output(
+        X_train[::2], y_pred_train[::2], y_train[::2], is_velocities, is_time, "Train"
+    )
 
     # evaluate test data
     test_loss, y_pred = evaluate(model, criterion, X_test, y_test)
@@ -467,7 +500,9 @@ def main():
     X_test = X_test.to("cpu").detach().numpy()
     y_pred = y_pred.to("cpu").detach().numpy()
     y_test = y_test.to("cpu").detach().numpy()
-    plot_NN_output(X_test[::2], y_pred[::2], y_test[::2], is_velocities, is_time, "Test")
+    plot_NN_output(
+        X_test[::2], y_pred[::2], y_test[::2], is_velocities, is_time, "Test"
+    )
 
     if evaluate_model and False:
         # weights_filename = f"../../scripts/mml_network/models/best_connected_graph_noisy_velocities_ScratchTransformer.pth"

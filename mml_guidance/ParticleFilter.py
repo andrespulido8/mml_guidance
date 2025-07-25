@@ -1,42 +1,44 @@
+#!/usr/bin/env python3
 import os
 import numpy as np
-from rclpy.clock import Clock, ClockType
-from ament_index_python.packages import get_package_share_directory
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import time
 
 from .mml_network.motion_model_network import MotionModel
 from .mml_network.simple_dnn import SimpleDNN
 from .mml_network.scratch_transformer import ScratchTransformer
 from .mml_network.train import train
-import logging
 
 FWD_VEL = 0.0
 ANG_VEL = 0.0
 
-clock = Clock(clock_type=ClockType.ROS_TIME)
 
 class ParticleFilter:
     def __init__(
-        self, num_particles=10, prediction_method="NN", is_sim=False, drone_height=2.0
+        self,
+        num_particles=10,
+        prediction_method="NN",
+        is_sim=False,
+        drone_height=2.0,
+        model_path=None,
+        initial_time=0.0,
     ):
-
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.APRILab_dims = np.array([[-1.7, -1.2], [2.2, 1.6]])  # hardware
+        self.APRILab_dims = np.array([[0.0, 0.0], [1024, 1024]])  # sim
 
         if self.prediction_method in {"NN", "Transformer"}:
             self.N_th = 5  # Number of time history particles
-            pkg_path = get_package_share_directory('mml_guidance')
             self.is_velocity = True
             is_occlusions_weights = True
             self.is_time_weights = True
             input_dim = 3 if self.is_time_weights else 2  # x, y, time
             self.nn_input_size = self.N_th * input_dim
-            logging.getLogger("mml_guidance.ParticleFilter").info(f"Input dim and size: {input_dim}, {self.nn_input_size}")
+            print(f"Input dim and size: {input_dim}, {self.nn_input_size}")
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             prefix_name = "noisy_5_v2_"  # "connected_graph_noisy_5_" or "noisy_5_" for pretrained on road network
             prefix_name = prefix_name + "time_" if self.is_time_weights else prefix_name
@@ -48,6 +50,7 @@ class ParticleFilter:
             prefix_name = (
                 prefix_name + "occlusions_" if is_occlusions_weights else prefix_name
             )
+
             if self.prediction_method == "NN":
                 prefix_name = prefix_name + "SimpleDNN"
                 self.motion_model = SimpleDNN(
@@ -67,24 +70,30 @@ class ParticleFilter:
                     n_layer=1,
                     hidden_dim=20,
                 )
-            try:
-                # Attempt to load the model parameters from the file
-                self.motion_model.load_state_dict(
-                    torch.load(model_file, map_location=self.device)
-                )
-            except FileNotFoundError:
-                    print(f"Error: The file '{model_file}' does not exist. Please make sure to change the directory to point to the correct file.")
+
+            # Load model if path is provided
+            if model_path:
+                try:
+                    self.motion_model.load_state_dict(
+                        torch.load(model_path, map_location=self.device)
+                    )
+                except FileNotFoundError:
+                    print(
+                        f"Error: The file '{model_path}' does not exist. Please make sure to change the directory to point to the correct file."
+                    )
         else:
             self.N_th = 2
 
         # PF
         self.N = num_particles
+        print(f"Number of particles: {self.N}")
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
         self.is_update = False
         self.is_occlusion = False
         self.neff = self.nEff(self.weights)
+
         if self.prediction_method == "Velocity":
             self.Nx = 4  # number of states
             self.vmax = 0.7  # m/s
@@ -98,6 +107,7 @@ class ParticleFilter:
             self.Nx = 2
             self.best_measurement_covariance = np.diag([0.02, 0.01])
             self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
+
         if self.prediction_method == "DMMN":
             inputSize = 2  # number of inputs to NN
             gamma = 0.1  # a learning for online learning
@@ -131,9 +141,10 @@ class ParticleFilter:
                 gamma,
                 k1,
             )
-            model_file = f"/home/basestation/base_ws/src/mml_guidance/mml_guidance/mml_network/models/online_model.pth"
-            # load weights
-            self.motion_model.loadModel(model_file)
+
+            # Load model if path is provided
+            if model_path:
+                self.motion_model.loadModel(model_path)
 
         if self.prediction_method in {"NN", "Transformer"}:
             self.Nx = 2
@@ -174,7 +185,9 @@ class ParticleFilter:
 
         # Particles to be resampled whether we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
-        self.initial_time = clock.now().seconds_nanoseconds()[0] 
+        self.initial_time = (
+            initial_time if initial_time is not None else self.initial_time
+        )
         self.last_time = 0.0
         self.t_since_last_update = 0.0
         self.iteration = 0
@@ -218,18 +231,17 @@ class ParticleFilter:
     def pf_loop(
         self,
         noisy_measurement,
+        t,
         ang_vel=np.array([ANG_VEL]),
         lin_vel=np.array([FWD_VEL]),
     ):
         """Main function of the particle filter where the predict,
         update, resample and estimate steps are called.
         """
-        t = clock.now().seconds_nanoseconds()[0] - self.initial_time
-
         # update measurement history with noisy_measurement
         noisy_measurement = noisy_measurement[:2] if self.Nx > 2 else noisy_measurement
-        self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
-        self.measurement_history[-1, :2] = noisy_measurement[:2]
+        # self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
+        # self.measurement_history[-1, :2] = noisy_measurement[:2]
 
         # Prediction step
         if self.prediction_method in {"NN", "Transformer"}:
@@ -304,13 +316,11 @@ class ParticleFilter:
 
         # estimate mean and variance
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
-        self.update_state_and_dt_buffer(noisy_measurement[:2])
+        self.update_state_and_dt_buffer(noisy_measurement[:2], dt=t - self.last_time)
 
         stuck_threshold = 0.03 if self.prediction_method == "Velocity" else 0.03
         max_time_since_last_update = 12.0
         wm_pos_diff = np.linalg.norm(self.state_history[0][:2] - self.weighted_mean[:2])
-        # print("wm_pos_diff: ", wm_pos_diff)
-        # print("self.t_since_last_update: ", self.t_since_last_update)
         time_condition = (
             np.floor(self.t_since_last_update) % max_time_since_last_update == 0
         ) and self.t_since_last_update > max_time_since_last_update
@@ -321,21 +331,16 @@ class ParticleFilter:
             )
             self.particles = self.uniform_sample()
 
-        # print("PF time: ", clock.now().seconds_nanoseconds()[0] - t - self.initial_time)
-        self.last_time = clock.now().seconds_nanoseconds()[0] - self.initial_time
+        self.last_time = t
 
     def optimize_learned_model_callback(self, event=None):
         """Optimize the neural network model with the particles and weights"""
         filled_elements = np.count_nonzero(self.state_history) // self.Nx
         if not np.all(self.state_history):
-            print(
-                f"Filled elements: {filled_elements} / {self.state_history.shape[0]}"
-            )
+            print(f"Filled elements: {filled_elements} / {self.state_history.shape[0]}")
         # if measurement history buffer is full
-        if (
-            filled_elements > self.N_th + self.max_batch_size * 0.6
-            and (self.prediction_method in {"NN", "Transformer"})
-            # and False
+        if filled_elements > self.N_th + self.max_batch_size * 0.6 and (
+            self.prediction_method in {"NN", "Transformer"}
         ):
             self.optimize_learned_model(filled_elements)
 
@@ -395,8 +400,6 @@ class ParticleFilter:
             )
         )
 
-        # print("shape of next_parts: ", next_parts.shape)
-        # print("next_parts: ", next_parts[0])
         if self.is_velocity:
             next_parts = (
                 particles[-1, :, :2] + next_parts * dt_history[-1]
@@ -430,9 +433,6 @@ class ParticleFilter:
         Input: State of the particles at time k-1
         Output: Predicted (propagated) state of the particles up to time k
         """
-        t = clock.now().seconds_nanoseconds()[0] - self.initial_time
-        dt = t - self.last_time
-
         particles[:-1, :, :] = particles[1:, :, :]  # shift particles in time
         if self.prediction_method == "Unicycle":
             delta_theta = angular_velocity[0] * dt
@@ -537,11 +537,6 @@ class ParticleFilter:
                     weights=weights,
                     axis=0,
                 )
-            ## source: Differential Entropy for a Gaussian in Wikipedia
-            ## https://en.wikipedia.org/wiki/Differential_entropy
-            # H_gauss = (
-            #    np.log((2 * np.pi * np.e) ** (3) * np.linalg.det(np.diag(var))) / 2
-            # )
             return weighted_mean, var
 
     def outside_bounds(self, particles):
@@ -553,11 +548,8 @@ class ParticleFilter:
             | (particles[:, 1] > self.APRILab_dims[1, 1])
         )
 
-    def update_state_and_dt_buffer(self, noisy_measurement):
+    def update_state_and_dt_buffer(self, noisy_measurement, dt):
         """Update the measurement history and the time history"""
-        t = clock.now().seconds_nanoseconds()[0] - self.initial_time
-
-        dt = t - self.last_time
         # pf dt history
         self.dt_history[:-1] = self.dt_history[1:] + dt  # delta time from index i to -1
         self.dt_history[-1] = dt
@@ -578,7 +570,6 @@ class ParticleFilter:
         gain = 1 + (max(height, 1.1) - 1.1) / (
             3.0 - 1.1
         )  # start with 2 (heght=1.8) and decrease to 1 (height=1.1)
-        # print("height: ", height)
         self.measurement_covariance = gain * self.best_measurement_covariance
 
     def convert_state_history_to_training_batches(
@@ -666,15 +657,15 @@ class ParticleFilter:
             online=True,
         )
 
-    def save_model(self):
+    def save_model(self, save_path=None):
         """Save the model to a file"""
-        pkg_path = get_package_share_directory('mml_guidance')
-        model_file = f"{pkg_path}/scripts/mml_network/models/online_model.pth"
+        if save_path is None:
+            save_path = "models/online_model.pth"
+
         if self.prediction_method in {"NN", "Transformer"}:
-            torch.save(self.motion_model.state_dict(), model_file)
-            csv_file = f"{pkg_path}/sim_data/training_data/online_data.csv"
-            if not os.path.exists(csv_file):
-                os.makedirs(os.path.dirname(csv_file), exist_ok=True)
+            torch.save(self.motion_model.state_dict(), save_path)
+            csv_file = save_path.replace(".pth", "_data.csv")
+            os.makedirs(os.path.dirname(csv_file), exist_ok=True)
             filled_elements = np.count_nonzero(self.state_history) // self.Nx
             X_train, y_train = self.convert_state_history_to_training_batches(
                 filled_elements, all_data=True
@@ -690,8 +681,8 @@ class ParticleFilter:
             np.savetxt(csv_file, state_history_flattened, delimiter=",")
             print(f"Data saved to {csv_file}")
         elif self.prediction_method == "DMMN":
-            self.motion_model.saveModel(time=clock.now().seconds_nanoseconds()[0], savePath=model_file)
-        print(f"Model saved to {model_file}")
+            self.motion_model.saveModel(time=time.time(), savePath=save_path)
+        print(f"Model saved to {save_path}")
 
     @staticmethod
     def add_noise(mean, covariance, size=1):
@@ -704,7 +695,6 @@ class ParticleFilter:
                 )
             else:
                 size = mean.shape[0]
-                # print('shape of mean: ', mean.shape)
                 noise = np.random.multivariate_normal(np.zeros(size), covariance)
         else:
             noise = np.random.normal(0, covariance, size)
