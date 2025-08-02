@@ -8,8 +8,9 @@ windows:
       layout: even-vertical 
       panes:
         - topic_check: 
-          - source devel/setup.bash && cd src/mml_guidance
+          - source install/setup.bash && cd src/mml_guidance
         - roslaunch:
-          - source devel/setup.bash && cd src/mml_guidance
+          - source install/setup.bash && cd src/mml_guidance
         - sim_helper:
-          - source devel/setup.bash && roscd sim_helper && python scripts/Master.py
+          - source install/setup.bash && ros2 launch isaacsim run_isaacsim.launch.py gui:=//home/andres/mml_ws/src/mml_guidance/simulation/isaac_mml_env.usd play_sim_on_start:=true
+
