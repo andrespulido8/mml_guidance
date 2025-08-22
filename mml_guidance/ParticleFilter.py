@@ -101,8 +101,8 @@ class ParticleFilter:
             self.process_covariance = np.diag([0.1, 0.1])
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
-            self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
-            self.process_covariance = np.diag([0.05, 0.05, 0.005])
+            self.best_measurement_covariance = np.diag([700., 700., deg2rad(5)])
+            self.process_covariance = np.diag([0.5, 0.5, 0.05])
         elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
             self.best_measurement_covariance = np.diag([0.02, 0.01])
@@ -162,8 +162,7 @@ class ParticleFilter:
 
         self.update_measurement_covariance(height=drone_height)
 
-        self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
-        self.state_history = np.zeros((self.N_th + buffer_size, 2))
+        self.state_history = np.zeros((self.N_th + buffer_size, self.Nx))
         self.dt_history = np.ones(self.N_th) * 0.333
         self.dt_state_history = np.zeros(self.state_history.shape[0])
         self.particles = self.uniform_sample()
@@ -255,7 +254,7 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             estimate_velocity = (
-                noisy_measurement - self.state_history[-1, :]
+                noisy_measurement - self.state_history[-1, :2]
             ) * self.dt_history[-1]
 
             self.particles = self.predict(
@@ -301,13 +300,17 @@ class ParticleFilter:
                             size=(self.N_th, self.N),
                         )
                         # repeat the measurement history to be the same size as the particles
-                        state_history_repeated = np.tile(
-                            self.state_history[-self.N_th :].reshape(
-                                self.N_th, 1, self.Nx
-                            ),
-                            (1, self.N, 1),
-                        )
-                        self.particles = state_history_repeated + noise
+                        filled_elements = np.count_nonzero(self.state_history) // self.Nx
+                        if filled_elements < self.N_th:
+                            self.particles[-1, :, :2] = noisy_measurement + noise[-1, :, :2]
+                        else:
+                            state_history_repeated = np.tile(
+                                self.state_history[-self.N_th :].reshape(
+                                    self.N_th, 1, self.Nx
+                                ),
+                                (1, self.N, 1),
+                            )
+                            self.particles = state_history_repeated + noise
 
                     self.weights = np.ones(self.N) / self.N
                 else:
@@ -515,29 +518,29 @@ class ParticleFilter:
 
     def estimate(self, particles, weights):
         """returns mean and variance of the weighted particles"""
-        if np.sum(weights) > 0.0:
-            weighted_mean = np.average(particles, weights=weights, axis=0)
-            # TODO: change in pf_viz to only use 2 covariance
-            var = np.zeros_like(self.var)
-            var[:2] = np.average(
-                (particles[:, :2] - weighted_mean[:2]) ** 2,
-                weights=weights,
-                axis=0,
+        assert np.sum(weights) > 0.0, "Sum of weights must be greater than zero."
+        weighted_mean = np.average(particles, weights=weights, axis=0)
+        # TODO: change in pf_viz to only use 2 covariance
+        var = np.zeros_like(self.var)
+        var[:2] = np.average(
+            (particles[:, :2] - weighted_mean[:2]) ** 2,
+            weights=weights,
+            axis=0,
+        )
+        if self.prediction_method == "Unicycle":
+            # Component mean in the complex plane to prevent wrong average
+            # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
+            self.yaw_mean = np.arctan2(
+            np.sum(self.weights * np.sin(particles[:, 2])),
+            np.sum(self.weights * np.cos(particles[:, 2])),
             )
-            if self.prediction_method == "Unicycle":
-                # Component mean in the complex plane to prevent wrong average
-                # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
-                self.yaw_mean = np.arctan2(
-                    np.sum(self.weights * np.sin(particles[:, 2])),
-                    np.sum(self.weights * np.cos(particles[:, 2])),
-                )
-                weighted_mean[2] = self.yaw_mean
-                var[2] = np.average(
-                    (particles[:, 2] - weighted_mean[2]) ** 2,
-                    weights=weights,
-                    axis=0,
-                )
-            return weighted_mean, var
+            weighted_mean[2] = self.yaw_mean
+            var[2] = np.average(
+            (particles[:, 2] - weighted_mean[2]) ** 2,
+            weights=weights,
+            axis=0,
+            )
+        return weighted_mean, var
 
     def outside_bounds(self, particles):
         """returns the number of particles outside of the lab boundaries"""
@@ -570,7 +573,9 @@ class ParticleFilter:
         gain = 1 + (max(height, 1.1) - 1.1) / (
             3.0 - 1.1
         )  # start with 2 (heght=1.8) and decrease to 1 (height=1.1)
+        gain = 1.  # Override TODO: remove this line
         self.measurement_covariance = gain * self.best_measurement_covariance
+        self.noise_inv = np.linalg.inv(self.measurement_covariance[:2, :2])
 
     def convert_state_history_to_training_batches(
         self, filled_elements, all_data=False

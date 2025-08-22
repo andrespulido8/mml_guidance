@@ -28,6 +28,7 @@ class Guidance:
         self.guidance_mode = guidance_mode
         self.prediction_method = prediction_method
         self.filter = filter  # particle filter instance
+        self.N = filter.N if filter is not None else 500
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -40,9 +41,9 @@ class Guidance:
         self.initial_time = initial_time if initial_time is not None else 0
 
         # Camera Model
-        self.height = 1.1  # initial height of the quadcopter in meters
+        self.height = 100  # initial height of the quadcopter in meters
         self.CAMERA_ANGLES = np.array(
-            [deg2rad(35), deg2rad(35)]
+            [deg2rad(45), deg2rad(45)]
         )  # camera angle in radians (horizontal, vertical)
         self.update_FOV_dims_and_measurement_cov()
         self.FOV = self.construct_FOV(self.quad_position)
@@ -495,6 +496,10 @@ class Guidance:
             self.linear_velocity = np.array(linear_vel[:2])
         if angular_vel is not None:
             self.angular_velocity = np.array([angular_vel[0]])
+        
+        print("Actual turtle pose:", self.actual_turtle_pose, 
+              "Linear velocity:", self.linear_velocity, 
+              "Angular velocity:", self.angular_velocity)
 
         # Add noise to measurement
         self.noisy_turtle_pose[:2] = self.filter.add_noise(
