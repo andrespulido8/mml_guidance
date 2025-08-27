@@ -6,7 +6,6 @@
     vol. 7, 2023
 """
 
-from geometry_msgs.msg import PoseStamped
 import torch
 import torch.nn as nn
 import torch.optim as optim
