@@ -6,7 +6,6 @@
     vol. 7, 2023
 """
 
-import rospy
 from geometry_msgs.msg import PoseStamped
 import torch
 import torch.nn as nn
@@ -237,7 +236,7 @@ class MotionModel:
     def predict(self, time):
         # if first call to learn, initialize
         if self.lastTime is None:
-            rospy.logerr("need observation to initialize")
+            print("need observation to initialize")
             return
 
         # calculate time difference then update weight and state estimate
@@ -395,8 +394,7 @@ class MotionModel:
                     print("velocityLoss " + str(velocityLoss))
 
                     if math.isnan(velocityLoss.item()):
-                        rospy.logerr("VELOCITY LOSS IS NAN, SHUTTINGDOWN")
-                        rospy.shutdown()
+                        print("VELOCITY LOSS IS NAN, SHUTTINGDOWN")
 
                     self.PhiNetwork.basisOptimizer.zero_grad()
                     velocityLoss.backward()
