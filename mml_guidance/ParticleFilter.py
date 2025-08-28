@@ -101,11 +101,11 @@ class ParticleFilter:
             self.process_covariance = np.diag([0.1, 0.1])
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
-            self.best_measurement_covariance = np.diag([700., 700., deg2rad(5)])
-            self.process_covariance = np.diag([0.5, 0.5, 0.05])
+            self.best_measurement_covariance = np.diag([20., 20., deg2rad(10)])
+            self.process_covariance = np.diag([2., 2., deg2rad(20)])
         elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
-            self.best_measurement_covariance = np.diag([0.02, 0.01])
+            self.best_measurement_covariance = np.diag([0.2, 0.2])
             self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
 
         if self.prediction_method == "DMMN":
@@ -270,6 +270,7 @@ class ParticleFilter:
         # Resampling step
         outbounds = self.outside_bounds(self.particles[-1])
         self.neff = self.nEff(self.weights)
+        print(f"Neff: {self.neff}")
         if outbounds > self.N * 0.8:
             print(
                 f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
@@ -277,10 +278,11 @@ class ParticleFilter:
             self.particles = self.uniform_sample()
         else:
             if (
-                self.neff < self.N * 0.99
+                self.neff < self.N * 0.7
             ):  # nEff is only infinity when something went wrong
-                if (self.neff < self.N * 0.4 or self.neff == self.N) and self.is_update:
+                if (self.neff < self.N * 0.1 or self.neff == self.N) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
+                    print("Resampling from Gaussian around the measurement")
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
                             noisy_measurement,
@@ -299,6 +301,9 @@ class ParticleFilter:
                             self.measurement_covariance,
                             size=(self.N_th, self.N),
                         )
+                        # create a uniform noise of the angle
+                        if self.Nx > 2:
+                            noise[:, :, 2] = np.random.uniform(-np.pi, np.pi, size=(self.N_th, self.N))
                         # repeat the measurement history to be the same size as the particles
                         filled_elements = np.count_nonzero(self.state_history) // self.Nx
                         if filled_elements < self.N_th:

@@ -66,7 +66,7 @@ class Guidance:
 
         # Occlusions
         if occ_centers is not None:
-            occ_centers = [occ_centers[:2], occ_centers[2:]]
+            occ_centers = [occ_centers[i*2:(i+1)*2] for i in range(len(occ_widths))]
         self.occlusions = Occlusions(occ_centers, occ_widths)
 
         if self.guidance_mode == "Lawnmower":
@@ -518,6 +518,7 @@ class Guidance:
                 self.filter.is_update = True
             else:
                 self.filter.is_update = False
+        print("is_update:", self.filter.is_update)
 
     def update_agent_position(self, position):
         """Update quadcopter position from external source (non-ROS)"""
@@ -573,6 +574,8 @@ class Guidance:
 class Occlusions:
     def __init__(self, positions, widths):
         """List of occlusions with helper functions"""
+        print("Occlusions initialized with centers:", positions)
+        print("Occlusions initialized with widths:", widths)
         self.occlusions = [(positions[ii], widths[ii]) for ii in range(len(positions))]
 
     def in_occlusion(self, pos):
