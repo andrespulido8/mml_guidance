@@ -29,7 +29,7 @@ class ParticleFilter:
         deg2rad = lambda deg: np.pi * deg / 180
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
-        self.APRILab_dims = np.array([[0.0, 0.0], [1024, 1024]])  # sim
+        self.APRILab_dims = np.array([[-3.0, -3.0], [3.0, 3.0]])  # sim
 
         if self.prediction_method in {"NN", "Transformer"}:
             self.N_th = 5  # Number of time history particles
@@ -98,15 +98,15 @@ class ParticleFilter:
             self.Nx = 4  # number of states
             self.vmax = 0.7  # m/s
             self.best_measurement_covariance = np.diag([0.01, 0.01])
-            self.process_covariance = np.diag([0.1, 0.1])
+            self.process_covariance = np.diag([0.4, 0.4])
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
-            self.best_measurement_covariance = np.diag([20., 20., deg2rad(10)])
-            self.process_covariance = np.diag([2., 2., deg2rad(20)])
+            self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
+            self.process_covariance = np.diag([0.2, 0.2, deg2rad(5.)])
         elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
-            self.best_measurement_covariance = np.diag([0.2, 0.2])
-            self.process_covariance = np.diag([0.003, 0.003, 0.0003, 0.0003])
+            self.best_measurement_covariance = np.diag([0.01, 0.01])
+            self.process_covariance = np.diag([0.0001, 0.0001, 0.00001, 0.00001])
 
         if self.prediction_method == "DMMN":
             inputSize = 2  # number of inputs to NN
@@ -270,7 +270,6 @@ class ParticleFilter:
         # Resampling step
         outbounds = self.outside_bounds(self.particles[-1])
         self.neff = self.nEff(self.weights)
-        print(f"Neff: {self.neff}")
         if outbounds > self.N * 0.8:
             print(
                 f"{self.outside_bounds(self.particles[-1])} particles outside the lab boundaries. Uniformly resampling."
@@ -282,7 +281,6 @@ class ParticleFilter:
             ):  # nEff is only infinity when something went wrong
                 if (self.neff < self.N * 0.1 or self.neff == self.N) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
-                    print("Resampling from Gaussian around the measurement")
                     if self.prediction_method == "Velocity":
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
                             noisy_measurement,
@@ -507,7 +505,7 @@ class ParticleFilter:
             self.particles[-1, self.resample_index, :] = self.particles[-1, rand_ind, :]
             self.weights[self.resample_index] = self.weights[rand_ind]
             # Roughening. See Bootstrap Filter from Crassidis and Junkins.
-            G = 0.2
+            G = 0.3
             E = np.zeros(self.Nx)
             for ii in range(self.Nx):
                 E[ii] = np.max(self.particles[-1, :, ii]) - np.min(
