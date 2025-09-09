@@ -20,7 +20,6 @@ class ParticleFilter:
         self,
         num_particles=10,
         prediction_method="NN",
-        is_sim=False,
         drone_height=2.0,
         model_path=None,
         initial_time=0.0,

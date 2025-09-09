@@ -15,6 +15,8 @@ class Guidance:
         prediction_method="Transformer",
         occ_centers=[[]],
         occ_widths=[],
+        drone_height=2.0,
+        is_height_constant=True,
         filter: ParticleFilter = None,
         initial_time=None,
     ):
@@ -41,7 +43,8 @@ class Guidance:
         self.initial_time = initial_time if initial_time is not None else 0
 
         # Camera Model
-        self.height = 100  # initial height of the quadcopter in meters
+        self.is_height_constant = True
+        self.height = drone_height  # initial height of the quadcopter in meters
         self.CAMERA_ANGLES = np.array(
             [deg2rad(45), deg2rad(45)]
         )  # camera angle in radians (horizontal, vertical)
@@ -443,15 +446,15 @@ class Guidance:
             self.goal_position = self.actual_turtle_pose[:2]
 
         # set height depending on runtime
-        is_height_constant = False
-        if is_height_constant:
-            self.height = np.clip(self.height, 1.1, 1.8)
+        if self.is_height_constant:
+            self.height = self.height
         else:
             dheight = 0.02
             if self.filter.is_update:
                 self.height -= dheight
             else:
                 self.height += dheight
+            self.height = np.clip(self.height, 1.1, 1.8)
         self.update_FOV_dims_and_measurement_cov()
 
     @staticmethod
@@ -497,9 +500,9 @@ class Guidance:
         if angular_vel is not None:
             self.angular_velocity = np.array([angular_vel[0]])
         
-        print("Actual turtle pose:", self.actual_turtle_pose, 
-              "Linear velocity:", self.linear_velocity, 
-              "Angular velocity:", self.angular_velocity)
+        # print("Actual turtle pose:", self.actual_turtle_pose, 
+        #       "Linear velocity:", self.linear_velocity, 
+        #       "Angular velocity:", self.angular_velocity)
 
         # Add noise to measurement
         self.noisy_turtle_pose[:2] = self.filter.add_noise(
@@ -518,7 +521,6 @@ class Guidance:
                 self.filter.is_update = True
             else:
                 self.filter.is_update = False
-        print("is_update:", self.filter.is_update)
 
     def update_agent_position(self, position):
         """Update quadcopter position from external source (non-ROS)"""
