@@ -6,6 +6,7 @@ import scipy.stats as stats
 from .lawnmower import LawnmowerPath
 from .kf import KalmanFilter
 from .ParticleFilter import ParticleFilter
+from .gnn_associator import KalmanFilterGNNAssociator
 
 
 class Guidance:
@@ -27,7 +28,10 @@ class Guidance:
             prediction_method,
         )
         self.init_finished = False
+        self.guidance_modes_set = {"Information", "WeightedMean", "Lawnmower", "Estimator", "MultiKFInfo"}
+        assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
         self.guidance_mode = guidance_mode
+        self.prediction_method = {"NN", "Transformer", "Unicycle", "Velocity", "KF", "MultiKF"}
         self.prediction_method = prediction_method
         self.filter = filter  # particle filter instance
         self.N = filter.N if filter is not None else 500
@@ -43,7 +47,7 @@ class Guidance:
         self.initial_time = initial_time if initial_time is not None else 0
 
         # Camera Model
-        self.is_height_constant = True
+        self.is_height_constant = is_height_constant
         self.height = drone_height  # initial height of the quadcopter in meters
         self.CAMERA_ANGLES = np.array(
             [deg2rad(45), deg2rad(45)]
@@ -97,6 +101,10 @@ class Guidance:
                 Q=self.filter.process_covariance,
                 H=H,
             )
+
+        if self.prediction_method == "MultiKF":
+            # Initialize multi-target tracker
+            self.multi_filter = KalmanFilterGNNAssociator(process_noise=0.15, measurement_noise=0.8)
 
         self.init_finished = True
 
@@ -193,7 +201,7 @@ class Guidance:
         likelihood = self.filter.likelihood(future_parts[-1], z_hat)
         # TODO: implement N_m sampled measurements (double loop)
         for jj in range(self.N_s):
-            k_fov = self.construct_FOV(z_hat[jj])
+            k_fov = self.construct_FOV(z_hat[jj])  # assuming we are on top of measurement
             # checking for measurement outside of fov or in occlusion
             if self.is_in_FOV(z_hat[jj], k_fov) and not self.occlusions.in_occlusion(
                 z_hat[jj]
@@ -223,6 +231,55 @@ class Guidance:
         action_index = np.argmax(EER)
         self.EER_range = np.array([np.min(EER), np.mean(EER), np.max(EER)])
         self.eer_particle = self.sampled_index[action_index]
+
+    def info_driven_guidance_multi(self, future_estimates):
+        """Compute the current entropy and future entropy using future gaussian estimates"""
+        assert len(future_estimates) > 0, "No future estimates provided for info-driven guidance"
+        if len(future_estimates) == 1:
+                      # Information Gain
+            # EER[jj] = self.Hp_t - Hp_k[jj] * likelihood[jj]  # remo  print("Only one future estimate, following it")
+            return self.multi_filter.get_track_states(tracks=future_estimates)[0][:2]
+        Hp_k = [0.0] * len(future_estimates)  # partial entropy
+        for ii, estimate in enumerate(future_estimates):
+            # possible future measurement
+            estimate_pos = self.multi_filter.get_track_states(tracks=[estimate])[0][:2]
+            z_hat = self.filter.add_noise(
+                estimate_pos, self.filter.measurement_covariance[:2, :2],
+            )
+
+            if self.is_in_FOV(z_hat, self.construct_FOV(estimate_pos)) and not self.occlusions.in_occlusion(z_hat):
+                # posterior tracks after update with possible measurement
+                future_posterior_tracks = self.multi_filter.process_detections([z_hat], confidences=None, future_tracks=future_estimates)
+            else:
+                future_posterior_tracks = future_estimates
+            if len(future_posterior_tracks) > 0:
+                track_states = self.multi_filter.get_track_states(tracks=future_posterior_tracks)
+                track_covs = self.multi_filter.get_track_covariances(tracks=future_posterior_tracks)
+                for jj in range(len(track_states)):
+                    Hp_k[ii] += self.entropy_gaussian(track_states[jj], track_covs[jj])
+            else:
+                Hp_k[ii] = 1e6  # very high entropy if no tracks
+        
+        # choose the estimate that minimizes the entropy
+        eer_track = np.argmin(Hp_k)  # I do not think I need to multiply by likelihood because it is constant wrt the action
+        print("entropies:", [f"{float(e):.3f}" for e in Hp_k])
+        print(f"track: {eer_track}")
+        for ii, estimate in enumerate(future_estimates):
+            if ii == eer_track:
+                return self.multi_filter.get_track_states(tracks=[estimate])[0][:2]
+            
+
+    def entropy_gaussian(self, mean, cov):
+        """Compute the entropy of a gaussian distribution
+        H = 0.5 * ln((2*pi*e)^n * |Sigma|)
+        where n is the dimension of the gaussian and Sigma is the covariance matrix
+        Output: entropy (float)"""
+        n = mean.shape[0]
+        det_cov = np.linalg.det(cov)
+        if det_cov <= 0:
+            det_cov = 1e-6  # numerical stability
+        entropy = 0.5 * np.log((2 * np.pi * np.e) ** n * det_cov)
+        return entropy
 
     def entropy_particle(
         self,
@@ -444,6 +501,22 @@ class Guidance:
             self.goal_position = mower_position
         elif self.guidance_mode == "Estimator":
             self.goal_position = self.actual_turtle_pose[:2]
+        elif self.guidance_mode == "MultiKFInfo":
+            future_estimate = self.multi_filter.tracks.copy()
+            perform_information = True
+            # if len(future_estimate) > 0:
+                # print("states of current tracks: ", np.array(self.multi_filter.get_track_states())[:, :2]) 
+            for k in range(self.K):
+                future_estimate = self.multi_filter.predict_tracks(future_estimate, steps_ahead=k+1)
+                # print("states of predicted tracks: ", np.array(self.multi_filter.get_track_states(tracks=future_estimate))[:, :2])
+                if len(future_estimate) <= 0:
+                    # random walk
+                    self.goal_position = self.goal_position + np.random.uniform(-0.2, 0.2, size=(2,))
+                    perform_information = False
+                    break
+            if perform_information:
+                self.goal_position = self.info_driven_guidance_multi(future_estimate)
+
 
         # set height depending on runtime
         if self.is_height_constant:

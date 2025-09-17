@@ -26,6 +26,13 @@ class ParticleFilter:
     ):
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
+        if prediction_method == "MultiKF":
+            prediction_method = "Unicycle"  # temporary fix
+            print("MultiKF not implemented in ParticleFilter, using Unicycle instead")
+        if prediction_method not in {"NN", "Transformer", "Unicycle", "Velocity", "KF", "DMMN"}:
+            raise ValueError(
+                f"Invalid prediction method: {prediction_method}. Choose from 'NN', 'Transformer', 'Unicycle', 'Velocity', 'KF', or 'DMMN'."
+            )
         self.prediction_method = prediction_method
         # boundary of the lab [[x_min, y_min], [x_max, y_,max]] [m]
         self.APRILab_dims = np.array([[-3.0, -3.0], [3.0, 3.0]])  # sim
