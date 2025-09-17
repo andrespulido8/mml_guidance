@@ -26,9 +26,9 @@ class ParticleFilter:
     ):
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
-        if prediction_method == "MultiKF":
+        if prediction_method == "MultiKF" or prediction_method == "MultiPF":
             prediction_method = "Unicycle"  # temporary fix
-            print("MultiKF not implemented in ParticleFilter, using Unicycle instead")
+            print("MultiKF and MultiPF not implemented in ParticleFilter, using Unicycle instead")
         if prediction_method not in {"NN", "Transformer", "Unicycle", "Velocity", "KF", "DMMN"}:
             raise ValueError(
                 f"Invalid prediction method: {prediction_method}. Choose from 'NN', 'Transformer', 'Unicycle', 'Velocity', 'KF', or 'DMMN'."
@@ -92,7 +92,7 @@ class ParticleFilter:
 
         # PF
         self.N = num_particles
-        print(f"Number of particles: {self.N}")
+        print(f"Initializing PF with Number of particles: {self.N}")
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
@@ -101,14 +101,18 @@ class ParticleFilter:
         self.neff = self.nEff(self.weights)
 
         if self.prediction_method == "Velocity":
-            self.Nx = 4  # number of states
-            self.vmax = 0.7  # m/s
-            self.best_measurement_covariance = np.diag([0.01, 0.01])
-            self.process_covariance = np.diag([0.4, 0.4])
+            self.Nx = 4  # number of states [x, y, vx, vy]
+            self.vmax = 0.7  # m/s maximum velocity
+            self.best_measurement_covariance = np.diag([0.005, 0.005])
+            # Process noise parameters - improved from reference code
+            self.proc_pos_std = 0.1  # m per sqrt(s) - position process noise
+            self.proc_vel_std = 1.   # m/s per sqrt(s) - velocity process noise
+            self.process_covariance = np.diag([self.proc_pos_std**2, self.proc_pos_std**2, 
+                                             self.proc_vel_std**2, self.proc_vel_std**2])
         elif self.prediction_method == "Unicycle":
             self.Nx = 3
             self.best_measurement_covariance = np.diag([0.01, 0.01, deg2rad(5)])
-            self.process_covariance = np.diag([0.2, 0.2, deg2rad(5.)])
+            self.process_covariance = np.diag([0.8, 0.8, deg2rad(5.)])
         elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
             self.best_measurement_covariance = np.diag([0.01, 0.01])
@@ -288,9 +292,10 @@ class ParticleFilter:
                 if (self.neff < self.N * 0.1 or self.neff == self.N) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
+                        # Improved resampling for velocity method
                         self.particles[-1, :, :2] = np.random.multivariate_normal(
-                            noisy_measurement,
-                            self.measurement_covariance,
+                            noisy_measurement[:2],
+                            self.measurement_covariance[:2, :2],
                             self.N,
                         )
                         # backwards difference for velocities
@@ -324,7 +329,12 @@ class ParticleFilter:
                     self.weights = np.ones(self.N) / self.N
                 else:
                     # some are good but some are bad, resample
-                    self.multinomial_resample()
+                    # Use improved systematic resampling for Velocity method
+                    if self.prediction_method == "Velocity":
+                        # self.systematic_resample()
+                        self.systematic_resample()
+                    else:
+                        self.multinomial_resample()
 
         # estimate mean and variance
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
@@ -480,16 +490,54 @@ class ParticleFilter:
                 ).T
             )
         elif self.prediction_method == "Velocity":
-            delta_distance = particles[-1, :, 2:] * dt + particles[
-                -1, :, 2:
-            ] * dt * self.add_noise(
-                np.array([0, 0]), self.process_covariance, size=particles.shape[1]
+            dt = max(dt, 1e-6)  # Avoid division by zero
+            sdt = dt ** 0.5  # Square root of time for noise scaling
+            
+            # Position update: x = x + vx*dt + noise
+            pos_noise = self.add_noise(
+                np.array([0, 0]), 
+                np.diag([self.proc_pos_std**2, self.proc_pos_std**2]) * dt,
+                size=particles.shape[1]
             )
             particles[-1, :, :2] = (
-                particles[-2, :, :2] + delta_distance * particles[-1, :, :2]
+                particles[-2, :, :2] + 
+                particles[-1, :, 2:4] * dt + 
+                pos_noise
             )
+            
+            # Velocity update: vx = vx + noise
+            vel_noise = self.add_noise(
+                np.array([0, 0]), 
+                np.diag([self.proc_vel_std**2, self.proc_vel_std**2]) * dt,
+                size=particles.shape[1]
+            )
+            particles[-1, :, 2:4] = particles[-1, :, 2:4] + vel_noise
+            
+            # Velocity bounds to prevent unrealistic velocities
+            particles[-1, :, 2:4] = np.clip(particles[-1, :, 2:4], -self.vmax, self.vmax)
 
         return particles
+
+    def systematic_resample(self):
+        """Improved systematic resampling algorithm - more efficient than multinomial.
+        Based on the reference implementation for better performance.
+        """
+        N = self.N
+        # Generate systematic samples
+        positions = (np.random.random() + np.arange(N)) / N
+        
+        # Compute cumulative sum
+        cumsum = np.cumsum(self.weights)
+        cumsum[-1] = 1.0  # Ensure last value is exactly 1.0
+        
+        # Find indices
+        indices = np.searchsorted(cumsum, positions)
+        
+        # Resample particles
+        self.particles = self.particles[:, indices, :]
+        
+        # Reset weights to uniform
+        self.weights.fill(1.0 / N)
 
     def multinomial_resample(self):
         """Uses the multinomial resampling algorithm to update the belief in the system state.

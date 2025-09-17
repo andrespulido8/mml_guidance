@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import time
+import copy
 import scipy.stats as stats
 from .lawnmower import LawnmowerPath
 from .kf import KalmanFilter
 from .ParticleFilter import ParticleFilter
 from .gnn_associator import KalmanFilterGNNAssociator
+from .particle_filter_gnn_associator import ParticleFilterGNNAssociator
 
 
 class Guidance:
@@ -28,10 +29,10 @@ class Guidance:
             prediction_method,
         )
         self.init_finished = False
-        self.guidance_modes_set = {"Information", "WeightedMean", "Lawnmower", "Estimator", "MultiKFInfo"}
+        self.guidance_modes_set = {"Information", "WeightedMean", "Lawnmower", "Estimator", "MultiKFInfo", "MultiPFInfo"}
         assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
         self.guidance_mode = guidance_mode
-        self.prediction_method = {"NN", "Transformer", "Unicycle", "Velocity", "KF", "MultiKF"}
+        self.prediction_method = {"NN", "Transformer", "Unicycle", "Velocity", "KF", "MultiKF", "MultiPF"}
         self.prediction_method = prediction_method
         self.filter = filter  # particle filter instance
         self.N = filter.N if filter is not None else 500
@@ -105,6 +106,15 @@ class Guidance:
         if self.prediction_method == "MultiKF":
             # Initialize multi-target tracker
             self.multi_filter = KalmanFilterGNNAssociator(process_noise=0.15, measurement_noise=0.8)
+
+        if self.prediction_method == "MultiPF":
+            # Initialize multi-target particle filter tracker
+            self.multi_filter = ParticleFilterGNNAssociator(
+                num_particles=100, 
+                prediction_method="Unicycle",  
+                max_association_distance=3.0, 
+                measurement_noise=0.8
+            )
 
         self.init_finished = True
 
@@ -267,6 +277,61 @@ class Guidance:
         for ii, estimate in enumerate(future_estimates):
             if ii == eer_track:
                 return self.multi_filter.get_track_states(tracks=[estimate])[0][:2]
+
+    def info_driven_guidance_multi_pf(self, future_tracks):
+        """Compute the current entropy and future entropy using future particle filter tracks"""
+        assert len(future_tracks) > 0, "No future tracks provided for info-driven guidance"
+        if len(future_tracks) == 1:
+            # Only one track, follow it
+            return future_tracks[0].get_state()[:2]
+        
+        Hp_k = [0.0] * len(future_tracks)  # partial entropy
+        for ii, track in enumerate(future_tracks):
+            # possible future measurement
+            track_state = track.get_state()
+            estimate_pos = track_state[:2]
+            z_hat = self.filter.add_noise(
+                estimate_pos, self.filter.measurement_covariance[:2, :2],
+            )
+
+            if self.is_in_FOV(z_hat, self.construct_FOV(estimate_pos)) and not self.occlusions.in_occlusion(z_hat):
+                # Simulate update with possible measurement
+                # Create a copy of the track for future prediction
+                future_track_copy = copy.deepcopy(track)
+                future_track_copy.update(z_hat, confidence=1.0)
+                
+                # Compute entropy based on particle spread after update
+                particles = future_track_copy.pf.particles[-1, :, :2]
+                weights = future_track_copy.pf.weights
+                
+                # Weighted covariance
+                mean = np.average(particles, weights=weights, axis=0)
+                diff = particles - mean
+                cov = np.average(diff[:, :, np.newaxis] * diff[:, np.newaxis, :], 
+                               weights=weights, axis=0)
+                
+                # Entropy = 0.5 * log((2*pi*e)^n * |Sigma|)
+                det_cov = np.linalg.det(cov + 1e-6 * np.eye(2))
+                Hp_k[ii] = 0.5 * np.log((2 * np.pi * np.e) ** 2 * max(det_cov, 1e-6))
+            else:
+                # No measurement update, use current entropy
+                particles = track.pf.particles[-1, :, :2]
+                weights = track.pf.weights
+                
+                mean = np.average(particles, weights=weights, axis=0)
+                diff = particles - mean
+                cov = np.average(diff[:, :, np.newaxis] * diff[:, np.newaxis, :], 
+                               weights=weights, axis=0)
+                
+                det_cov = np.linalg.det(cov + 1e-6 * np.eye(2))
+                Hp_k[ii] = 0.5 * np.log((2 * np.pi * np.e) ** 2 * max(det_cov, 1e-6))
+        
+        # Choose the track that minimizes the entropy
+        eer_track = np.argmin(Hp_k)
+        print("particle filter entropies:", [f"{float(e):.3f}" for e in Hp_k])
+        print(f"selected track: {eer_track}")
+        
+        return future_tracks[eer_track].get_state()[:2]
             
 
     def entropy_gaussian(self, mean, cov):
@@ -516,6 +581,26 @@ class Guidance:
                     break
             if perform_information:
                 self.goal_position = self.info_driven_guidance_multi(future_estimate)
+        elif self.guidance_mode == "MultiPFInfo":
+            future_tracks = copy.deepcopy(self.multi_filter.tracks)
+            perform_information = True
+            # Predict tracks forward for K time steps
+            for k in range(self.K):
+                if len(future_tracks) <= 0:
+                    # random walk if no tracks
+                    self.goal_position = self.goal_position + np.random.uniform(-0.2, 0.2, size=(2,))
+                    perform_information = False
+                    break
+                # Predict each track forward
+                dt = 0.33  # Time step
+                for track in future_tracks:
+                    track.predict(dt, 
+                                angular_velocity=self.angular_velocity,
+                                linear_velocity=self.linear_velocity)
+            
+            if perform_information:
+                # Use particle filter information-driven guidance
+                self.goal_position = self.info_driven_guidance_multi_pf(future_tracks)
 
 
         # set height depending on runtime
@@ -644,6 +729,35 @@ class Guidance:
                     self.kf.t_since_last_update = 0.0
                     self.kf.X = np.array([0.0, 0.0, 0.05, 0.0])
             self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
+        elif self.prediction_method in {"MultiKF", "MultiPF"}:
+            # Multi-target tracking
+            dt = t - getattr(self, 'last_multi_time', 0.0)
+            self.last_multi_time = t
+            
+            if self.filter.is_update:
+                # Process the measurement
+                detections = [self.noisy_turtle_pose[:2]]
+                confidences = [1.0]
+                self.multi_filter.process_detections(detections, confidences, dt=dt,
+                                                   angular_velocity=self.angular_velocity,
+                                                   linear_velocity=self.linear_velocity)
+            else:
+                # Predict without measurements
+                if self.prediction_method == "MultiPF":
+                    self.multi_filter.predict_tracks(dt=dt,
+                                                   angular_velocity=self.angular_velocity,
+                                                   linear_velocity=self.linear_velocity)
+                else:  # MultiKF
+                    self.multi_filter.predict_tracks(dt=dt)
+            
+            # Update weighted mean from tracks
+            track_states = self.multi_filter.get_track_states(confirmed_only=True)
+            if len(track_states) > 0:
+                # Use the first confirmed track as the weighted mean
+                self.filter.weighted_mean = np.array(track_states[0][:2])
+            else:
+                # Fallback to current turtle pose
+                self.filter.weighted_mean = self.actual_turtle_pose[:2]
 
 
 class Occlusions:
