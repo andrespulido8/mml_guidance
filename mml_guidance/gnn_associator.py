@@ -70,7 +70,7 @@ class KalmanFilterGNNAssociator:
         else:
             self.current_time = datetime.now().replace(microsecond=0)
 
-    def predict_tracks(self, tracks=None, steps_ahead=1):
+    def predict_tracks(self, tracks=None, steps_ahead=1, **kwargs):
         """
         Perform prediction step for all tracks without measurements.
         This can be called when no new detections are available.
@@ -104,7 +104,7 @@ class KalmanFilterGNNAssociator:
         else:
             return tracks
 
-    def process_detections(self, detections, confidences=None, future_tracks=None):
+    def process_detections(self, detections, confidences=None, future_tracks=None, **kwargs):
         """
         Process new detections and update tracks.
         
@@ -117,7 +117,7 @@ class KalmanFilterGNNAssociator:
             if not future_tracks:
                 self.predict_tracks()
             else:
-                future_tracks = self.predict_tracks(tracks=future_tracks)
+                future_tracks = self.predict_tracks(tracks=future_tracks, **kwargs)
             return
             
         # Convert detections to numpy array if needed

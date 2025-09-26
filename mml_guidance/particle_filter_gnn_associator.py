@@ -17,6 +17,7 @@ class ParticleFilterTrack:
         self.age = 0  # Number of time steps since creation
         self.hits = 1  # Number of successful updates
         self.missed_detections = 0
+        self.is_bad_weights = False 
         
         # Initialize particle filter for this track
         self.pf = ParticleFilter(
@@ -34,16 +35,16 @@ class ParticleFilterTrack:
                 noise = np.random.multivariate_normal([0, 0], init_cov)
                 self.pf.particles[-1, i, :2] = initial_detection[:2] + noise
         
-        self.state_history = []
-        self.covariance_history = []
         self._update_state_estimates()
 
     def _update_state_estimates(self):
         """Update the state estimate from particle filter"""
         # Get weighted mean and covariance
-        mean, var = self.pf.estimate(self.pf.particles[-1], self.pf.weights)
-        self.state_history.append(mean.copy())
-        self.covariance_history.append(np.diag(var))
+        if np.sum(self.pf.weights) == 0:
+            self.is_bad_weights = True
+            return
+        self.weighted_mean, var = self.pf.estimate(self.pf.particles[-1], self.pf.weights)
+        self.covariance = np.diag(var)
 
     def predict(self, dt, **kwargs):
         """Perform prediction step"""
@@ -99,6 +100,8 @@ class ParticleFilterTrack:
         self.pf.neff = self.pf.nEff(self.pf.weights)
         if self.pf.neff < self.pf.N * 0.7:
             self.pf.multinomial_resample()
+        if self.pf.neff < self.pf.N * 0.05:
+            self.is_bad_weights = True
         
         # Restore original measurement covariance
         self.pf.measurement_covariance = original_cov
@@ -107,46 +110,6 @@ class ParticleFilterTrack:
         self.hits += 1
         self.missed_detections = 0
         self._update_state_estimates()
-
-    def get_state(self):
-        """Get current state estimate [x, y, vx, vy]"""
-        if len(self.state_history) == 0:
-            return np.zeros(4)
-        
-        current_state = self.state_history[-1]
-        if len(current_state) == 2:
-            # Position only, estimate velocity from history
-            if len(self.state_history) >= 2:
-                dt = 0.1  # Assume 0.1s time step
-                velocity = (self.state_history[-1][:2] - self.state_history[-2][:2]) / dt
-                return np.array([current_state[0], current_state[1], velocity[0], velocity[1]])
-            else:
-                return np.array([current_state[0], current_state[1], 0.0, 0.0])
-        elif len(current_state) == 3:
-            # Position + heading, estimate velocity
-            if len(self.state_history) >= 2:
-                dt = 0.1
-                velocity = (self.state_history[-1][:2] - self.state_history[-2][:2]) / dt
-                return np.array([current_state[0], current_state[1], velocity[0], velocity[1]])
-            else:
-                return np.array([current_state[0], current_state[1], 0.0, 0.0])
-        else:
-            # Full state
-            return current_state[:4]
-
-    def get_covariance(self):
-        """Get current covariance estimate"""
-        if len(self.covariance_history) == 0:
-            return np.eye(4) * 10.0  # Large uncertainty
-        
-        current_cov = self.covariance_history[-1]
-        if current_cov.shape[0] == 2:
-            # Expand to 4x4 for position and velocity
-            full_cov = np.eye(4) * 0.1
-            full_cov[:2, :2] = current_cov
-            return full_cov
-        else:
-            return current_cov
 
     def get_likelihood(self, detection):
         """Get likelihood of detection given current track state"""
@@ -189,7 +152,7 @@ class SimpleGNNAssociator:
         cost_matrix = np.full((len(tracks), len(detections)), np.inf)
         
         for i, track in enumerate(tracks):
-            track_state = track.get_state()[:2]  # Get position
+            track_state = track.weighted_mean[:2]  # Get position
             for j, detection in enumerate(detections):
                 distance = np.linalg.norm(track_state - detection[:2])
                 if distance <= self.max_association_distance:
@@ -228,7 +191,7 @@ class ParticleFilterGNNAssociator:
     This is the particle filter equivalent of KalmanFilterGNNAssociator.
     """
     def __init__(self, num_particles=100, prediction_method="Velocity", 
-                 max_association_distance=3.0, max_missed_detections=7,
+                 max_association_distance=3.0, max_missed_detections=20,
                  min_hits_for_confirmation=3, measurement_noise=0.8, **pf_kwargs):
         """
         Initialize the multi-target particle filter tracker.
@@ -277,8 +240,7 @@ class ParticleFilterGNNAssociator:
         for track in self.tracks:
             track.predict(dt, **kwargs)
 
-    def process_detections(self, detections, confidences=None, dt=0.1, 
-                          linear_velocities=None, angular_velocities=None, **kwargs):
+    def process_detections(self, detections, confidences=None, dt=0.1, **kwargs):
         """
         Process new detections and update tracks.
         
@@ -286,9 +248,7 @@ class ParticleFilterGNNAssociator:
             detections: List of [x, y] positions or numpy array of shape (N, 2)
             confidences: List of confidence values (0-1) for each detection, optional
             dt: Time step since last update
-            linear_velocities: List of [vx, vy] velocities for each detection, optional
-            angular_velocities: List of angular velocities for each detection, optional
-            **kwargs: Additional arguments for prediction
+            **kwargs: Additional arguments for prediction (e.g., velocities)
         """
         # Convert detections to numpy array if needed
         if isinstance(detections, list) and len(detections) > 0:
@@ -300,43 +260,16 @@ class ParticleFilterGNNAssociator:
         if confidences is None:
             confidences = [1.0] * len(detections)
         
-        # First predict all tracks forward with default parameters
-        if self.prediction_method != "Unicycle" or True:
-            self.predict_tracks(dt, **kwargs)
+        # Predict all tracks forward
+        self.predict_tracks(dt, **kwargs)
         
         # Data association
         associations, unassociated_tracks, unassociated_detections = \
             self.associator.associate(self.tracks, detections)
         
-        # For unicycle model and when we have velocity information,
-        # perform a second prediction with correct velocities for associated tracks
-        if (self.prediction_method == "Unicycle" and 
-            linear_velocities is not None and 
-            angular_velocities is not None):
-            
-            for track_idx, det_idx in associations:
-                if det_idx < len(linear_velocities) and det_idx < len(angular_velocities):
-                    # Re-predict this track with the correct velocity
-                    track = self.tracks[track_idx]
-                    
-                    # Restore particles to previous state (before prediction)
-                    if len(track.pf.particles) > 1:
-                        track.pf.particles[-1] = track.pf.particles[-2].copy()
-                    
-                    # Predict with correct velocity
-                    track_kwargs = kwargs.copy()
-                    track_kwargs['linear_velocity'] = np.array(linear_velocities[det_idx])
-                    track_kwargs['angular_velocity'] = np.array([angular_velocities[det_idx]])
-                    track.predict(dt, **track_kwargs)
-        
         # Update associated tracks
         for track_idx, det_idx in associations:
             self.tracks[track_idx].update(detections[det_idx], confidences[det_idx])
-        
-        # Handle unassociated tracks (increment missed detections)
-        for track_idx in unassociated_tracks:
-            # Missed detection already incremented in predict step
-            pass
         
         # Create new tracks from unassociated detections
         for det_idx in unassociated_detections:
@@ -364,14 +297,22 @@ class ParticleFilterGNNAssociator:
         for track in self.tracks:
             # Delete if too many missed detections
             if track.missed_detections > self.max_missed_detections:
+                print(f"Deleted id: {track.id} due to missed detections > {self.max_missed_detections}")
+                continue
+            if track.is_bad_weights:
+                print(f"Deleted id: {track.id} due to bad weights")
+                continue
+            outbounds = track.pf.outside_bounds(track.pf.particles[-1])
+            if outbounds > track.pf.N* 0.8:
+                print(f"Deleted id: {track.id} due to {outbounds} particles being out of bounds")
                 continue
             # Keep confirmed tracks or tentative tracks that might still be good
             tracks_to_keep.append(track)
         
         deleted_count = len(self.tracks) - len(tracks_to_keep)
-        if deleted_count > 0:
-            print(f"Deleted {deleted_count} tracks due to missed detections > {self.max_missed_detections}")
-        
+        # if deleted_count > 0:
+        #     print(f"Deleted {deleted_count} tracks")
+
         self.tracks = tracks_to_keep
 
     def get_confirmed_tracks(self):
@@ -381,16 +322,16 @@ class ParticleFilterGNNAssociator:
 
     def get_track_states(self, confirmed_only=True):
         """
-        Get current track states as a list of [x, y, vx, vy] arrays.
+        Get current track states as a list of state arrays.
         
         Args:
             confirmed_only: If True, only return confirmed tracks
             
         Returns:
-            List of numpy arrays, each containing [x, y, vx, vy] for a track
+            List of numpy arrays, each containing [x, y] for a track
         """
         tracks_to_use = self.get_confirmed_tracks() if confirmed_only else self.tracks
-        return [track.get_state() for track in tracks_to_use]
+        return [track.weighted_mean for track in tracks_to_use]
 
     def get_track_covariances(self, confirmed_only=True):
         """
@@ -403,7 +344,7 @@ class ParticleFilterGNNAssociator:
             List of numpy arrays, each containing the covariance matrix for a track
         """
         tracks_to_use = self.get_confirmed_tracks() if confirmed_only else self.tracks
-        return [track.get_covariance() for track in tracks_to_use]
+        return [track.covariance for track in tracks_to_use]
 
     def get_track_particles(self, confirmed_only=True):
         """
@@ -416,7 +357,7 @@ class ParticleFilterGNNAssociator:
             List of particle arrays for each track
         """
         tracks_to_use = self.get_confirmed_tracks() if confirmed_only else self.tracks
-        return [track.pf.particles[-1] for track in tracks_to_use]
+        return [track.pf.particles for track in tracks_to_use]
 
     def get_track_weights(self, confirmed_only=True):
         """
@@ -454,8 +395,8 @@ class ParticleFilterGNNAssociator:
                 future_track.predict(dt, **kwargs)
             
             future_tracks.append(future_track)
-        
-        return [track.get_state() for track in future_tracks]
+
+        return [track.weighted_mean for track in future_tracks]
 
     def get_entropy_estimates(self):
         """

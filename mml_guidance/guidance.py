@@ -102,16 +102,14 @@ class Guidance:
                 Q=self.filter.process_covariance,
                 H=H,
             )
-
-        if self.prediction_method == "MultiKF":
+        elif self.prediction_method == "MultiKF":
             # Initialize multi-target tracker
             self.multi_filter = KalmanFilterGNNAssociator(process_noise=0.15, measurement_noise=0.8)
-
-        if self.prediction_method == "MultiPF":
+        elif self.prediction_method == "MultiPF":
             # Initialize multi-target particle filter tracker
             self.multi_filter = ParticleFilterGNNAssociator(
                 num_particles=100, 
-                prediction_method="Unicycle",  
+                prediction_method="Velocity",
                 max_association_distance=3.0, 
                 measurement_noise=0.8
             )
@@ -685,8 +683,11 @@ class Guidance:
         self.quad_position = np.array(position[:2])
         self.FOV = self.construct_FOV(self.quad_position)
 
-    def guidance_pf(self, t):
-        """Runs the particle (or Kalman) filter loop based on the estimation method"""
+    def guidance_filter_loop(self, t, detections=[], lin_ang_vels=[]):
+        """Runs the filter loop based on the prediction method"""
+        if self.guidance_mode == "Information":
+            self.current_entropy()
+
         # Select to resample all particles if there is a measurement
         if not self.filter.is_update:
             self.filter.resample_index = np.where(
@@ -731,34 +732,29 @@ class Guidance:
             self.filter.weighted_mean = np.array([self.kf.X[0], self.kf.X[1]])
         elif self.prediction_method in {"MultiKF", "MultiPF"}:
             # Multi-target tracking
+            self.multi_filter.update_time(t)  # Update tracker time
             dt = t - getattr(self, 'last_multi_time', 0.0)
             self.last_multi_time = t
             
-            if self.filter.is_update:
+            if len(detections) > 0:
                 # Process the measurement
-                detections = [self.noisy_turtle_pose[:2]]
-                confidences = [1.0]
+                confidences = [1.0] * len(detections)
                 self.multi_filter.process_detections(detections, confidences, dt=dt,
-                                                   angular_velocity=self.angular_velocity,
-                                                   linear_velocity=self.linear_velocity)
+                                                   lin_ang_vels=lin_ang_vels)
             else:
                 # Predict without measurements
-                if self.prediction_method == "MultiPF":
-                    self.multi_filter.predict_tracks(dt=dt,
-                                                   angular_velocity=self.angular_velocity,
-                                                   linear_velocity=self.linear_velocity)
-                else:  # MultiKF
-                    self.multi_filter.predict_tracks(dt=dt)
-            
-            # Update weighted mean from tracks
-            track_states = self.multi_filter.get_track_states(confirmed_only=True)
-            if len(track_states) > 0:
-                # Use the first confirmed track as the weighted mean
-                self.filter.weighted_mean = np.array(track_states[0][:2])
-            else:
-                # Fallback to current turtle pose
-                self.filter.weighted_mean = self.actual_turtle_pose[:2]
+                self.multi_filter.predict_tracks(dt=dt, lin_ang_vels=lin_ang_vels)
 
+        # Information-driven guidance
+        if self.guidance_mode in {"Information", "MultiKFInfo", "MultiPFInfo"}:
+            future_parts = np.copy(self.sampled_particles)
+            for k in range(self.K):  # propagate k steps in the future
+                future_parts = self.propagate_particles(
+                    future_parts,
+                    self.K,
+                    self.N_s,
+                )
+            self.information_driven_guidance(future_parts)
 
 class Occlusions:
     def __init__(self, positions, widths):

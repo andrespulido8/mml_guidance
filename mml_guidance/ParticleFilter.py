@@ -11,10 +11,6 @@ from .mml_network.simple_dnn import SimpleDNN
 from .mml_network.scratch_transformer import ScratchTransformer
 from .mml_network.train import train
 
-FWD_VEL = 0.0
-ANG_VEL = 0.0
-
-
 class ParticleFilter:
     def __init__(
         self,
@@ -92,7 +88,6 @@ class ParticleFilter:
 
         # PF
         self.N = num_particles
-        print(f"Initializing PF with Number of particles: {self.N}")
         self.weights = np.ones(self.N) / self.N
         self.prev_weights = np.copy(self.weights)
         self.weighted_mean = np.array([0, 0, 0])
@@ -102,11 +97,11 @@ class ParticleFilter:
 
         if self.prediction_method == "Velocity":
             self.Nx = 4  # number of states [x, y, vx, vy]
-            self.vmax = 0.7  # m/s maximum velocity
+            self.vmax = 0.4  # m/s maximum velocity
             self.best_measurement_covariance = np.diag([0.005, 0.005])
             # Process noise parameters - improved from reference code
-            self.proc_pos_std = 0.1  # m per sqrt(s) - position process noise
-            self.proc_vel_std = 1.   # m/s per sqrt(s) - velocity process noise
+            self.proc_pos_std = 0.05  # m per sqrt(s) - position process noise
+            self.proc_vel_std = 0.15   # m/s per sqrt(s) - velocity process noise
             self.process_covariance = np.diag([self.proc_pos_std**2, self.proc_pos_std**2, 
                                              self.proc_vel_std**2, self.proc_vel_std**2])
         elif self.prediction_method == "Unicycle":
@@ -177,20 +172,14 @@ class ParticleFilter:
         self.dt_state_history = np.zeros(self.state_history.shape[0])
         self.particles = self.uniform_sample()
         # Use multivariate normal if you know the initial condition
-        # self.particles[-1,:, :2] = np.array([
-        #   np.random.multivariate_normal(
-        #   np.array([1.3, -1.26]), self.measurement_covariance, self.N
-        #   )
-        # ])
+        self.particles[-1,:, :2] = np.array([
+          np.random.multivariate_normal(
+          np.array([-2., 1.6]), self.measurement_covariance[:2, :2], self.N
+          )
+        ])
 
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
-        self.var = np.array(
-            [
-                self.process_covariance[0, 0],
-                self.process_covariance[1, 1],
-                self.process_covariance[0, 0],
-            ]
-        )  # initialization of variance of particles
+        self.var = np.diag(self.process_covariance)
 
         # Particles to be resampled whether we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
@@ -241,8 +230,8 @@ class ParticleFilter:
         self,
         noisy_measurement,
         t,
-        ang_vel=np.array([ANG_VEL]),
-        lin_vel=np.array([FWD_VEL]),
+        ang_vel=np.array([0]),
+        lin_vel=np.array([0]),
     ):
         """Main function of the particle filter where the predict,
         update, resample and estimate steps are called.
@@ -289,7 +278,7 @@ class ParticleFilter:
             if (
                 self.neff < self.N * 0.7
             ):  # nEff is only infinity when something went wrong
-                if (self.neff < self.N * 0.1 or self.neff == self.N) and self.is_update:
+                if (self.neff < self.N * 0.1) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
                     if self.prediction_method == "Velocity":
                         # Improved resampling for velocity method
@@ -329,12 +318,7 @@ class ParticleFilter:
                     self.weights = np.ones(self.N) / self.N
                 else:
                     # some are good but some are bad, resample
-                    # Use improved systematic resampling for Velocity method
-                    if self.prediction_method == "Velocity":
-                        # self.systematic_resample()
-                        self.systematic_resample()
-                    else:
-                        self.multinomial_resample()
+                    self.multinomial_resample()
 
         # estimate mean and variance
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
@@ -518,27 +502,6 @@ class ParticleFilter:
 
         return particles
 
-    def systematic_resample(self):
-        """Improved systematic resampling algorithm - more efficient than multinomial.
-        Based on the reference implementation for better performance.
-        """
-        N = self.N
-        # Generate systematic samples
-        positions = (np.random.random() + np.arange(N)) / N
-        
-        # Compute cumulative sum
-        cumsum = np.cumsum(self.weights)
-        cumsum[-1] = 1.0  # Ensure last value is exactly 1.0
-        
-        # Find indices
-        indices = np.searchsorted(cumsum, positions)
-        
-        # Resample particles
-        self.particles = self.particles[:, indices, :]
-        
-        # Reset weights to uniform
-        self.weights.fill(1.0 / N)
-
     def multinomial_resample(self):
         """Uses the multinomial resampling algorithm to update the belief in the system state.
         The particles are copied randomly with probability proportional to the weights plus
@@ -559,7 +522,7 @@ class ParticleFilter:
             self.particles[-1, self.resample_index, :] = self.particles[-1, rand_ind, :]
             self.weights[self.resample_index] = self.weights[rand_ind]
             # Roughening. See Bootstrap Filter from Crassidis and Junkins.
-            G = 0.3
+            G = 1.1 if self.prediction_method == "Velocity" else 0.6
             E = np.zeros(self.Nx)
             for ii in range(self.Nx):
                 E[ii] = np.max(self.particles[-1, :, ii]) - np.min(
@@ -575,7 +538,7 @@ class ParticleFilter:
 
     def estimate(self, particles, weights):
         """returns mean and variance of the weighted particles"""
-        assert np.sum(weights) > 0.0, "Sum of weights must be greater than zero."
+        assert np.sum(weights) > 0.0, "Sum of weights must be greater than zero, now its " + str(np.sum(weights))
         weighted_mean = np.average(particles, weights=weights, axis=0)
         # TODO: change in pf_viz to only use 2 covariance
         var = np.zeros_like(self.var)
@@ -596,6 +559,12 @@ class ParticleFilter:
             (particles[:, 2] - weighted_mean[2]) ** 2,
             weights=weights,
             axis=0,
+            )
+        elif self.prediction_method == "Velocity":
+            var[2:] = np.average(
+                (particles[:, 2:] - weighted_mean[2:]) ** 2,
+                weights=weights,
+                axis=0,
             )
         return weighted_mean, var
 
