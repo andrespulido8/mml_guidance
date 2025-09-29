@@ -10,7 +10,7 @@ class ParticleFilterTrack:
     Each track maintains its own particle filter instance.
     """
     def __init__(self, track_id, initial_detection, initial_time, 
-                 num_particles=100, prediction_method="Unicycle", **pf_kwargs):
+                 num_particles=200, prediction_method="Unicycle", **pf_kwargs):
         self.id = track_id
         self.created_time = initial_time
         self.last_update_time = initial_time
@@ -42,6 +42,7 @@ class ParticleFilterTrack:
         # Get weighted mean and covariance
         if np.sum(self.pf.weights) == 0:
             self.is_bad_weights = True
+            print("Warning: All particle weights are zero.")
             return
         self.weighted_mean, var = self.pf.estimate(self.pf.particles[-1], self.pf.weights)
         self.covariance = np.diag(var)
@@ -101,7 +102,7 @@ class ParticleFilterTrack:
         if self.pf.neff < self.pf.N * 0.7:
             self.pf.multinomial_resample()
         if self.pf.neff < self.pf.N * 0.05:
-            self.is_bad_weights = True
+            self.pf.gaussian_reset(detection)
         
         # Restore original measurement covariance
         self.pf.measurement_covariance = original_cov
@@ -190,8 +191,8 @@ class ParticleFilterGNNAssociator:
     Multi-target tracker using particle filters with GNN data association.
     This is the particle filter equivalent of KalmanFilterGNNAssociator.
     """
-    def __init__(self, num_particles=100, prediction_method="Velocity", 
-                 max_association_distance=3.0, max_missed_detections=20,
+    def __init__(self, num_particles=200, prediction_method="Velocity", 
+                 max_association_distance=3.0, max_missed_detections=25,
                  min_hits_for_confirmation=3, measurement_noise=0.8, **pf_kwargs):
         """
         Initialize the multi-target particle filter tracker.

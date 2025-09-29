@@ -252,9 +252,6 @@ class ParticleFilter:
                 linear_velocity=lin_vel,
             )
         elif self.prediction_method == "Velocity":
-            estimate_velocity = (
-                noisy_measurement - self.state_history[-1, :2]
-            ) * self.dt_history[-1]
 
             self.particles = self.predict(
                 self.particles,
@@ -275,47 +272,10 @@ class ParticleFilter:
             )
             self.particles = self.uniform_sample()
         else:
-            if (
-                self.neff < self.N * 0.7
-            ):  # nEff is only infinity when something went wrong
+            if (self.neff < self.N * 0.7):  
                 if (self.neff < self.N * 0.1) and self.is_update:
                     # most particles are bad, resample from Gaussian around the measurement
-                    if self.prediction_method == "Velocity":
-                        # Improved resampling for velocity method
-                        self.particles[-1, :, :2] = np.random.multivariate_normal(
-                            noisy_measurement[:2],
-                            self.measurement_covariance[:2, :2],
-                            self.N,
-                        )
-                        # backwards difference for velocities
-                        self.particles[-1, :, 2:] = np.random.multivariate_normal(
-                            estimate_velocity,
-                            self.dt_history[-1] * self.measurement_covariance,
-                            self.N,
-                        )
-                    else:
-                        noise = np.random.multivariate_normal(
-                            np.zeros(self.Nx),
-                            self.measurement_covariance,
-                            size=(self.N_th, self.N),
-                        )
-                        # create a uniform noise of the angle
-                        if self.Nx > 2:
-                            noise[:, :, 2] = np.random.uniform(-np.pi, np.pi, size=(self.N_th, self.N))
-                        # repeat the measurement history to be the same size as the particles
-                        filled_elements = np.count_nonzero(self.state_history) // self.Nx
-                        if filled_elements < self.N_th:
-                            self.particles[-1, :, :2] = noisy_measurement + noise[-1, :, :2]
-                        else:
-                            state_history_repeated = np.tile(
-                                self.state_history[-self.N_th :].reshape(
-                                    self.N_th, 1, self.Nx
-                                ),
-                                (1, self.N, 1),
-                            )
-                            self.particles = state_history_repeated + noise
-
-                    self.weights = np.ones(self.N) / self.N
+                    self.gaussian_reset(noisy_measurement)
                 else:
                     # some are good but some are bad, resample
                     self.multinomial_resample()
@@ -338,7 +298,49 @@ class ParticleFilter:
             self.particles = self.uniform_sample()
 
         self.last_time = t
+    
+    def gaussian_reset(self, noisy_measurement):
+        """Reset particles around the noisy measurement with Gaussian noise."""
+        if self.prediction_method == "Velocity":
+            # Improved resampling for velocity method
+            self.particles[-1, :, :2] = np.random.multivariate_normal(
+                noisy_measurement[:2],
+                self.measurement_covariance[:2, :2],
+                self.N,
+            )
+            # backwards difference for velocities
+            estimate_velocity = (
+                noisy_measurement - self.state_history[-1, :2]
+            ) * self.dt_history[-1]
+            self.particles[-1, :, 2:] = np.random.multivariate_normal(
+                estimate_velocity,
+                self.dt_history[-1] * self.measurement_covariance,
+                self.N,
+            )
+        else:
+            noise = np.random.multivariate_normal(
+                np.zeros(self.Nx),
+                self.measurement_covariance,
+                size=(self.N_th, self.N),
+            )
+            # create a uniform noise of the angle
+            if self.Nx > 2:
+                noise[:, :, 2] = np.random.uniform(-np.pi, np.pi, size=(self.N_th, self.N))
+            # repeat the measurement history to be the same size as the particles
+            filled_elements = np.count_nonzero(self.state_history) // self.Nx
+            if filled_elements < self.N_th:
+                self.particles[-1, :, :2] = noisy_measurement + noise[-1, :, :2]
+            else:
+                state_history_repeated = np.tile(
+                    self.state_history[-self.N_th :].reshape(
+                        self.N_th, 1, self.Nx
+                    ),
+                    (1, self.N, 1),
+                )
+                self.particles = state_history_repeated + noise
 
+        self.weights = np.ones(self.N) / self.N
+ 
     def optimize_learned_model_callback(self, event=None):
         """Optimize the neural network model with the particles and weights"""
         filled_elements = np.count_nonzero(self.state_history) // self.Nx
