@@ -43,7 +43,7 @@ class KalmanFilterGNNAssociator:
         )
         self.data_associator = GNNWith2DAssignment(self.hypothesizer)
 
-        self.deleter = CovarianceBasedDeleter(covar_trace_thresh=8)
+        self.deleter = CovarianceBasedDeleter(covar_trace_thresh=9)
         self.initiator = MultiMeasurementInitiator(
             prior_state=GaussianState([[0], [0], [0], [0]], np.diag([0, 0.5, 0, 0.5])),
             measurement_model=self.measurement_model,

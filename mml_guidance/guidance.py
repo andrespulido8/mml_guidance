@@ -170,11 +170,12 @@ class Guidance:
         self.prev_Hp[-1, :2] = Hp_t
 
     def propagate_particles(self, future_parts):
-        if self.prediction_method in {"NN", "Transformer"}:
+        prediction_method = self.filter.prediction_method
+        if prediction_method in {"NN", "Transformer"}:
             future_parts = self.filter.predict_mml(
                 np.copy(future_parts), np.ones(future_parts.shape[0]) * 0.33
             )
-        elif self.prediction_method == "Unicycle":
+        elif prediction_method == "Unicycle":
             future_parts = self.filter.predict(
                 future_parts,
                 0.33,
@@ -183,6 +184,7 @@ class Guidance:
             )
         elif self.prediction_method == "Velocity":
             future_parts = self.filter.predict(future_parts, 0.33)
+        return future_parts
 
     def information_driven_guidance(self, future_parts):
         """Compute the current entropy and future entropy using particles
@@ -271,7 +273,7 @@ class Guidance:
         # choose the estimate that minimizes the entropy
         eer_track = np.argmin(Hp_k)  # I do not think I need to multiply by likelihood because it is constant wrt the action
         print("entropies:", [f"{float(e):.3f}" for e in Hp_k])
-        print(f"track: {eer_track}")
+        print(f"goal track: {eer_track}")
         for ii, estimate in enumerate(future_estimates):
             if ii == eer_track:
                 return self.multi_filter.get_track_states(tracks=[estimate])[0][:2]
@@ -281,13 +283,12 @@ class Guidance:
         assert len(future_tracks) > 0, "No future tracks provided for info-driven guidance"
         if len(future_tracks) == 1:
             # Only one track, follow it
-            return future_tracks[0].get_state()[:2]
+            return future_tracks[0].weighted_mean[:2]
         
         Hp_k = [0.0] * len(future_tracks)  # partial entropy
         for ii, track in enumerate(future_tracks):
             # possible future measurement
-            track_state = track.get_state()
-            estimate_pos = track_state[:2]
+            estimate_pos = track.weighted_mean[:2]
             z_hat = self.filter.add_noise(
                 estimate_pos, self.filter.measurement_covariance[:2, :2],
             )
@@ -328,9 +329,8 @@ class Guidance:
         eer_track = np.argmin(Hp_k)
         print("particle filter entropies:", [f"{float(e):.3f}" for e in Hp_k])
         print(f"selected track: {eer_track}")
-        
-        return future_tracks[eer_track].get_state()[:2]
-            
+
+        return future_tracks[eer_track].weighted_mean[:2]
 
     def entropy_gaussian(self, mean, cov):
         """Compute the entropy of a gaussian distribution
@@ -531,7 +531,7 @@ class Guidance:
             self.lawnmower_idx += self.increment
             return self.path[int(np.floor(self.lawnmower_idx)), :2]
 
-    def update_goal_position(self, event=None):
+    def update_goal_position(self, dt=0.33):
         """Get the goal position based on the guidance mode.
         Output: goal_position (numpy.array of shape (2,))"""
         if self.guidance_mode == "Information":
@@ -542,19 +542,19 @@ class Guidance:
             for k in range(self.K):
                 if self.prediction_method in {"NN", "Transformer"}:
                     future_part = self.filter.predict_mml(
-                        future_part, np.ones(future_part.shape[0]) * 0.33
+                        future_part, np.ones(future_part.shape[0]) * dt
                     )
                 if self.prediction_method == "Unicycle":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
-                        last_future_time + 0.3,
+                        last_future_time + dt,
                         angular_velocity=self.angular_velocity,
                         linear_velocity=self.linear_velocity,
                     )
                 elif self.prediction_method == "Velocity":
                     future_part, last_future_time = self.filter.predict(
                         future_part,
-                        last_future_time + 0.3,
+                        last_future_time + dt,
                     )
             self.goal_position = future_part[-1][0]
         elif self.guidance_mode == "WeightedMean":
@@ -590,7 +590,6 @@ class Guidance:
                     perform_information = False
                     break
                 # Predict each track forward
-                dt = 0.33  # Time step
                 for track in future_tracks:
                     track.predict(dt, 
                                 angular_velocity=self.angular_velocity,
@@ -599,7 +598,6 @@ class Guidance:
             if perform_information:
                 # Use particle filter information-driven guidance
                 self.goal_position = self.info_driven_guidance_multi_pf(future_tracks)
-
 
         # set height depending on runtime
         if self.is_height_constant:
@@ -688,8 +686,8 @@ class Guidance:
         if self.guidance_mode == "Information":
             self.current_entropy()
 
-        # Select to resample all particles if there is a measurement
         if not self.filter.is_update:
+            # negative information if no measurement
             self.filter.resample_index = np.where(
                 np.logical_and(
                     self.is_in_FOV(self.filter.particles[-1], self.FOV),
@@ -702,6 +700,7 @@ class Guidance:
                 # normalize weights
                 self.filter.weights = self.filter.weights / np.sum(self.filter.weights)
         else:
+            # Select to resample all particles if there is a measurement
             self.filter.resample_index = np.arange(self.N)
 
         # Run the particle filter loop
@@ -736,24 +735,45 @@ class Guidance:
             dt = t - getattr(self, 'last_multi_time', 0.0)
             self.last_multi_time = t
             
-            if len(detections) > 0:
-                # Process the measurement
-                confidences = [1.0] * len(detections)
-                self.multi_filter.process_detections(detections, confidences, dt=dt,
-                                                   lin_ang_vels=lin_ang_vels)
+            if self.prediction_method == "MultiPF":
+                if len(detections) <= 0:
+                    for track in self.multi_filter.tracks:
+                        track.pf.resample_index = np.arange(self.multi_filter.num_particles)
+                else:
+                    for track in self.multi_filter.tracks:
+                        track.pf.resample_index = np.where(
+                            np.logical_and(
+                                self.is_in_FOV(track.pf.particles[-1], self.FOV),
+                                ~self.occlusions.in_occlusion(track.pf.particles[-1, :, :2]),
+                            )
+                        )[0]
             else:
-                # Predict without measurements
-                self.multi_filter.predict_tracks(dt=dt, lin_ang_vels=lin_ang_vels)
+                # if an estimate is outside of bounds, eliminate the track
+                outside_bounds = set()
+                for track in self.multi_filter.tracks:
+                    est_pos = self.multi_filter.get_track_states(tracks=[track])[0][:2]
+                    if not np.all(
+                        [
+                            est_pos[0] > self.filter.APRILab_dims[0][0],
+                            est_pos[0] < self.filter.APRILab_dims[1][0],
+                            est_pos[1] > self.filter.APRILab_dims[0][1],
+                            est_pos[1] < self.filter.APRILab_dims[1][1],
+                        ]
+                    ):
+                        outside_bounds.add(track)
+                if len(outside_bounds) > 0:
+                    print(f"Removing {len(outside_bounds)} tracks outside of bounds")
+                    self.multi_filter.tracks -= outside_bounds
+
+            confidences = [1.0] * len(detections)
+            self.multi_filter.process_detections(detections, confidences, dt=dt,
+                                                   lin_ang_vels=lin_ang_vels)
 
         # Information-driven guidance
         if self.guidance_mode in {"Information", "MultiKFInfo", "MultiPFInfo"}:
             future_parts = np.copy(self.sampled_particles)
             for k in range(self.K):  # propagate k steps in the future
-                future_parts = self.propagate_particles(
-                    future_parts,
-                    self.K,
-                    self.N_s,
-                )
+                future_parts = self.propagate_particles(future_parts)
             self.information_driven_guidance(future_parts)
 
 class Occlusions:

@@ -14,7 +14,6 @@ class ParticleFilterTrack:
         self.id = track_id
         self.created_time = initial_time
         self.last_update_time = initial_time
-        self.age = 0  # Number of time steps since creation
         self.hits = 1  # Number of successful updates
         self.missed_detections = 0
         self.is_bad_weights = False 
@@ -71,7 +70,6 @@ class ParticleFilterTrack:
         elif self.pf.prediction_method == "Velocity":
             self.pf.particles = self.pf.predict(self.pf.particles, dt)
         
-        self.age += 1
         self.missed_detections += 1
         self.last_update_time = current_time
         self._update_state_estimates()
