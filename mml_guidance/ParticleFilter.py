@@ -19,13 +19,15 @@ class ParticleFilter:
         drone_height=2.0,
         model_path=None,
         initial_time=0.0,
+        initial_detection=None,
     ):
         # Initialize variables
         deg2rad = lambda deg: np.pi * deg / 180
-        if prediction_method == "MultiKF" or prediction_method == "MultiPF":
-            prediction_method = "Unicycle"  # temporary fix
-            print("MultiKF and MultiPF not implemented in ParticleFilter, using Unicycle instead")
-        if prediction_method not in {"NN", "Transformer", "Unicycle", "Velocity", "KF", "DMMN"}:
+        if prediction_method in {"MultiKF", "MultiPFVel"}:
+            prediction_method = "Velocity"  # temporary fix
+        elif prediction_method in {"MultiPFTra"}:
+            prediction_method = "Transformer"  # temporary fix
+        elif prediction_method not in {"NN", "Transformer", "Unicycle", "Velocity", "KF", "DMMN"}:
             raise ValueError(
                 f"Invalid prediction method: {prediction_method}. Choose from 'NN', 'Transformer', 'Unicycle', 'Velocity', 'KF', or 'DMMN'."
             )
@@ -37,10 +39,9 @@ class ParticleFilter:
             self.N_th = 5  # Number of time history particles
             self.is_velocity = True
             is_occlusions_weights = True
-            self.is_time_weights = True
+            self.is_time_weights = False
             input_dim = 3 if self.is_time_weights else 2  # x, y, time
             self.nn_input_size = self.N_th * input_dim
-            print(f"Input dim and size: {input_dim}, {self.nn_input_size}")
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             prefix_name = "noisy_5_v2_"  # "connected_graph_noisy_5_" or "noisy_5_" for pretrained on road network
             prefix_name = prefix_name + "time_" if self.is_time_weights else prefix_name
@@ -67,9 +68,9 @@ class ParticleFilter:
                 self.motion_model = ScratchTransformer(
                     input_dim=input_dim,
                     block_size=self.N_th,
-                    n_embed=40,
+                    n_embed=20,
                     n_head=8,
-                    n_layer=1,
+                    n_layer=2,
                     hidden_dim=20,
                 )
 
@@ -80,9 +81,9 @@ class ParticleFilter:
                         torch.load(model_path, map_location=self.device)
                     )
                 except FileNotFoundError:
-                    print(
-                        f"Error: The file '{model_path}' does not exist. Please make sure to change the directory to point to the correct file."
-                    )
+                    print(f"Error: The file '{model_path}' does not exist. Change to the correct directory.")
+            else:
+                print("No model path provided for NN/Transformer. Using untrained model.")
         else:
             self.N_th = 2
 
@@ -168,25 +169,21 @@ class ParticleFilter:
         self.update_measurement_covariance(height=drone_height)
 
         self.state_history = np.zeros((self.N_th + buffer_size, self.Nx))
-        self.dt_history = np.ones(self.N_th) * 0.333
-        self.dt_state_history = np.zeros(self.state_history.shape[0])
-        self.particles = self.uniform_sample()
+        self.dt_history = np.ones(self.N_th) * 0.1  # for prediction
+        self.dt_state_history = np.zeros(self.state_history.shape[0])  # for creating history to optimize
         # Use multivariate normal if you know the initial condition
-        self.particles[-1,:, :2] = np.array([
-          np.random.multivariate_normal(
-          np.array([-2., 1.6]), self.measurement_covariance[:2, :2], self.N
-          )
-        ])
+        self.particles = self.uniform_sample()
+        if initial_detection is not None:
+            self.gaussian_reset(initial_detection)
 
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
         self.var = np.diag(self.process_covariance)
 
         # Particles to be resampled whether we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
-        self.initial_time = (
-            initial_time if initial_time is not None else self.initial_time
+        self.last_time = (
+            initial_time if initial_time is not None else 0.0
         )
-        self.last_time = 0.0
         self.t_since_last_update = 0.0
         self.iteration = 0
 
@@ -224,6 +221,7 @@ class ParticleFilter:
                 [self.APRILab_dims[1, 0], self.APRILab_dims[1, 1]],
                 (self.N_th, self.N, self.Nx),
             )
+        self.weights = np.ones(self.N) / self.N
         return local_particles
 
     def pf_loop(
@@ -236,10 +234,10 @@ class ParticleFilter:
         """Main function of the particle filter where the predict,
         update, resample and estimate steps are called.
         """
+        dt = t - self.last_time
         # update measurement history with noisy_measurement
         noisy_measurement = noisy_measurement[:2] if self.Nx > 2 else noisy_measurement
-        # self.measurement_history = np.roll(self.measurement_history, -1, axis=0)
-        # self.measurement_history[-1, :2] = noisy_measurement[:2]
+        self.update_state_and_dt_buffer(noisy_measurement[:2], dt=dt)
 
         # Prediction step
         if self.prediction_method in {"NN", "Transformer"}:
@@ -279,10 +277,12 @@ class ParticleFilter:
                 else:
                     # some are good but some are bad, resample
                     self.multinomial_resample()
+            elif self.neff > np.inf:
+                print("All particles have zero weight. Reinitializing weights uniformly.")
+                self.weights = np.ones(self.N) / self.N
 
         # estimate mean and variance
         self.weighted_mean, self.var = self.estimate(self.particles[-1], self.weights)
-        self.update_state_and_dt_buffer(noisy_measurement[:2], dt=t - self.last_time)
 
         stuck_threshold = 0.03 if self.prediction_method == "Velocity" else 0.03
         max_time_since_last_update = 12.0
@@ -329,7 +329,7 @@ class ParticleFilter:
             # repeat the measurement history to be the same size as the particles
             filled_elements = np.count_nonzero(self.state_history) // self.Nx
             if filled_elements < self.N_th:
-                self.particles[-1, :, :2] = noisy_measurement + noise[-1, :, :2]
+                self.particles[-1, :, :2] = noisy_measurement[:self.Nx] + noise[-1, :, :2]
             else:
                 state_history_repeated = np.tile(
                     self.state_history[-self.N_th :].reshape(
@@ -477,7 +477,6 @@ class ParticleFilter:
             )
         elif self.prediction_method == "Velocity":
             dt = max(dt, 1e-6)  # Avoid division by zero
-            sdt = dt ** 0.5  # Square root of time for noise scaling
             
             # Position update: x = x + vx*dt + noise
             pos_noise = self.add_noise(
@@ -589,9 +588,9 @@ class ParticleFilter:
             self.state_history = np.roll(self.state_history, -1, axis=0)
             self.state_history[-1, :2] = noisy_measurement[:2]
             self.dt_state_history[:-1] = (
-                self.dt_state_history[1:] + self.t_since_last_update
+                self.dt_state_history[1:] + self.t_since_last_update + dt
             )
-            self.dt_state_history[-1] = self.t_since_last_update
+            self.dt_state_history[-1] = self.t_since_last_update + dt
             self.t_since_last_update = 0.0
         else:
             self.t_since_last_update += dt

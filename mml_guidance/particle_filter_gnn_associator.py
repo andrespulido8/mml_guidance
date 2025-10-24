@@ -1,6 +1,4 @@
-from datetime import datetime, timedelta
 import numpy as np
-import copy
 from .ParticleFilter import ParticleFilter
 
 
@@ -10,9 +8,9 @@ class ParticleFilterTrack:
     Each track maintains its own particle filter instance.
     """
     def __init__(self, track_id, initial_detection, initial_time, 
-                 num_particles=200, prediction_method="Unicycle", **pf_kwargs):
+                 num_particles=200, prediction_method="Unicycle", model_path=None, 
+                 drone_height=2.0):
         self.id = track_id
-        self.created_time = initial_time
         self.last_update_time = initial_time
         self.hits = 1  # Number of successful updates
         self.missed_detections = 0
@@ -23,16 +21,10 @@ class ParticleFilterTrack:
             num_particles=num_particles,
             prediction_method=prediction_method,
             initial_time=initial_time,
-            **pf_kwargs
+            initial_detection=initial_detection,
+            model_path=model_path,
+            drone_height=drone_height
         )
-        
-        # Initialize particles around the first detection
-        if initial_detection is not None:
-            # Initialize particles in a small Gaussian around the detection
-            init_cov = np.diag([0.1, 0.1])  # Small initial uncertainty
-            for i in range(self.pf.N):
-                noise = np.random.multivariate_normal([0, 0], init_cov)
-                self.pf.particles[-1, i, :2] = initial_detection[:2] + noise
         
         self._update_state_estimates()
 
@@ -45,80 +37,6 @@ class ParticleFilterTrack:
             return
         self.weighted_mean, var = self.pf.estimate(self.pf.particles[-1], self.pf.weights)
         self.covariance = np.diag(var)
-
-    def predict(self, dt, **kwargs):
-        """Perform prediction step"""
-        # Update particle filter time - handle both datetime and float types
-        if isinstance(self.last_update_time, datetime):
-            current_time = self.last_update_time + timedelta(seconds=dt)
-        else:
-            current_time = self.last_update_time + dt
-        
-        # Predict particles forward
-        if self.pf.prediction_method in {"NN", "Transformer"}:
-            self.pf.particles = self.pf.predict_mml(
-                np.copy(self.pf.particles), 
-                self.pf.dt_history
-            )
-        elif self.pf.prediction_method == "Unicycle":
-            self.pf.particles = self.pf.predict(
-                self.pf.particles,
-                dt,
-                angular_velocity=kwargs.get('angular_velocity', np.array([0.0])),
-                linear_velocity=kwargs.get('linear_velocity', np.array([0.0, 0.0])),
-            )
-        elif self.pf.prediction_method == "Velocity":
-            self.pf.particles = self.pf.predict(self.pf.particles, dt)
-        
-        self.missed_detections += 1
-        self.last_update_time = current_time
-        self._update_state_estimates()
-
-    def update(self, detection, confidence=1.0):
-        """Perform update step with measurement"""
-        # Update measurement covariance based on confidence
-        base_cov = self.pf.best_measurement_covariance.copy()
-        if confidence < 1.0:
-            # Increase measurement noise for low confidence detections
-            confidence_factor = max(0.1, confidence)
-            measurement_cov = base_cov / confidence_factor
-        else:
-            measurement_cov = base_cov
-        
-        # Temporarily update measurement covariance
-        original_cov = self.pf.measurement_covariance.copy()
-        self.pf.measurement_covariance = measurement_cov
-        self.pf.noise_inv = np.linalg.inv(measurement_cov[:2, :2])
-        
-        # Perform particle filter update
-        self.pf.is_update = True
-        self.pf.prev_weights = np.copy(self.pf.weights)
-        self.pf.weights = self.pf.update(self.pf.weights, self.pf.particles, detection)
-        
-        # Check if resampling is needed
-        self.pf.neff = self.pf.nEff(self.pf.weights)
-        if self.pf.neff < self.pf.N * 0.7:
-            self.pf.multinomial_resample()
-        if self.pf.neff < self.pf.N * 0.05:
-            self.pf.gaussian_reset(detection)
-        
-        # Restore original measurement covariance
-        self.pf.measurement_covariance = original_cov
-        self.pf.noise_inv = np.linalg.inv(original_cov[:2, :2])
-        
-        self.hits += 1
-        self.missed_detections = 0
-        self._update_state_estimates()
-
-    def get_likelihood(self, detection):
-        """Get likelihood of detection given current track state"""
-        # Use particle filter likelihood computation
-        current_particles = self.pf.particles[-1, :, :2]
-        y_act = np.tile(detection[:2], (self.pf.N, 1))
-        likelihoods = self.pf.likelihood(current_particles, y_act)
-        # Return weighted average likelihood
-        return np.average(likelihoods, weights=self.pf.weights)
-
 
 class SimpleGNNAssociator:
     """
@@ -190,8 +108,9 @@ class ParticleFilterGNNAssociator:
     This is the particle filter equivalent of KalmanFilterGNNAssociator.
     """
     def __init__(self, num_particles=200, prediction_method="Velocity", 
-                 max_association_distance=3.0, max_missed_detections=25,
-                 min_hits_for_confirmation=3, measurement_noise=0.8, **pf_kwargs):
+                 max_association_distance=3.0, max_missed_detections=35,
+                 min_hits_for_confirmation=1, model_path=None, drone_height=2.0,
+                 initial_time=0.0):
         """
         Initialize the multi-target particle filter tracker.
         
@@ -201,14 +120,11 @@ class ParticleFilterGNNAssociator:
             max_association_distance: Maximum distance for data association
             max_missed_detections: Maximum missed detections before track deletion
             min_hits_for_confirmation: Minimum hits before track is confirmed
-            measurement_noise: Measurement noise parameter (not passed to ParticleFilter)
-            **pf_kwargs: Additional arguments for ParticleFilter
         """
         self.num_particles = num_particles
         self.prediction_method = prediction_method
-        self.measurement_noise = measurement_noise
-        self.pf_kwargs = pf_kwargs
-        
+        self.model_path = model_path
+        self.drone_height = drone_height
         # Data association
         self.associator = SimpleGNNAssociator(max_association_distance)
         
@@ -219,35 +135,25 @@ class ParticleFilterGNNAssociator:
         self.min_hits_for_confirmation = min_hits_for_confirmation
         
         # Timing
-        self.start_time = datetime.now().replace(microsecond=0)
-        self.current_time = self.start_time
+        self.current_time = initial_time
 
-    def update_time(self, time_step=None):
+    def update_time(self, time_step):
         """Update the current time for tracking."""
-        if time_step is not None:
-            if isinstance(time_step, (int, float)):
-                # Convert float time step (seconds since start) to datetime
-                self.current_time = self.start_time + timedelta(seconds=float(time_step))
-            else:
-                # Assume it's already a datetime object
-                self.current_time = time_step
-        else:
-            self.current_time = datetime.now().replace(microsecond=0)
+        self.current_time = time_step
 
     def predict_tracks(self, dt=0.1, **kwargs):
         """Perform prediction step for all tracks"""
         for track in self.tracks:
             track.predict(dt, **kwargs)
 
-    def process_detections(self, detections, confidences=None, dt=0.1, **kwargs):
+    def process_detections(self, detections, confidences=None, current_time=None):
         """
         Process new detections and update tracks.
         
         Args:
             detections: List of [x, y] positions or numpy array of shape (N, 2)
+            current_time: Current simulation time 
             confidences: List of confidence values (0-1) for each detection, optional
-            dt: Time step since last update
-            **kwargs: Additional arguments for prediction (e.g., velocities)
         """
         # Convert detections to numpy array if needed
         if isinstance(detections, list) and len(detections) > 0:
@@ -259,23 +165,46 @@ class ParticleFilterGNNAssociator:
         if confidences is None:
             confidences = [1.0] * len(detections)
         
-        # Predict all tracks forward
-        self.predict_tracks(dt, **kwargs)
-        
         # Data association
         associations, unassociated_tracks, unassociated_detections = \
             self.associator.associate(self.tracks, detections)
         
         # Update associated tracks
         for track_idx, det_idx in associations:
-            self.tracks[track_idx].update(detections[det_idx], confidences[det_idx])
-        
+            self.tracks[track_idx].pf.is_update = True
+            self.tracks[track_idx].pf.resample_index = np.arange(self.num_particles)
+            self.tracks[track_idx].pf.pf_loop(noisy_measurement=detections[det_idx], t=self.current_time)
+            self.tracks[track_idx].pf.is_update = False
+            self.tracks[track_idx].hits += 1
+            self.tracks[track_idx].missed_detections = 0
+            self.tracks[track_idx]._update_state_estimates()
+
+        # loop without a detection for unassociated tracks
+        for track_idx in unassociated_tracks:
+            self.tracks[track_idx].pf.resample_index = np.where(
+                np.logical_and(
+                    self.is_in_FOV(self.tracks[track_idx].pf.particles[-1], self.FOV),
+                    ~self.in_occlusion(self.tracks[track_idx].pf.particles[-1, :, :2]),
+                )
+            )[0]
+            if self.tracks[track_idx].pf.t_since_last_update > 1.0:
+                # Reduce weights for particles that haven't been updated
+                self.tracks[track_idx].pf.weights *= 0.9
+                # normalize weights
+                self.tracks[track_idx].pf.weights = self.tracks[track_idx].pf.weights / np.sum(self.tracks[track_idx].pf.weights)
+            self.tracks[track_idx].pf.is_update = False
+            self.tracks[track_idx].pf.pf_loop(noisy_measurement=np.array([0, 0]), t=self.current_time)
+            self.tracks[track_idx]._update_state_estimates()
+            self.tracks[track_idx].missed_detections += 1
+
         # Create new tracks from unassociated detections
         for det_idx in unassociated_detections:
             self._create_new_track(detections[det_idx], confidences[det_idx])
         
         # Delete old tracks
         self._delete_old_tracks()
+
+        self.current_time = current_time
 
     def _create_new_track(self, detection, confidence=1.0):
         """Create a new track from an unassociated detection"""
@@ -285,7 +214,8 @@ class ParticleFilterGNNAssociator:
             initial_time=self.current_time,
             num_particles=self.num_particles,
             prediction_method=self.prediction_method,
-            **self.pf_kwargs
+            model_path=self.model_path,
+            drone_height=self.drone_height
         )
         self.tracks.append(new_track)
         self.next_track_id += 1
@@ -308,10 +238,6 @@ class ParticleFilterGNNAssociator:
             # Keep confirmed tracks or tentative tracks that might still be good
             tracks_to_keep.append(track)
         
-        deleted_count = len(self.tracks) - len(tracks_to_keep)
-        # if deleted_count > 0:
-        #     print(f"Deleted {deleted_count} tracks")
-
         self.tracks = tracks_to_keep
 
     def get_confirmed_tracks(self):
@@ -370,32 +296,6 @@ class ParticleFilterGNNAssociator:
         """
         tracks_to_use = self.get_confirmed_tracks() if confirmed_only else self.tracks
         return [track.pf.weights for track in tracks_to_use]
-
-    def predict_future_states(self, steps_ahead=1, dt=0.1, **kwargs):
-        """
-        Predict future states of all tracks.
-        
-        Args:
-            steps_ahead: Number of time steps to predict ahead
-            dt: Time step size
-            **kwargs: Additional arguments for prediction
-            
-        Returns:
-            List of future track states [x, y, vx, vy]
-        """
-        future_tracks = []
-        
-        for track in self.tracks:
-            # Create a copy of the track for future prediction
-            future_track = copy.deepcopy(track)
-            
-            # Predict forward
-            for _ in range(steps_ahead):
-                future_track.predict(dt, **kwargs)
-            
-            future_tracks.append(future_track)
-
-        return [track.weighted_mean for track in future_tracks]
 
     def get_entropy_estimates(self):
         """
