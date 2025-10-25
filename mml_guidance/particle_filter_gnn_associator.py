@@ -35,8 +35,8 @@ class ParticleFilterTrack:
             self.is_bad_weights = True
             print("Warning: All particle weights are zero.")
             return
-        self.weighted_mean, var = self.pf.estimate(self.pf.particles[-1], self.pf.weights)
-        self.covariance = np.diag(var)
+        self.weighted_mean, self.covariance = self.pf.estimate(
+                            self.pf.particles[-1], self.pf.weights)
 
 class SimpleGNNAssociator:
     """

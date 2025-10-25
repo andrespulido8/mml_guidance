@@ -234,5 +234,5 @@ class KalmanFilterGNNAssociator:
                                   [covar[2,0], covar[2,2], covar[2,1], covar[2,3]],
                                   [covar[1,0], covar[1,2], covar[1,1], covar[1,3]],
                                   [covar[3,0], covar[3,2], covar[3,1], covar[3,3]]])
-                track_covariances.append(covar)
+                track_covariances.append(covar * 0.25)  # scale down 
         return np.array(track_covariances)

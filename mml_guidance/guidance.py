@@ -184,7 +184,7 @@ class Guidance:
                 angular_velocity=self.angular_velocity,
                 linear_velocity=self.linear_velocity,
             )
-        elif self.prediction_method == "Velocity":
+        elif prediction_method == "Velocity":
             future_parts = self.filter.predict(future_parts, dt)
         return future_parts
 

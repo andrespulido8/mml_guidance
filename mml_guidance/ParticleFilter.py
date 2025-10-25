@@ -99,7 +99,7 @@ class ParticleFilter:
         if self.prediction_method == "Velocity":
             self.Nx = 4  # number of states [x, y, vx, vy]
             self.vmax = 0.4  # m/s maximum velocity
-            self.best_measurement_covariance = np.diag([0.005, 0.005])
+            self.best_measurement_covariance = np.diag([0.006, 0.006])
             # Process noise parameters - improved from reference code
             self.proc_pos_std = 0.05  # m per sqrt(s) - position process noise
             self.proc_vel_std = 0.15   # m/s per sqrt(s) - velocity process noise
@@ -111,7 +111,7 @@ class ParticleFilter:
             self.process_covariance = np.diag([0.8, 0.8, deg2rad(5.)])
         elif self.prediction_method in {"KF", "DMMN"}:
             self.Nx = 2
-            self.best_measurement_covariance = np.diag([0.01, 0.01])
+            self.best_measurement_covariance = np.diag([0.006, 0.006])
             self.process_covariance = np.diag([0.0001, 0.0001, 0.00001, 0.00001])
 
         if self.prediction_method == "DMMN":
@@ -177,7 +177,7 @@ class ParticleFilter:
             self.gaussian_reset(initial_detection)
 
         # Process noise: q11, q22 is meters of error per meter, q33 is radians of error per revolution
-        self.var = np.diag(self.process_covariance)
+        self.var = np.zeros_like(self.process_covariance)
 
         # Particles to be resampled whether we have measurements or not (in guidance.py)
         self.resample_index = np.arange(self.N)
@@ -541,13 +541,13 @@ class ParticleFilter:
         """returns mean and variance of the weighted particles"""
         assert np.sum(weights) > 0.0, "Sum of weights must be greater than zero, now its " + str(np.sum(weights))
         weighted_mean = np.average(particles, weights=weights, axis=0)
-        # TODO: change in pf_viz to only use 2 covariance
         var = np.zeros_like(self.var)
-        var[:2] = np.average(
-            (particles[:, :2] - weighted_mean[:2]) ** 2,
-            weights=weights,
-            axis=0,
-        )
+        pos_diff = particles[:, :2] - weighted_mean[:2]
+        # Weighted covariance computation: Cov = E[(X-μ)(X-μ)^T]
+        pos_cov = np.average(pos_diff[:, :, np.newaxis] * pos_diff[:, np.newaxis, :], 
+                           weights=weights, axis=0)
+        var[:2, :2] = pos_cov
+        
         if self.prediction_method == "Unicycle":
             # Component mean in the complex plane to prevent wrong average
             # source: https://www.rosettacode.org/wiki/Averages/Mean_angle#C.2B.2B
@@ -556,13 +556,13 @@ class ParticleFilter:
             np.sum(self.weights * np.cos(particles[:, 2])),
             )
             weighted_mean[2] = self.yaw_mean
-            var[2] = np.average(
+            var[2, 2] = np.average(
             (particles[:, 2] - weighted_mean[2]) ** 2,
             weights=weights,
             axis=0,
             )
         elif self.prediction_method == "Velocity":
-            var[2:] = np.average(
+            var[2:, 2:] = np.average(
                 (particles[:, 2:] - weighted_mean[2:]) ** 2,
                 weights=weights,
                 axis=0,
