@@ -8,7 +8,7 @@ from .kf import KalmanFilter
 from .ParticleFilter import ParticleFilter
 from .gnn_associator import KalmanFilterGNNAssociator
 from .particle_filter_gnn_associator import ParticleFilterGNNAssociator
-
+from .ppo_guidance import PPOGuidance
 
 class Guidance:
     def __init__(
@@ -22,6 +22,8 @@ class Guidance:
         filter: ParticleFilter = None,
         initial_time=None,
         model_path=None,
+        ppo_model_path=None, 
+        ppo_vecnorm_path=None
     ):
         print(
             "Initializing Guidance with mode:",
@@ -30,7 +32,7 @@ class Guidance:
             prediction_method,
         )
         self.init_finished = False
-        self.guidance_modes_set = {"Information", "WeightedMean", "Lawnmower", "Estimator", "MultiKFInfo", "MultiPFInfo"}
+        self.guidance_modes_set = {"Information", "WeightedMean", "Lawnmower", "Estimator", "MultiKFInfo", "MultiPFInfo", "MultiPFinfoPPO"}
         assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
         self.guidance_mode = guidance_mode
         self.prediction_methods_set = {"NN", "Transformer", "Unicycle", "Velocity", "KF", "MultiKF", "MultiPFVel", "MultiPFTra"}
@@ -38,6 +40,10 @@ class Guidance:
         assert prediction_method in self.prediction_methods_set, f"Prediction method {prediction_method} not recognized. Choose from {self.prediction_methods_set}"
         self.filter = filter  # particle filter instance
         self.N = filter.N if filter is not None else 500
+          # Initialize PPO guidance 
+        self.ppo_guidance = None
+        self.ppo_model_path = ppo_model_path
+        self.ppo_vecnorm_path = ppo_vecnorm_path
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -120,7 +126,36 @@ class Guidance:
             )
             self.multi_filter.in_occlusion = self.occlusions.in_occlusion  # temp fix
             self.multi_filter.is_in_FOV = self.is_in_FOV
-
+        # ═══════════════════════════════════════════════════════════
+        # init ppo_guidance
+        # ═══════════════════════════════════════════════════════════
+        
+        # Initialize PPO guidance 
+        # Initialize PPO guidance if needed
+        if self.guidance_mode == "MultiPFinfoPPO":
+            if self.ppo_model_path is None:
+                raise ValueError("PPO model path required for MultiPFinfoPPO guidance mode")
+            
+            print(f"🤖 Initializing PPO guidance...")
+            
+            # Read number of targets from config
+            import yaml
+            with open('config.yaml') as f:
+                config = yaml.safe_load(f)
+                num_targets = config['number_targets']  # Will be 2 from your config
+            
+            self.ppo_guidance = PPOGuidance(
+                model_path=self.ppo_model_path,
+                vecnorm_path=self.ppo_vecnorm_path,
+                num_targets=num_targets,
+                drone_height=drone_height
+            )
+            print(f"✓ PPO guidance ready for {num_targets} targets")
+        else:
+            self.ppo_guidance = None
+        
+        # ═══════════════════════════════════════════════════════════
+        
         self.init_finished = True
 
     def current_entropy(self, event=None) -> None:
@@ -533,7 +568,31 @@ class Guidance:
     def update_goal_position(self, dt=0.33):
         """Get the goal position based on the guidance mode.
         Output: goal_position (numpy.array of shape (2,))"""
-        if self.guidance_mode == "Information":
+        if self.guidance_mode == "MultiPFinfoPPO":
+            # Use PPO guidance
+            if self.ppo_guidance is None:
+                raise RuntimeError("PPO guidance not initialized")
+            
+            # Get current agent position
+            agent_pos = self.quad_position  # Assuming this is set via update_agent_position()
+            
+            # Get tracked states and covariances
+            if self.prediction_method in {"MultiPFVel", "MultiPFTra", "MultiKF"}:
+                tracked_states = self.multi_filter.get_track_states()
+                tracked_covs = self.multi_filter.get_track_covariances()
+            else:
+                # Single target case
+                tracked_states = [self.filter.weighted_mean]
+                tracked_covs = [self.filter.var]
+            
+            # Get goal position from PPO policy
+            self.goal_position = self.ppo_guidance.predict_goal_position(
+                agent_position=agent_pos,
+                tracked_states=tracked_states,
+                tracked_covs=[cov[:2, :2] for cov in tracked_covs],  # Use only position covariance
+                deterministic=True
+            )
+        elif self.guidance_mode == "Information":
             self.sampled_index = np.random.choice(a=self.N, size=self.N_s)
             self.sampled_particles = np.copy(
                 self.filter.particles[:, self.sampled_index, :]
