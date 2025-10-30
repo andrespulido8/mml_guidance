@@ -90,19 +90,13 @@ class PPOGuidance:
         
         return np.array(obs, dtype=np.float32)
     
-    def predict_goal_position(self, agent_position, tracked_states, tracked_covs, 
+    def predict_velocity_command(self, agent_position, tracked_states, tracked_covs, 
                               deterministic=True):
         """
-        Use PPO policy to predict goal position.
+        Use PPO policy to predict velocity command DIRECTLY.
         
-        Args:
-            agent_position: [x, y] position of agent (meters)
-            tracked_states: List of tracked target states
-            tracked_covs: List of covariance matrices
-            deterministic: Whether to use deterministic policy
-            
         Returns:
-            goal_position: [x, y] goal position in meters
+            tau: [vx, vy, omega] velocity command (NOT goal position!)
         """
         # Compute observation
         obs = self.compute_observation(agent_position, tracked_states, tracked_covs)
@@ -114,18 +108,12 @@ class PPOGuidance:
         # Get action from PPO model
         action, _ = self.model.predict(obs, deterministic=deterministic)
         
-        # Action is [vx, vy, omega] in m/s and rad/s
-        # Integrate velocity to get goal position
-        vx, vy, _ = action  # Ignore angular velocity for now
-        
-        # Goal position = current position + velocity * dt
-        goal_x = agent_position[0] + vx * self.dt
-        goal_y = agent_position[1] + vy * self.dt
-        
-        self.last_goal_position = np.array([goal_x, goal_y])
+        # ✅ CORRECT: Return velocity command directly
+        # action is [vx, vy, omega] - this IS tau!
+        self.last_action = action
         self.last_obs = obs
         
-        return self.last_goal_position
+        return action  # [vx, vy, omega] in m/s and rad/s
     
     def get_info(self):
         """Get diagnostic information about PPO guidance."""

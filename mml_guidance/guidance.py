@@ -151,9 +151,10 @@ class Guidance:
                 drone_height=drone_height
             )
             print(f"✓ PPO guidance ready for {num_targets} targets")
+            self.ppo_velocity_command = np.array([0.0, 0.0, 0.0])
         else:
             self.ppo_guidance = None
-        
+            self.ppo_velocity_command = None 
         # ═══════════════════════════════════════════════════════════
         
         self.init_finished = True
@@ -567,31 +568,34 @@ class Guidance:
 
     def update_goal_position(self, dt=0.33):
         """Get the goal position based on the guidance mode.
-        Output: goal_position (numpy.array of shape (2,))"""
+        For PPO mode, stores velocity command instead.
+        Output: goal_position (numpy.array of shape (2,)) OR velocity command"""
+        
         if self.guidance_mode == "MultiPFinfoPPO":
-            # Use PPO guidance
             if self.ppo_guidance is None:
                 raise RuntimeError("PPO guidance not initialized")
             
-            # Get current agent position
-            agent_pos = self.quad_position  # Assuming this is set via update_agent_position()
+            agent_pos = self.quad_position
             
-            # Get tracked states and covariances
             if self.prediction_method in {"MultiPFVel", "MultiPFTra", "MultiKF"}:
                 tracked_states = self.multi_filter.get_track_states()
                 tracked_covs = self.multi_filter.get_track_covariances()
             else:
-                # Single target case
                 tracked_states = [self.filter.weighted_mean]
                 tracked_covs = [self.filter.var]
             
-            # Get goal position from PPO policy
-            self.goal_position = self.ppo_guidance.predict_goal_position(
+            # ✅ CORRECT: Get velocity command from PPO
+            self.ppo_velocity_command = self.ppo_guidance.predict_velocity_command(
                 agent_position=agent_pos,
                 tracked_states=tracked_states,
-                tracked_covs=[cov[:2, :2] for cov in tracked_covs],  # Use only position covariance
+                tracked_covs=[cov[:2, :2] for cov in tracked_covs],
                 deterministic=True
             )
+        
+        # For visualization, compute what the goal position would be
+        # (but this is NOT used for control)
+            self.goal_position = agent_pos + self.ppo_velocity_command[:2] * dt
+
         elif self.guidance_mode == "Information":
             self.sampled_index = np.random.choice(a=self.N, size=self.N_s)
             self.sampled_particles = np.copy(
