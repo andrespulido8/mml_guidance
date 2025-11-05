@@ -34,6 +34,9 @@ class Guidance:
         self.init_finished = False
         self.guidance_modes_set = {"Information", "WeightedMean", "Lawnmower", "Estimator", "MultiKFInfo", "MultiPFInfo", "MultiPFinfoPPO"}
         assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
+        if self.guidance_mode == "MultiPFinfoPPO":
+            self.guidance_mode = "MultiPFInfo"  # internally use info mode for PPO
+        assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
         self.guidance_mode = guidance_mode
         self.prediction_methods_set = {"NN", "Transformer", "Unicycle", "Velocity", "KF", "MultiKF", "MultiPFVel", "MultiPFTra"}
         self.prediction_method = prediction_method
@@ -60,7 +63,7 @@ class Guidance:
         self.is_height_constant = is_height_constant
         self.height = drone_height  # initial height of the quadcopter in meters
         self.CAMERA_ANGLES = np.array(
-            [deg2rad(45), deg2rad(45)]
+            [deg2rad(89), deg2rad(89)]
         )  # camera angle in radians (horizontal, vertical)
         self.update_FOV_dims_and_measurement_cov()
         self.FOV = self.construct_FOV(self.quad_position)
@@ -130,23 +133,28 @@ class Guidance:
         # init ppo_guidance
         # ═══════════════════════════════════════════════════════════
         
-        # Initialize PPO guidance 
         # Initialize PPO guidance if needed
-        if self.guidance_mode == "MultiPFinfoPPO":
-            if self.ppo_model_path is None:
+        self.ppo_guidance = None
+        self.ppo_velocity_command = None
+        
+        if self.original_guidance_mode == "MultiPFinfoPPO":  # ✅ Use original mode
+            if ppo_model_path is None:
                 raise ValueError("PPO model path required for MultiPFinfoPPO guidance mode")
             
             print(f"🤖 Initializing PPO guidance...")
+            print(f"   Model path: {ppo_model_path}")
+            if ppo_vecnorm_path:
+                print(f"   VecNormalize path: {ppo_vecnorm_path}")
             
             # Read number of targets from config
             import yaml
             with open('config.yaml') as f:
                 config = yaml.safe_load(f)
-                num_targets = config['number_targets']  # Will be 2 from your config
+                num_targets = config['number_targets']
             
             self.ppo_guidance = PPOGuidance(
-                model_path=self.ppo_model_path,
-                vecnorm_path=self.ppo_vecnorm_path,
+                model_path=ppo_model_path,
+                vecnorm_path=ppo_vecnorm_path,
                 num_targets=num_targets,
                 drone_height=drone_height
             )
