@@ -8,7 +8,15 @@ from .kf import KalmanFilter
 from .ParticleFilter import ParticleFilter
 from .gnn_associator import KalmanFilterGNNAssociator
 from .particle_filter_gnn_associator import ParticleFilterGNNAssociator
-from .ppo_guidance import PPOGuidance
+
+# NEW: Import for PPO support
+try:
+    from stable_baselines3 import PPO
+    PPO_AVAILABLE = True
+except ImportError:
+    PPO_AVAILABLE = False
+    print("Warning: stable_baselines3 not available. PPO guidance modes will not work.")
+
 
 class Guidance:
     def __init__(
@@ -22,8 +30,7 @@ class Guidance:
         filter: ParticleFilter = None,
         initial_time=None,
         model_path=None,
-        ppo_model_path=None, 
-        ppo_vecnorm_path=None
+        ppo_model_path=None,  # NEW: Path to trained PPO model
     ):
         print(
             "Initializing Guidance with mode:",
@@ -32,21 +39,36 @@ class Guidance:
             prediction_method,
         )
         self.init_finished = False
-        self.guidance_modes_set = {"Information", "WeightedMean", "Lawnmower", "Estimator", "MultiKFInfo", "MultiPFInfo", "MultiPFinfoPPO"}
-        assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
-        if self.guidance_mode == "MultiPFinfoPPO":
-            self.guidance_mode = "MultiPFInfo"  # internally use info mode for PPO
+        
+        # NEW: Update guidance modes to include PPO variants
+        self.guidance_modes_set = {
+            "Information", "WeightedMean", "Lawnmower", "Estimator", 
+            "MultiKFInfo", "MultiPFInfo", "MultiPFPPO", "MultiPFInfoPPO"
+        }
         assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
         self.guidance_mode = guidance_mode
+        
         self.prediction_methods_set = {"NN", "Transformer", "Unicycle", "Velocity", "KF", "MultiKF", "MultiPFVel", "MultiPFTra"}
         self.prediction_method = prediction_method
         assert prediction_method in self.prediction_methods_set, f"Prediction method {prediction_method} not recognized. Choose from {self.prediction_methods_set}"
         self.filter = filter  # particle filter instance
         self.N = filter.N if filter is not None else 500
-          # Initialize PPO guidance 
-        self.ppo_guidance = None
-        self.ppo_model_path = ppo_model_path
-        self.ppo_vecnorm_path = ppo_vecnorm_path
+
+        # NEW: Load PPO model if needed
+        self.ppo_model = None
+        if guidance_mode in {"MultiPFPPO", "MultiPFInfoPPO"}:
+            if not PPO_AVAILABLE:
+                raise ImportError("stable_baselines3 is required for PPO guidance modes. Install with: pip install stable-baselines3")
+            if ppo_model_path is not None:
+                try:
+                    print(f"Loading PPO model from: {ppo_model_path}")
+                    self.ppo_model = PPO.load(ppo_model_path)
+                    print("PPO model loaded successfully!")
+                except Exception as e:
+                    print(f"Error loading PPO model: {e}")
+                    raise
+            else:
+                raise ValueError(f"PPO model path required for guidance mode '{guidance_mode}'")
 
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
@@ -63,7 +85,7 @@ class Guidance:
         self.is_height_constant = is_height_constant
         self.height = drone_height  # initial height of the quadcopter in meters
         self.CAMERA_ANGLES = np.array(
-            [deg2rad(89), deg2rad(89)]
+            [deg2rad(45), deg2rad(45)]
         )  # camera angle in radians (horizontal, vertical)
         self.update_FOV_dims_and_measurement_cov()
         self.FOV = self.construct_FOV(self.quad_position)
@@ -129,43 +151,109 @@ class Guidance:
             )
             self.multi_filter.in_occlusion = self.occlusions.in_occlusion  # temp fix
             self.multi_filter.is_in_FOV = self.is_in_FOV
-        # ═══════════════════════════════════════════════════════════
-        # init ppo_guidance
-        # ═══════════════════════════════════════════════════════════
-        
-        # Initialize PPO guidance if needed
-        self.ppo_guidance = None
-        self.ppo_velocity_command = None
-        
-        if self.original_guidance_mode == "MultiPFinfoPPO":  # ✅ Use original mode
-            if ppo_model_path is None:
-                raise ValueError("PPO model path required for MultiPFinfoPPO guidance mode")
-            
-            print(f"🤖 Initializing PPO guidance...")
-            print(f"   Model path: {ppo_model_path}")
-            if ppo_vecnorm_path:
-                print(f"   VecNormalize path: {ppo_vecnorm_path}")
-            
-            # Read number of targets from config
-            import yaml
-            with open('config.yaml') as f:
-                config = yaml.safe_load(f)
-                num_targets = config['number_targets']
-            
-            self.ppo_guidance = PPOGuidance(
-                model_path=ppo_model_path,
-                vecnorm_path=ppo_vecnorm_path,
-                num_targets=num_targets,
-                drone_height=drone_height
-            )
-            print(f"✓ PPO guidance ready for {num_targets} targets")
-            self.ppo_velocity_command = np.array([0.0, 0.0, 0.0])
-        else:
-            self.ppo_guidance = None
-            self.ppo_velocity_command = None 
-        # ═══════════════════════════════════════════════════════════
-        
+
         self.init_finished = True
+
+    def get_ppo_action_nearest_track(self, agent_state, tracked_states):
+        """
+        Get PPO action for tracking the nearest target (matches gym_pursuit_env logic).
+        
+        Args:
+            agent_state: Agent state [x, y, theta, vx, vy, omega]
+            tracked_states: List of track states from multi_filter.get_track_states()
+                        Each: [x, y, vx, vy, ...] or [x, y, ...]
+        
+        Returns:
+            action: [vx, vy, omega] if tracks exist, None if no tracks (for random walk)
+        """
+        if self.ppo_model is None:
+            print("Warning: PPO model not loaded")
+            return None
+        
+        # Check if we have any tracks
+        if len(tracked_states) == 0:
+            return None  # Signal for random walk
+        
+        # ========== NEAREST TRACK LOGIC (same as gym_pursuit_env) ==========
+        agent_pos = agent_state[:2]
+        agent_vel = agent_state[3:5]
+        
+        min_distance = float('inf')
+        nearest_estimate = None
+        
+        # Find nearest track
+        for track_state in tracked_states:
+            target_pos = track_state[:2]
+            distance = np.linalg.norm(target_pos - agent_pos)
+            
+            if distance < min_distance:
+                min_distance = distance
+                # Ensure we have [x, y, vx, vy] format
+                if len(track_state) >= 4:
+                    nearest_estimate = track_state[:4]
+                else:
+                    nearest_estimate = np.concatenate([track_state[:2], [0.0, 0.0]])
+        
+        # ========== BUILD OBSERVATION (8D - same as gym_pursuit_env) ==========
+        # Observation format: [agent_x, agent_y, agent_vx, agent_vy, rel_x, rel_y, rel_vx, rel_vy]
+        target_pos = nearest_estimate[:2]
+        target_vel = nearest_estimate[2:4]
+        
+        rel_pos = target_pos - agent_pos
+        rel_vel = target_vel - agent_vel
+        
+        obs = np.array([
+            agent_pos[0], agent_pos[1],
+            agent_vel[0], agent_vel[1],
+            rel_pos[0], rel_pos[1],
+            rel_vel[0], rel_vel[1]
+        ], dtype=np.float32)
+        
+        # Verify observation shape (should be 8 for track_nearest_only=True)
+        assert obs.shape[0] == 8, f"Observation shape {obs.shape} != 8. Check implementation!"
+        
+        # Get action from PPO
+        action, _states = self.ppo_model.predict(obs, deterministic=True)
+        
+        return action
+
+    # Keep the old method for backward compatibility but mark as deprecated
+    def get_ppo_action(self, agent_state, target_estimates):
+        """
+        DEPRECATED: Use get_ppo_action_nearest_track() instead.
+        This method assumes you're passing the correct format.
+        """
+        print("Warning: get_ppo_action() is deprecated. Use get_ppo_action_nearest_track() for automatic nearest selection.")
+        
+        if self.ppo_model is None:
+            print("Warning: PPO model not loaded, returning zero action")
+            return np.array([0.0, 0.0, 0.0])
+        
+        # Build observation for PPO
+        agent_pos = agent_state[:2]
+        agent_vel = agent_state[3:5]
+        
+        obs = [agent_pos[0], agent_pos[1], agent_vel[0], agent_vel[1]]
+        
+        # Add relative target states
+        for estimate in target_estimates:
+            target_pos = estimate[:2]
+            rel_pos = target_pos - agent_pos
+            
+            if len(estimate) >= 4:
+                target_vel = estimate[2:4]
+            else:
+                target_vel = np.array([0.0, 0.0])
+            
+            rel_vel = target_vel - agent_vel
+            obs.extend([rel_pos[0], rel_pos[1], rel_vel[0], rel_vel[1]])
+        
+        obs = np.array(obs, dtype=np.float32)
+        
+        # Get action from PPO policy
+        action, _states = self.ppo_model.predict(obs, deterministic=True)
+        
+        return action
 
     def current_entropy(self, event=None) -> None:
         """Compute the entropy of the current distribution of particles
@@ -576,35 +664,8 @@ class Guidance:
 
     def update_goal_position(self, dt=0.33):
         """Get the goal position based on the guidance mode.
-        For PPO mode, stores velocity command instead.
-        Output: goal_position (numpy.array of shape (2,)) OR velocity command"""
-        
-        if self.guidance_mode == "MultiPFinfoPPO":
-            if self.ppo_guidance is None:
-                raise RuntimeError("PPO guidance not initialized")
-            
-            agent_pos = self.quad_position
-            
-            if self.prediction_method in {"MultiPFVel", "MultiPFTra", "MultiKF"}:
-                tracked_states = self.multi_filter.get_track_states()
-                tracked_covs = self.multi_filter.get_track_covariances()
-            else:
-                tracked_states = [self.filter.weighted_mean]
-                tracked_covs = [self.filter.var]
-            
-            # ✅ CORRECT: Get velocity command from PPO
-            self.ppo_velocity_command = self.ppo_guidance.predict_velocity_command(
-                agent_position=agent_pos,
-                tracked_states=tracked_states,
-                tracked_covs=[cov[:2, :2] for cov in tracked_covs],
-                deterministic=True
-            )
-        
-        # For visualization, compute what the goal position would be
-        # (but this is NOT used for control)
-            self.goal_position = agent_pos + self.ppo_velocity_command[:2] * dt
-
-        elif self.guidance_mode == "Information":
+        Output: goal_position (numpy.array of shape (2,))"""
+        if self.guidance_mode == "Information":
             self.sampled_index = np.random.choice(a=self.N, size=self.N_s)
             self.sampled_particles = np.copy(
                 self.filter.particles[:, self.sampled_index, :]
