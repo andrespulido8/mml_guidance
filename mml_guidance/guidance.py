@@ -40,10 +40,9 @@ class Guidance:
         )
         self.init_finished = False
         
-        # NEW: Update guidance modes to include PPO variants
         self.guidance_modes_set = {
             "Information", "WeightedMean", "Lawnmower", "Estimator", 
-            "MultiKFInfo", "MultiPFInfo", "MultiPFPPO", "MultiPFInfoPPO"
+            "MultiKFInfo", "MultiPFInfo", "MultiPFPPO", "MultiPFInfoPPO", "MultiPFInfoPPO_LSTM"  # ADD THIS
         }
         assert guidance_mode in self.guidance_modes_set, f"Guidance mode {guidance_mode} not recognized. Choose from {self.guidance_modes_set}"
         self.guidance_mode = guidance_mode
@@ -53,23 +52,26 @@ class Guidance:
         assert prediction_method in self.prediction_methods_set, f"Prediction method {prediction_method} not recognized. Choose from {self.prediction_methods_set}"
         self.filter = filter  
         self.N = filter.N if filter is not None else 500
-
+        
         self.ppo_model = None
         self.is_recurrent_ppo = False   
-        self.lstm_states = None  #  LSTM hidden states
-        if guidance_mode in {"MultiPFPPO", "MultiPFInfoPPO"}:
+        self.lstm_states = None  # LSTM hidden states
+        
+        if guidance_mode in {"MultiPFPPO", "MultiPFInfoPPO", "MultiPFInfoPPO_LSTM"}:  # ADD LSTM mode
             if not PPO_AVAILABLE:
-                raise ImportError("stable_baselines3 is required for PPO guidance modes. Install with: pip install stable-baselines3")
+                raise ImportError("stable_baselines3 is required for PPO guidance modes")
             if ppo_model_path is not None:
                 try:
                     print(f"Loading PPO model from: {ppo_model_path}")
-
+                    
+                    # Try loading as RecurrentPPO first
                     try:
                         self.ppo_model = RecurrentPPO.load(ppo_model_path)
                         self.is_recurrent_ppo = True
                         print("✓ Loaded RecurrentPPO (LSTM) model")
-                    except:
-                        
+                    except Exception as e:
+                        # Fall back to standard PPO
+                        print(f"Not a RecurrentPPO model, trying standard PPO: {e}")
                         self.ppo_model = PPO.load(ppo_model_path)
                         self.is_recurrent_ppo = False
                         print("✓ Loaded standard PPO model")
@@ -80,7 +82,7 @@ class Guidance:
                     raise
             else:
                 raise ValueError(f"PPO model path required for guidance mode '{guidance_mode}'")
-
+        
         # Initialization of robot variables
         self.quad_position = np.array([0.0, 0.0])
         self.actual_turtle_pose = np.array([0.0, 0.0, 0.0])
@@ -165,38 +167,126 @@ class Guidance:
 
         self.init_finished = True
 
-    def get_ppo_action_all_tracks(self, agent_state, tracked_states, max_targets=10, reset_lstm=False):
+    def get_ppo_action_lstm(self, agent_state, tracked_states, lstm_states=None, episode_start=None):
+        """
+        Get PPO action for LSTM policy with proper state management.
+        
+        Args:
+            agent_state: Agent state [x, y, theta, vx, vy, omega]
+            tracked_states: List of track states from multi_filter.get_track_states()
+            lstm_states: Previous LSTM hidden states (None to reset)
+            episode_start: np.array([True/False]) indicating episode start
+        
+        Returns:
+            action: [vx, vy, omega] if tracks exist, None if no tracks
+            lstm_states: Updated LSTM states
+        """
+        if not self.is_recurrent_ppo:
+            print("Warning: Called get_ppo_action_lstm but model is not RecurrentPPO")
+            return self.get_ppo_action_nearest_track(agent_state, tracked_states), None
+        
+        if self.ppo_model is None:
+            print("Warning: PPO model not loaded")
+            return None, None
+        
+        if len(tracked_states) == 0:
+            return None, lstm_states
+        
+        # Build observation (same as nearest track)
+        agent_pos = agent_state[:2]
+        agent_vel = agent_state[3:5]
+        
+        min_distance = float('inf')
+        nearest_estimate = None
+        
+        for track_state in tracked_states:
+            target_pos = track_state[:2]
+            distance = np.linalg.norm(target_pos - agent_pos)
+            
+            if distance < min_distance:
+                min_distance = distance
+                if len(track_state) >= 4:
+                    nearest_estimate = track_state[:4]
+                else:
+                    nearest_estimate = np.concatenate([track_state[:2], [0.0, 0.0]])
+        
+        target_pos = nearest_estimate[:2]
+        target_vel = nearest_estimate[2:4]
+        
+        rel_pos = target_pos - agent_pos
+        rel_vel = target_vel - agent_vel
+        
+        obs = np.array([
+            agent_pos[0], agent_pos[1],
+            agent_vel[0], agent_vel[1],
+            rel_pos[0], rel_pos[1],
+            rel_vel[0], rel_vel[1]
+        ], dtype=np.float32)
+        
+        # Handle episode_start default
+        if episode_start is None:
+            episode_start = np.array([lstm_states is None])
+        
+        # Get action with LSTM states
+        action, lstm_states = self.ppo_model.predict(
+            obs,
+            state=lstm_states,
+            episode_start=episode_start,
+            deterministic=True
+        )
+        
+        return action, lstm_states
+
+    def get_ppo_action_all_tracks(self, agent_state, tracked_states, max_targets=10, 
+                                   lstm_states=None, episode_start=None):
         """
         Get PPO action using ALL tracked targets with Transformer/Attention.
+        Now supports both standard PPO and RecurrentPPO (LSTM).
         
         The Transformer will internally decide which targets are important
         via attention mechanism, rather than pre-selecting nearest.
+        
+        Args:
+            agent_state: Agent state [x, y, theta, vx, vy, omega]
+            tracked_states: List of track states
+            max_targets: Maximum number of targets to track
+            lstm_states: LSTM hidden states (for RecurrentPPO only)
+            episode_start: Episode start flag (for RecurrentPPO only)
+        
+        Returns:
+            If RecurrentPPO: (action, lstm_states)
+            If standard PPO: action
         """
         if self.ppo_model is None:
             print("Warning: PPO model not loaded")
-            return None
-        
-        if reset_lstm and self.is_recurrent_ppo:
-            self.lstm_states = None
+            return (None, lstm_states) if self.is_recurrent_ppo else None
         
         if len(tracked_states) == 0:
-            return None
+            return (None, lstm_states) if self.is_recurrent_ppo else None
         
-        # Agent observation
+        # ========== BUILD DICT OBSERVATION ==========
         agent_pos = agent_state[:2]
         agent_vel = agent_state[3:5]
         agent_obs = np.array([agent_pos[0], agent_pos[1], agent_vel[0], agent_vel[1]], dtype=np.float32)
         
-        # ALL targets observation (not just nearest!)
-        num_tracks = min(len(tracked_states), max_targets)
+        # ALL targets observation (sorted by distance for consistency)
         targets_obs = np.zeros((max_targets, 4), dtype=np.float32)
         mask = np.zeros(max_targets, dtype=np.float32)
         
-        for i in range(num_tracks):
-            track_state = tracked_states[i]
+        # Sort targets by distance (nearest first)
+        target_data = []
+        for track_state in tracked_states:
             target_pos = track_state[:2]
+            distance = np.linalg.norm(target_pos - agent_pos)
             target_vel = track_state[2:4] if len(track_state) >= 4 else np.array([0.0, 0.0])
-            
+            target_data.append((distance, target_pos, target_vel))
+        
+        target_data.sort(key=lambda x: x[0])  # Sort by distance
+        
+        # Fill in up to max_targets
+        num_tracks = min(len(target_data), max_targets)
+        for i in range(num_tracks):
+            _, target_pos, target_vel = target_data[i]
             rel_pos = target_pos - agent_pos
             rel_vel = target_vel - agent_vel
             
@@ -210,16 +300,23 @@ class Guidance:
             'mask': mask
         }
         
-        # Get action
+        # ========== GET ACTION (RECURRENT vs STANDARD) ==========
         if self.is_recurrent_ppo:
-            action, self.lstm_states = self.ppo_model.predict(
-                obs, state=self.lstm_states, deterministic=True,
-                episode_start=np.array([reset_lstm])
+            # RecurrentPPO: Handle LSTM states
+            if episode_start is None:
+                episode_start = np.array([lstm_states is None])
+            
+            action, lstm_states = self.ppo_model.predict(
+                obs,
+                state=lstm_states,
+                episode_start=episode_start,
+                deterministic=True
             )
+            return action, lstm_states
         else:
+            # Standard PPO
             action, _states = self.ppo_model.predict(obs, deterministic=True)
-        
-        return action
+            return action
 
     def get_ppo_action_nearest_track(self, agent_state, tracked_states, reset_lstm=False):
         """
@@ -311,7 +408,6 @@ class Guidance:
         agent_vel = agent_state[3:5]
         
         obs = [agent_pos[0], agent_pos[1], agent_vel[0], agent_vel[1]]
-        
         # Add relative target states
         for estimate in target_estimates:
             target_pos = estimate[:2]
