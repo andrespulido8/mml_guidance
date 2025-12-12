@@ -1,6 +1,6 @@
 <!-- launch file for MML in simulation -->
 <launch>
-	<arg name="is_visualization" default="false"/>
+	<arg name="is_visualization" default="true"/>
 	<arg name="is_simulation" default="true"/>
 
 	<!-- Launches the reef estimator -->

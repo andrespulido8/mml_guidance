@@ -29,6 +29,9 @@ class SimpleDNN(nn.Module):
             self.activation_fn = nn.Sigmoid()
         else:
             raise ValueError("Invalid activation function")
+        self.layers.to(device)
+        # for layer in self.layers:
+        # layer.float()
 
         # move weights to device 
         self.to(device)
