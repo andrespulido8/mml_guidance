@@ -862,7 +862,7 @@ class Guidance:
             perform_information = True
             for k in range(self.K):
                 future_estimate = self.multi_filter.predict_tracks(future_estimate, steps_ahead=k+1)
-                if len(future_estimate) <= 0:
+                if future_estimate is None or len(future_estimate) <= 0:
                     # random walk
                     self.goal_position = self.goal_position + np.random.uniform(-0.2, 0.2, size=(2,))
                     perform_information = False
