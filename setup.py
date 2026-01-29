@@ -24,7 +24,8 @@ setup(
     entry_points={
         "console_scripts": ["guidance = mml_guidance.guidance:main",
                             "markov_goal_pose= mml_guidance.markov_goal_pose:main", 
-                            "mml_pf_visualization = mml_guidance.mml_pf_visualization:main", 
+                            "mml_pf_visualization = mml_guidance.mml_pf_visualization:main",
+			    "rl_gazebo_multi_tracker = mml_guidance.rl_gazebo_multi_tracker:main", 			    
         ]
     },
     
