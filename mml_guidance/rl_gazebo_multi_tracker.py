@@ -5,7 +5,7 @@ Tracks TWO TurtleBot3 robots in Gazebo using SJTU Drone
 Extends rl_gazebo_tracker.py to handle multiple targets
 """
 import sys
-sys.path.append('/home/basestation/ros2_ws/src/mml_python_sim')
+sys.path.append('/home/user/PPO_drone_Gazebo_ROS2/src/mml_python_sim')
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -14,15 +14,14 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Empty, Bool
 import numpy as np
 
-# NumPy compatibility patch
-try:
-    import numpy._core.numeric
-except ImportError:
-    print("Applying NumPy 2.0 -> 1.x Compatibility Patch...")
-    import numpy
-    if hasattr(numpy, 'core'):
-        sys.modules['numpy._core'] = numpy.core
-        sys.modules['numpy._core.numeric'] = numpy.core.numeric
+#try:
+#import numpy._core.numeric
+# except ImportError:
+#     print("Applying NumPy 2.0 -> 1.x Compatibility Patch...")
+#     import numpy
+#     if hasattr(numpy, 'core'):
+#         sys.modules['numpy._core'] = numpy.core
+#         sys.modules['numpy._core.numeric'] = numpy.core.numeric
 
 from mml_guidance.guidance import Guidance
 from mml_guidance.ParticleFilter import ParticleFilter
