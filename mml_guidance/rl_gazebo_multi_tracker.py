@@ -91,7 +91,7 @@ class RLGazeboMultiTracker(Node):
             prediction_method='Velocity',
             drone_height=self.target_height,
             filter=self.pf,
-            ppo_model_path=model_path
+            model_path=model_path
         )
         
         self.lstm_states = None
